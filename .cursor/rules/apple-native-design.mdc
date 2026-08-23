@@ -1,0 +1,21 @@
+---
+description: Native Apple design language for ServerDash SwiftUI surfaces
+globs: Sources/**/*.swift
+alwaysApply: false
+---
+
+# ServerDash Apple Native Design
+
+- Prefer native macOS structure: `NavigationSplitView`, `.listStyle(.sidebar)`, `Table`, `Toolbar`, `Form`, `Inspector`, SF Symbols.
+- Use semantic colors and materials from `AppleDesign`; never introduce raw theme RGB values in feature views.
+- Same-kind sibling data belongs in one solid panel with hairline dividers. Use separate cards only for independently selectable VPS objects.
+- Glass/material is reserved for overlapping chrome: sidebar, toolbar, sheet, popover. Content panels remain solid.
+- Hierarchy comes from SF text styles, weight, spacing, and grayscale. Only actions/selection use the system accent; live/error colors carry real state.
+- Use named spacing and radius tiers. Avoid one-off shadows, borders, gradients, and sub-11pt text.
+- Metrics use `monospacedDigit()` and update without entrance fades or status flicker.
+- Prefer system button styles and at least regular control size; prominent actions need generous hit areas.
+- Motion must be interruptible, restrained, and disabled or simplified when Reduce Motion is active.
+- Every screen needs a clear title, primary action, empty state, error state, keyboard path, and VoiceOver labels.
+- Run `Docs/AppleDesignReview.md` before considering a visual change complete.
+
+Source inspiration: naplesblue/apple-design-skill (MIT), adapted for native macOS SwiftUI.

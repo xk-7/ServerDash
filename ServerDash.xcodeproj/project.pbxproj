@@ -1,0 +1,518 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03F2C9D87EEF91EB67A14869 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA3D23AC51B51EA56248DE7F /* Models.swift */; };
+		1DD6167D45D75A6CA479734F /* SFTPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943DE456AB8EBE7128B9AF0E /* SFTPService.swift */; };
+		212C7E2A794E9B4A130301E5 /* ServerDashApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */; };
+		2B10618EA7A302B318BA5719 /* ResourceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DBF7489718D78F03CFD571B /* ResourceViews.swift */; };
+		32BD194CEC38B2F0C10A5D3C /* DashboardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72AFCD45B23730D303190D42 /* DashboardViews.swift */; };
+		5D1ECA6BAC4A15B7BCBA8603 /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BA641DDE28754C1E7F14AA /* Services.swift */; };
+		6F88E9F3E181A4BB69546BBE /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE7A846E41C1811B95FF217 /* TerminalView.swift */; };
+		786E5460DCF8005C8691F884 /* SidebarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */; };
+		98975C1A363FED85E59FA30A /* EditorAndSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */; };
+		9AB76B8335AFE9FE81BF7D78 /* SFTPListingParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */; };
+		A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */; };
+		B0A1873ABCFDB642FB08089B /* DesignGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */; };
+		B152A8EB774592B5A9FF269A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E316E9C6F6836AA6547B6942 /* Assets.xcassets */; };
+		C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = B31B612E337EB371ED8FE01C /* SwiftTerm */; };
+		C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */; };
+		DC537BF8A738012B96641B04 /* ServerLocationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */; };
+		E198FF02DF752866C68B7687 /* MonitoringResponseParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */; };
+		E4E05E912A7AE3EFE7DFDF28 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473A692AB3CAE4975F0BC3EE /* AppState.swift */; };
+		EB4839F84B60B255E2D68A86 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBCD7321B546E993FC42494 /* ContentView.swift */; };
+		EEC0A120B9976B4AE9E22CA9 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		E5029226768E13F8F7E2E59D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5D8DE40393B42BBCE7E76166 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 6AC6F66596C25AD6DE2A0AE3;
+			remoteInfo = ServerDash;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringResponseParserTests.swift; sourceTree = "<group>"; };
+		19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		2F15C4AA65F5856F88252649 /* ServerDashTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ServerDashTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPView.swift; sourceTree = "<group>"; };
+		45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPListingParserTests.swift; sourceTree = "<group>"; };
+		473A692AB3CAE4975F0BC3EE /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashApp.swift; sourceTree = "<group>"; };
+		5B428436A02C28484585B06A /* ServerDash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ServerDash.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5DBF7489718D78F03CFD571B /* ResourceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceViews.swift; sourceTree = "<group>"; };
+		60BA641DDE28754C1E7F14AA /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
+		72AFCD45B23730D303190D42 /* DashboardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViews.swift; sourceTree = "<group>"; };
+		749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignGallery.swift; sourceTree = "<group>"; };
+		7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceModelTests.swift; sourceTree = "<group>"; };
+		8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorAndSettingsViews.swift; sourceTree = "<group>"; };
+		943DE456AB8EBE7128B9AF0E /* SFTPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPService.swift; sourceTree = "<group>"; };
+		9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerLocationView.swift; sourceTree = "<group>"; };
+		AAE7A846E41C1811B95FF217 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		ACBCD7321B546E993FC42494 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		CA3D23AC51B51EA56248DE7F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViews.swift; sourceTree = "<group>"; };
+		E316E9C6F6836AA6547B6942 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4AC21B498148BC2F4DA8E78F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1445BD40A4DF5AF3B34952B9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5B428436A02C28484585B06A /* ServerDash.app */,
+				2F15C4AA65F5856F88252649 /* ServerDashTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1656222CBBF9ABFA7A9E8685 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				473A692AB3CAE4975F0BC3EE /* AppState.swift */,
+				E316E9C6F6836AA6547B6942 /* Assets.xcassets */,
+				ACBCD7321B546E993FC42494 /* ContentView.swift */,
+				72AFCD45B23730D303190D42 /* DashboardViews.swift */,
+				749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */,
+				19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */,
+				8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */,
+				CA3D23AC51B51EA56248DE7F /* Models.swift */,
+				5DBF7489718D78F03CFD571B /* ResourceViews.swift */,
+				4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */,
+				9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */,
+				60BA641DDE28754C1E7F14AA /* Services.swift */,
+				943DE456AB8EBE7128B9AF0E /* SFTPService.swift */,
+				416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */,
+				CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */,
+				AAE7A846E41C1811B95FF217 /* TerminalView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		64DD5C1F2C165F5A0D0E4827 = {
+			isa = PBXGroup;
+			children = (
+				1656222CBBF9ABFA7A9E8685 /* Sources */,
+				E8B635DD8A46136DF2AA141D /* Tests */,
+				1445BD40A4DF5AF3B34952B9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E8B635DD8A46136DF2AA141D /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */,
+				7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */,
+				45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		680B34EA0F0A6851B6847F24 /* ServerDashTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 854719EB471296C6255B0B9A /* Build configuration list for PBXNativeTarget "ServerDashTests" */;
+			buildPhases = (
+				68C78E48AD7EDF169BA2E3F8 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2C9AF37C81AE8E9CFEC4A2F7 /* PBXTargetDependency */,
+			);
+			name = ServerDashTests;
+			packageProductDependencies = (
+			);
+			productName = ServerDashTests;
+			productReference = 2F15C4AA65F5856F88252649 /* ServerDashTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		6AC6F66596C25AD6DE2A0AE3 /* ServerDash */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C9209E7A692DE12CD54EC4C0 /* Build configuration list for PBXNativeTarget "ServerDash" */;
+			buildPhases = (
+				2F236EA43A97211A7D9A6DA0 /* Sources */,
+				7CFAC8040F15DCA602198D00 /* Resources */,
+				4AC21B498148BC2F4DA8E78F /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ServerDash;
+			packageProductDependencies = (
+				B31B612E337EB371ED8FE01C /* SwiftTerm */,
+			);
+			productName = ServerDash;
+			productReference = 5B428436A02C28484585B06A /* ServerDash.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5D8DE40393B42BBCE7E76166 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = A2406ABA205D7345D0A59BBF /* Build configuration list for PBXProject "ServerDash" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 64DD5C1F2C165F5A0D0E4827;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				9B84048690FEE717C991712D /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1445BD40A4DF5AF3B34952B9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6AC6F66596C25AD6DE2A0AE3 /* ServerDash */,
+				680B34EA0F0A6851B6847F24 /* ServerDashTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7CFAC8040F15DCA602198D00 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B152A8EB774592B5A9FF269A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2F236EA43A97211A7D9A6DA0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4E05E912A7AE3EFE7DFDF28 /* AppState.swift in Sources */,
+				EB4839F84B60B255E2D68A86 /* ContentView.swift in Sources */,
+				32BD194CEC38B2F0C10A5D3C /* DashboardViews.swift in Sources */,
+				B0A1873ABCFDB642FB08089B /* DesignGallery.swift in Sources */,
+				EEC0A120B9976B4AE9E22CA9 /* DesignSystem.swift in Sources */,
+				98975C1A363FED85E59FA30A /* EditorAndSettingsViews.swift in Sources */,
+				03F2C9D87EEF91EB67A14869 /* Models.swift in Sources */,
+				2B10618EA7A302B318BA5719 /* ResourceViews.swift in Sources */,
+				1DD6167D45D75A6CA479734F /* SFTPService.swift in Sources */,
+				C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */,
+				212C7E2A794E9B4A130301E5 /* ServerDashApp.swift in Sources */,
+				DC537BF8A738012B96641B04 /* ServerLocationView.swift in Sources */,
+				5D1ECA6BAC4A15B7BCBA8603 /* Services.swift in Sources */,
+				786E5460DCF8005C8691F884 /* SidebarViews.swift in Sources */,
+				6F88E9F3E181A4BB69546BBE /* TerminalView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		68C78E48AD7EDF169BA2E3F8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E198FF02DF752866C68B7687 /* MonitoringResponseParserTests.swift in Sources */,
+				A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */,
+				9AB76B8335AFE9FE81BF7D78 /* SFTPListingParserTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2C9AF37C81AE8E9CFEC4A2F7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 6AC6F66596C25AD6DE2A0AE3 /* ServerDash */;
+			targetProxy = E5029226768E13F8F7E2E59D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		13BC4178FE824B5EE4CC6840 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app.tests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ServerDash.app/Contents/MacOS/ServerDash";
+			};
+			name = Release;
+		};
+		25C9EAA06C09148360AC1E60 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		27978D85BFBEB95C38562776 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ServerDash;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app;
+				PRODUCT_NAME = ServerDash;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		35CCAA3665578B89598DCB88 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		463B1036B1AB8160007A6CC1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = ServerDash;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app;
+				PRODUCT_NAME = ServerDash;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		D5B1645F1DC315F59D77A447 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app.tests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ServerDash.app/Contents/MacOS/ServerDash";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		854719EB471296C6255B0B9A /* Build configuration list for PBXNativeTarget "ServerDashTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D5B1645F1DC315F59D77A447 /* Debug */,
+				13BC4178FE824B5EE4CC6840 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A2406ABA205D7345D0A59BBF /* Build configuration list for PBXProject "ServerDash" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				25C9EAA06C09148360AC1E60 /* Debug */,
+				35CCAA3665578B89598DCB88 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C9209E7A692DE12CD54EC4C0 /* Build configuration list for PBXNativeTarget "ServerDash" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27978D85BFBEB95C38562776 /* Debug */,
+				463B1036B1AB8160007A6CC1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9B84048690FEE717C991712D /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.11.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B31B612E337EB371ED8FE01C /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9B84048690FEE717C991712D /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 5D8DE40393B42BBCE7E76166 /* Project object */;
+}
