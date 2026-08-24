@@ -1,0 +1,22 @@
+[
+  {"id":"serverdash-light","name":"ServerDash Light","isDark":false,"foreground":"#1f2329","background":"#f7f7f9","accent":"#2478d4","selection":"#cfe4ff","palette":"classic"},
+  {"id":"paper","name":"Paper","isDark":false,"foreground":"#2f3337","background":"#ffffff","accent":"#2468b4","selection":"#d8e9fb","palette":"soft"},
+  {"id":"ivory","name":"Ivory","isDark":false,"foreground":"#34312d","background":"#fffdf5","accent":"#9a5b13","selection":"#f4e5bd","palette":"solar"},
+  {"id":"sand","name":"Warm Sand","isDark":false,"foreground":"#3a322a","background":"#f8f0df","accent":"#ad5d2a","selection":"#ead3ad","palette":"solar"},
+  {"id":"rose","name":"Rose Quartz","isDark":false,"foreground":"#3b3035","background":"#fff7fa","accent":"#b54572","selection":"#f6d5e2","palette":"soft"},
+  {"id":"mint","name":"Fresh Mint","isDark":false,"foreground":"#20332d","background":"#f3fff9","accent":"#16805f","selection":"#ccefe2","palette":"soft"},
+  {"id":"sky","name":"Clear Sky","isDark":false,"foreground":"#26343c","background":"#f2fbff","accent":"#197ba8","selection":"#cceafa","palette":"classic"},
+  {"id":"lavender","name":"Lavender","isDark":false,"foreground":"#332f3d","background":"#faf7ff","accent":"#7256ad","selection":"#e5daf8","palette":"soft"},
+  {"id":"sepia","name":"Sepia","isDark":false,"foreground":"#43382c","background":"#f5ead5","accent":"#8f5d28","selection":"#dfc89f","palette":"solar"},
+  {"id":"monochrome-light","name":"Monochrome Light","isDark":false,"foreground":"#222222","background":"#f5f5f5","accent":"#555555","selection":"#d8d8d8","palette":"classic"},
+  {"id":"serverdash-dark","name":"ServerDash Dark","isDark":true,"foreground":"#e8eaed","background":"#111317","accent":"#56a8ff","selection":"#28496b","palette":"classic"},
+  {"id":"midnight","name":"Midnight","isDark":true,"foreground":"#dce7f5","background":"#09111f","accent":"#5fa8ff","selection":"#1b3d65","palette":"vivid"},
+  {"id":"graphite","name":"Graphite","isDark":true,"foreground":"#e0e0e0","background":"#202124","accent":"#a6a6a6","selection":"#45474c","palette":"classic"},
+  {"id":"ocean","name":"Deep Ocean","isDark":true,"foreground":"#d7edf4","background":"#08232d","accent":"#37b4d2","selection":"#174b5c","palette":"soft"},
+  {"id":"forest","name":"Night Forest","isDark":true,"foreground":"#dceadf","background":"#102019","accent":"#60b87a","selection":"#274b34","palette":"soft"},
+  {"id":"aubergine","name":"Aubergine","isDark":true,"foreground":"#eee6f2","background":"#241629","accent":"#c184d5","selection":"#51365a","palette":"vivid"},
+  {"id":"ember","name":"Ember","isDark":true,"foreground":"#f3e5dc","background":"#241511","accent":"#ef7d42","selection":"#5b3020","palette":"vivid"},
+  {"id":"nordic","name":"Nordic Night","isDark":true,"foreground":"#d8dee9","background":"#2e3440","accent":"#88c0d0","selection":"#434c5e","palette":"soft"},
+  {"id":"slate","name":"Blue Slate","isDark":true,"foreground":"#dfe6ed","background":"#1b2632","accent":"#70a4d4","selection":"#334b63","palette":"classic"},
+  {"id":"high-contrast","name":"High Contrast","isDark":true,"foreground":"#ffffff","background":"#000000","accent":"#00d8ff","selection":"#2d4e57","palette":"vivid"}
+]

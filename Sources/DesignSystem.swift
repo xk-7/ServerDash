@@ -57,6 +57,26 @@ enum AppleDesign {
     static let quick = Animation.easeOut(duration: 0.18)
 }
 
+enum MonitorSeverity: String, Equatable {
+    case normal
+    case warning
+    case critical
+
+    static func percentage(_ value: Double) -> MonitorSeverity {
+        if value >= 90 { return .critical }
+        if value >= 75 { return .warning }
+        return .normal
+    }
+
+    var color: Color {
+        switch self {
+        case .normal: .appAccent
+        case .warning: .appWarning
+        case .critical: .appError
+        }
+    }
+}
+
 extension Color {
     static let appGround = Color(
         light: NSColor(srgbRed: 245 / 255, green: 245 / 255, blue: 247 / 255, alpha: 1),
@@ -174,6 +194,172 @@ struct AppleChromeBackground: View {
         } else {
             Rectangle()
                 .fill(contrast == .increased ? .thickMaterial : .regularMaterial)
+        }
+    }
+}
+
+struct AppleDismissibleOverlay<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let maxWidth: CGFloat
+    let maxHeight: CGFloat
+    let onDismiss: () -> Void
+    @ViewBuilder let content: Content
+
+    init(
+        maxWidth: CGFloat,
+        maxHeight: CGFloat,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.maxWidth = maxWidth
+        self.maxHeight = maxHeight
+        self.onDismiss = onDismiss
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.22)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onDismiss)
+
+            content
+                .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                .background(Color.appGround)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: AppleDesign.Radius.hero,
+                        style: .continuous
+                    )
+                )
+                .shadow(color: .black.opacity(0.22), radius: 28, y: 12)
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: AppleDesign.Radius.hero,
+                        style: .continuous
+                    )
+                )
+                .padding(AppleDesign.Spacing.xl)
+        }
+        .onExitCommand(perform: onDismiss)
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .opacity.combined(with: .scale(scale: 0.98))
+        )
+    }
+}
+
+struct MonitorSectionPanel<Content: View>: View {
+    let title: String
+    var subtitle: String?
+    @ViewBuilder let content: Content
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                Text(title)
+                    .font(.headline)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            content
+        }
+        .applePanel(padding: AppleDesign.Spacing.lg, radius: AppleDesign.Radius.card)
+    }
+}
+
+struct MonitorStatTile: View {
+    let title: String
+    let value: String
+    let symbol: String
+    var tint: Color = .appAccent
+    var detail: String?
+
+    var body: some View {
+        HStack(spacing: AppleDesign.Spacing.sm) {
+            Image(systemName: symbol)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.11))
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: AppleDesign.Radius.chip,
+                        style: .continuous
+                    )
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+                if let detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct MonitorLinearGauge: View {
+    let value: Double
+    var tint: Color? = nil
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.appTrack)
+                Capsule()
+                    .fill(tint ?? MonitorSeverity.percentage(value).color)
+                    .frame(
+                        width: geometry.size.width * min(1, max(0, value / 100))
+                    )
+            }
+        }
+        .frame(height: 7)
+        .accessibilityLabel("使用率")
+        .accessibilityValue(DisplayFormat.percent(value))
+    }
+}
+
+struct MonitorLegend: View {
+    let items: [(title: String, color: Color)]
+
+    var body: some View {
+        HStack(spacing: AppleDesign.Spacing.sm) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(spacing: AppleDesign.Spacing.xxs) {
+                    Circle()
+                        .fill(item.color)
+                        .frame(width: 7, height: 7)
+                    Text(item.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 }

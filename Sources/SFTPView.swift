@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct SFTPBrowserView: View {
+    @EnvironmentObject private var appState: AppState
+
     let server: ServerRecord
 
     @State private var items: [RemoteFileItem] = []
@@ -12,13 +14,25 @@ struct SFTPBrowserView: View {
     @State private var errorMessage: String?
     @State private var statusMessage = "尚未读取远程目录"
     @State private var showingNewFolderPrompt = false
+    @State private var showingNewFilePrompt = false
     @State private var showingRenamePrompt = false
+    @State private var showingMovePrompt = false
+    @State private var showingConflict = false
     @State private var promptText = ""
     @State private var itemPendingDeletion: RemoteFileItem?
+    @State private var progress: SFTPProgress?
+    @State private var transferTask: Task<Void, Never>?
+    @State private var pendingUploads: [URL] = []
+    @State private var pendingDownload: (item: RemoteFileItem, url: URL)?
+    @State private var conflictPolicy: SFTPConflictPolicy = .overwrite
 
     private var selectedItem: RemoteFileItem? {
         guard let id = selection.first else { return nil }
         return items.first { $0.id == id }
+    }
+
+    private var connectionConfig: ServerConnectionConfig {
+        appState.connectionConfig(for: server)
     }
 
     var body: some View {
@@ -30,10 +44,10 @@ struct SFTPBrowserView: View {
                 ContentUnavailableView {
                     Label("此目录为空", systemImage: "folder")
                 } description: {
-                    Text("上传文件或创建文件夹以开始使用 SFTP。")
+                    Text("上传文件、文件夹或创建新项目以开始使用 SFTP。")
                 } actions: {
                     Button("上传文件", systemImage: "square.and.arrow.up") {
-                        chooseFilesToUpload()
+                        chooseItemsToUpload(directories: false)
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -48,25 +62,33 @@ struct SFTPBrowserView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.appGround)
         .task(id: server.id) {
-            await loadDirectory(".")
+            await loadDirectory(server.defaultSFTPPath.isEmpty ? "." : server.defaultSFTPPath)
         }
         .alert("新建文件夹", isPresented: $showingNewFolderPrompt) {
             TextField("文件夹名称", text: $promptText)
             Button("取消", role: .cancel) {}
-            Button("创建") {
-                createFolder(named: promptText)
-            }
+            Button("创建") { createFolder(named: promptText) }
         } message: {
             Text("将在 \(currentPath) 中创建文件夹。")
+        }
+        .alert("新建文件", isPresented: $showingNewFilePrompt) {
+            TextField("文件名称", text: $promptText)
+            Button("取消", role: .cancel) {}
+            Button("创建") { createFile(named: promptText) }
         }
         .alert("重命名", isPresented: $showingRenamePrompt) {
             TextField("新名称", text: $promptText)
             Button("取消", role: .cancel) {}
-            Button("重命名") {
-                renameSelectedItem(to: promptText)
-            }
+            Button("重命名") { renameSelectedItem(to: promptText) }
         } message: {
             Text(selectedItem?.name ?? "")
+        }
+        .alert("移动到", isPresented: $showingMovePrompt) {
+            TextField("目标目录", text: $promptText)
+            Button("取消", role: .cancel) {}
+            Button("移动") { moveSelectedItem(to: promptText) }
+        } message: {
+            Text("将 \(selectedItem?.name ?? "项目") 移动到指定远程目录。")
         }
         .confirmationDialog(
             "删除 \(itemPendingDeletion?.name ?? "项目")？",
@@ -83,11 +105,21 @@ struct SFTPBrowserView: View {
                 itemPendingDeletion = nil
             }
         } message: {
-            Text(
-                itemPendingDeletion?.isDirectory == true
-                    ? "只能删除空文件夹，此操作无法撤销。"
-                    : "远程文件将被永久删除，此操作无法撤销。"
-            )
+            Text(deletionMessage)
+        }
+        .confirmationDialog(
+            "目标已存在",
+            isPresented: $showingConflict
+        ) {
+            Button("覆盖") { resolveConflict(.overwrite) }
+            Button("跳过") { resolveConflict(.skip) }
+            Button("重命名") { resolveConflict(.rename) }
+            Button("取消", role: .cancel) {
+                pendingUploads = []
+                pendingDownload = nil
+            }
+        } message: {
+            Text("同名文件或文件夹已存在。覆盖会替换目标，跳过会保留现有内容，重命名会自动加序号。")
         }
         .alert(
             "SFTP 操作失败",
@@ -96,10 +128,21 @@ struct SFTPBrowserView: View {
                 set: { if !$0 { errorMessage = nil } }
             )
         ) {
+            Button("重新连接") {
+                errorMessage = nil
+                Task { await loadDirectory(currentPath) }
+            }
             Button("好") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
         }
+    }
+
+    private var deletionMessage: String {
+        if itemPendingDeletion?.isDirectory == true {
+            return "将删除文件夹及其全部内容，此操作无法撤销。"
+        }
+        return "远程文件将被永久删除，此操作无法撤销。"
     }
 
     private var browserToolbar: some View {
@@ -135,21 +178,43 @@ struct SFTPBrowserView: View {
 
             Divider().frame(height: 20)
 
-            Button("上传", systemImage: "square.and.arrow.up") {
-                chooseFilesToUpload()
+            Menu {
+                Button("上传文件", systemImage: "doc.badge.plus") {
+                    chooseItemsToUpload(directories: false)
+                }
+                Button("上传文件夹", systemImage: "folder.badge.plus") {
+                    chooseItemsToUpload(directories: true)
+                }
+            } label: {
+                Label("上传", systemImage: "square.and.arrow.up")
             }
             Button("下载", systemImage: "square.and.arrow.down") {
                 downloadSelectedItem()
             }
-            .disabled(selectedItem == nil || selectedItem?.isDirectory == true)
+            .disabled(selectedItem == nil)
+
+            if busyMessage != nil {
+                Button("取消", role: .destructive) {
+                    transferTask?.cancel()
+                }
+            }
 
             Menu {
                 Button("新建文件夹", systemImage: "folder.badge.plus") {
                     promptText = ""
                     showingNewFolderPrompt = true
                 }
+                Button("新建文件", systemImage: "doc.badge.plus") {
+                    promptText = ""
+                    showingNewFilePrompt = true
+                }
                 Button("重命名", systemImage: "pencil") {
                     beginRename()
+                }
+                .disabled(selectedItem == nil)
+                Button("移动…", systemImage: "arrow.right") {
+                    promptText = RemotePath.parent(of: selectedItem?.path ?? currentPath)
+                    showingMovePrompt = true
                 }
                 .disabled(selectedItem == nil)
                 Divider()
@@ -164,7 +229,7 @@ struct SFTPBrowserView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
-        .disabled(busyMessage != nil)
+        .disabled(busyMessage != nil && transferTask == nil)
         .padding(.horizontal, AppleDesign.Spacing.md)
         .padding(.vertical, AppleDesign.Spacing.sm)
         .background(AppleChromeBackground())
@@ -209,11 +274,10 @@ struct SFTPBrowserView: View {
                     Button("打开", systemImage: "folder") {
                         Task { await loadDirectory(item.path) }
                     }
-                } else {
-                    Button("下载", systemImage: "square.and.arrow.down") {
-                        selection = [item.id]
-                        downloadSelectedItem()
-                    }
+                }
+                Button("下载", systemImage: "square.and.arrow.down") {
+                    selection = [item.id]
+                    downloadSelectedItem()
                 }
                 Button("重命名", systemImage: "pencil") {
                     selection = [item.id]
@@ -239,9 +303,23 @@ struct SFTPBrowserView: View {
                 ZStack {
                     Color.appGround.opacity(0.72)
                     VStack(spacing: AppleDesign.Spacing.sm) {
-                        ProgressView()
+                        if let progress {
+                            ProgressView(value: progress.fraction)
+                        } else {
+                            ProgressView()
+                        }
                         Text(busyMessage)
                             .font(.callout)
+                        if let progress {
+                            Text(
+                                "\(DisplayFormat.speed(progress.speedBytesPerSecond)) · 剩余 \(Int(progress.remaining)) 秒"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        Button("取消") {
+                            transferTask?.cancel()
+                        }
                     }
                     .padding(AppleDesign.Spacing.lg)
                     .background(AppleChromeBackground())
@@ -290,7 +368,7 @@ struct SFTPBrowserView: View {
         busyMessage = "正在读取 \(path)"
         errorMessage = nil
         do {
-            let listing = try await SFTPService.list(config: server.connectionConfig, path: path)
+            let listing = try await SFTPService.list(config: connectionConfig, path: path)
             currentPath = listing.path
             pathText = listing.path
             items = listing.items
@@ -299,80 +377,152 @@ struct SFTPBrowserView: View {
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = "无法读取远程目录"
+            EventLogStore.shared.append(
+                serverID: server.id,
+                module: .sftp,
+                level: "error",
+                message: error.localizedDescription
+            )
         }
         busyMessage = nil
+        progress = nil
     }
 
-    private func chooseFilesToUpload() {
+    private func chooseItemsToUpload(directories: Bool) {
         let panel = NSOpenPanel()
-        panel.title = "选择要上传到 \(currentPath) 的文件"
+        panel.title = directories ? "选择要上传的文件夹" : "选择要上传的文件"
         panel.prompt = "上传"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseFiles = !directories
+        panel.canChooseDirectories = directories
         panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        upload(panel.urls)
+        let existing = Set(items.map(\.name))
+        if panel.urls.contains(where: { existing.contains($0.lastPathComponent) }) {
+            pendingUploads = panel.urls
+            showingConflict = true
+        } else {
+            upload(panel.urls, policy: .overwrite)
+        }
     }
 
-    private func upload(_ urls: [URL]) {
-        busyMessage = urls.count == 1 ? "正在上传 \(urls[0].lastPathComponent)" : "正在上传 \(urls.count) 个文件"
-        Task {
+    private func upload(_ urls: [URL], policy: SFTPConflictPolicy) {
+        busyMessage = urls.count == 1 ? "正在上传 \(urls[0].lastPathComponent)" : "正在上传 \(urls.count) 个项目"
+        transferTask = Task {
             do {
                 try await SFTPService.upload(
                     localURLs: urls,
                     to: currentPath,
-                    config: server.connectionConfig
-                )
+                    config: connectionConfig,
+                    policy: policy,
+                    existingNames: Set(items.map(\.name))
+                ) { update in
+                    Task { @MainActor in
+                        progress = update
+                        busyMessage = update.message
+                    }
+                }
                 busyMessage = nil
+                progress = nil
                 statusMessage = "上传完成"
                 await loadDirectory(currentPath)
             } catch {
                 busyMessage = nil
+                progress = nil
                 errorMessage = error.localizedDescription
             }
+            transferTask = nil
         }
     }
 
     private func downloadSelectedItem() {
-        guard let item = selectedItem, !item.isDirectory else { return }
-        let panel = NSSavePanel()
-        panel.title = "下载 \(item.name)"
-        panel.nameFieldStringValue = item.name
-        panel.prompt = "下载"
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        guard let item = selectedItem else { return }
+        if item.isDirectory {
+            let panel = NSOpenPanel()
+            panel.title = "选择下载文件夹的位置"
+            panel.prompt = "下载"
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let folder = panel.url else { return }
+            let destination = folder.appendingPathComponent(item.name)
+            enqueueDownload(item, to: destination)
+        } else {
+            let panel = NSSavePanel()
+            panel.title = "下载 \(item.name)"
+            panel.nameFieldStringValue = item.name
+            panel.prompt = "下载"
+            guard panel.runModal() == .OK, let destination = panel.url else { return }
+            enqueueDownload(item, to: destination)
+        }
+    }
 
+    private func enqueueDownload(_ item: RemoteFileItem, to destination: URL) {
+        if FileManager.default.fileExists(atPath: destination.path) {
+            pendingDownload = (item, destination)
+            showingConflict = true
+        } else {
+            download(item, to: destination, policy: .overwrite)
+        }
+    }
+
+    private func download(_ item: RemoteFileItem, to destination: URL, policy: SFTPConflictPolicy) {
         busyMessage = "正在下载 \(item.name)"
-        Task {
+        transferTask = Task {
             do {
                 try await SFTPService.download(
                     item: item,
                     to: destination,
-                    config: server.connectionConfig
-                )
+                    config: connectionConfig,
+                    policy: policy
+                ) { update in
+                    Task { @MainActor in
+                        progress = update
+                        busyMessage = update.message
+                    }
+                }
                 statusMessage = "已下载到 \(destination.path)"
             } catch {
                 errorMessage = error.localizedDescription
             }
             busyMessage = nil
+            progress = nil
+            transferTask = nil
+        }
+    }
+
+    private func resolveConflict(_ policy: SFTPConflictPolicy) {
+        conflictPolicy = policy
+        if !pendingUploads.isEmpty {
+            let urls = pendingUploads
+            pendingUploads = []
+            upload(urls, policy: policy)
+        } else if let pendingDownload {
+            download(pendingDownload.item, to: pendingDownload.url, policy: policy)
+            self.pendingDownload = nil
         }
     }
 
     private func createFolder(named name: String) {
-        busyMessage = "正在创建文件夹"
-        Task {
-            do {
-                try await SFTPService.createDirectory(
-                    named: name,
-                    in: currentPath,
-                    config: server.connectionConfig
-                )
-                busyMessage = nil
-                statusMessage = "文件夹已创建"
-                await loadDirectory(currentPath)
-            } catch {
-                busyMessage = nil
-                errorMessage = error.localizedDescription
-            }
+        runMutation("正在创建文件夹") {
+            try await SFTPService.createDirectory(
+                named: name,
+                in: currentPath,
+                config: connectionConfig
+            )
+        } success: {
+            "文件夹已创建"
+        }
+    }
+
+    private func createFile(named name: String) {
+        runMutation("正在创建文件") {
+            try await SFTPService.createFile(
+                named: name,
+                in: currentPath,
+                config: connectionConfig
+            )
+        } success: {
+            "文件已创建"
         }
     }
 
@@ -384,37 +534,48 @@ struct SFTPBrowserView: View {
 
     private func renameSelectedItem(to name: String) {
         guard let item = selectedItem else { return }
-        busyMessage = "正在重命名 \(item.name)"
-        Task {
-            do {
-                try await SFTPService.rename(
-                    item: item,
-                    to: name,
-                    config: server.connectionConfig
-                )
-                busyMessage = nil
-                statusMessage = "重命名完成"
-                await loadDirectory(currentPath)
-            } catch {
-                busyMessage = nil
-                errorMessage = error.localizedDescription
-            }
+        runMutation("正在重命名 \(item.name)") {
+            try await SFTPService.rename(item: item, to: name, config: connectionConfig)
+        } success: {
+            "重命名完成"
+        }
+    }
+
+    private func moveSelectedItem(to directory: String) {
+        guard let item = selectedItem else { return }
+        runMutation("正在移动 \(item.name)") {
+            try await SFTPService.move(item: item, to: directory, config: connectionConfig)
+        } success: {
+            "移动完成"
         }
     }
 
     private func delete(_ item: RemoteFileItem) {
         itemPendingDeletion = nil
-        busyMessage = "正在删除 \(item.name)"
-        Task {
+        runMutation("正在删除 \(item.name)") {
+            try await SFTPService.delete(
+                item: item,
+                config: connectionConfig,
+                recursive: item.isDirectory
+            )
+        } success: {
+            "已删除 \(item.name)"
+        }
+    }
+
+    private func runMutation(_ message: String, work: @escaping () async throws -> Void, success: @escaping () -> String) {
+        busyMessage = message
+        transferTask = Task {
             do {
-                try await SFTPService.delete(item: item, config: server.connectionConfig)
+                try await work()
                 busyMessage = nil
-                statusMessage = "已删除 \(item.name)"
+                statusMessage = success()
                 await loadDirectory(currentPath)
             } catch {
                 busyMessage = nil
                 errorMessage = error.localizedDescription
             }
+            transferTask = nil
         }
     }
 }

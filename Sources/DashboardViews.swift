@@ -1,3 +1,4 @@
+import AppKit
 import Charts
 import SwiftUI
 
@@ -5,7 +6,9 @@ struct DashboardOverviewView: View {
     @EnvironmentObject private var appState: AppState
 
     let servers: [ServerRecord]
+    @Binding var scrollAnchor: UUID?
     let onSelect: (ServerRecord) -> Void
+    let onOpenTerminal: (ServerRecord) -> Void
     let onAdd: () -> Void
 
     private var onlineCount: Int {
@@ -100,15 +103,19 @@ struct DashboardOverviewView: View {
                         ForEach(servers) { server in
                             VPSSummaryCard(
                                 server: server,
-                                onSelect: { onSelect(server) }
+                                onSelect: { onSelect(server) },
+                                onOpenTerminal: { onOpenTerminal(server) }
                             )
+                            .id(server.id)
                         }
                     }
+                    .scrollTargetLayout()
                 }
             }
             .padding(20)
             .frame(maxWidth: 1100, alignment: .leading)
         }
+        .scrollPosition(id: $scrollAnchor, anchor: .center)
         .task(id: refreshTaskID) {
             await monitorAllServers()
         }
@@ -170,6 +177,7 @@ private struct VPSSummaryCard: View {
 
     let server: ServerRecord
     let onSelect: () -> Void
+    let onOpenTerminal: () -> Void
 
     private var snapshot: ServerSnapshot { appState.snapshot(for: server) }
     private var status: ServerConnectionStatus { appState.status(for: server) }
@@ -184,9 +192,7 @@ private struct VPSSummaryCard: View {
                 Text(status.title)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(statusColor)
-                Button {
-                    appState.openTerminal(for: server)
-                } label: {
+                Button(action: onOpenTerminal) {
                     Image(systemName: "terminal")
                 }
                 .buttonStyle(CompactActionButtonStyle())
@@ -260,10 +266,15 @@ private struct VPSSummaryCard: View {
         if let error = appState.errors[server.id] {
             return error
         }
-        if status == .unknown {
-            return "等待首次资源采集"
+        if appState.isStale(server) {
+            return "监控数据已过期"
         }
-        return "\(snapshot.distribution) · \(server.host)"
+        if status == .unknown {
+            return server.verificationStatus == .unverified ? "未验证 · 可先离线保存" : "等待首次资源采集"
+        }
+        let host = PrivacySettings.hideIPInformation ? "[IP]" : server.host
+        let latency = server.lastLatencyMS > 0 ? " · \(Int(server.lastLatencyMS)) ms" : ""
+        return "\(snapshot.distribution) · \(host)\(latency) · \(server.verificationStatus.title)"
     }
 }
 
@@ -337,11 +348,16 @@ private struct DashboardResourceRow: View {
 }
 
 struct ServerDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appState: AppState
 
     let server: ServerRecord
+    @Binding var mode: DetailMode
+    let backTitle: String
+    let onBack: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    @State private var presentedOverlay: ServerDetailOverlay?
 
     private var snapshot: ServerSnapshot { appState.snapshot(for: server) }
     private var status: ServerConnectionStatus { appState.status(for: server) }
@@ -351,15 +367,19 @@ struct ServerDetailView: View {
             ServerDetailHeader(
                 server: server,
                 status: status,
-                mode: $appState.detailMode,
+                mode: $mode,
+                backTitle: backTitle,
+                onBack: onBack,
                 onEdit: onEdit,
-                onDelete: onDelete
+                onDelete: onDelete,
+                onEventLog: { presentedOverlay = .eventLog },
+                onDiagnostics: { presentedOverlay = .diagnostics }
             )
             Divider().opacity(0.55)
 
-            switch appState.detailMode {
+            switch mode {
             case .monitor:
-                monitoringContent
+                ServerMonitorLayoutView(server: server)
             case .terminal:
                 TerminalWorkspaceView(server: server)
             case .sftp:
@@ -368,6 +388,36 @@ struct ServerDetailView: View {
         }
         .background(Color.appGround)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay {
+            if let presentedOverlay {
+                AppleDismissibleOverlay(
+                    maxWidth: presentedOverlay == .eventLog ? 760 : 560,
+                    maxHeight: presentedOverlay == .eventLog ? 500 : 420,
+                    onDismiss: { self.presentedOverlay = nil }
+                ) {
+                    switch presentedOverlay {
+                    case .eventLog:
+                        EventLogView(
+                            store: EventLogStore.shared,
+                            serverID: server.id,
+                            onDismiss: { self.presentedOverlay = nil }
+                        )
+                    case .diagnostics:
+                        DiagnosticsPreviewView(
+                            text: appState.diagnostics[server.id] ?? "暂无诊断信息。",
+                            onDismiss: { self.presentedOverlay = nil }
+                        ) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                appState.diagnostics[server.id] ?? "",
+                                forType: .string
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : AppleDesign.quick, value: presentedOverlay)
     }
 
     private var monitoringContent: some View {
@@ -436,22 +486,48 @@ struct ServerDetailView: View {
     }
 }
 
+private enum ServerDetailOverlay: Equatable {
+    case eventLog
+    case diagnostics
+}
+
 private struct ServerDetailHeader: View {
     @EnvironmentObject private var appState: AppState
 
     let server: ServerRecord
     let status: ServerConnectionStatus
     @Binding var mode: DetailMode
+    let backTitle: String
+    let onBack: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onEventLog: () -> Void
+    let onDiagnostics: () -> Void
+
+    private var headerSubtitle: String {
+        let host = PrivacySettings.hideIPInformation ? "[IP]" : server.host
+        var parts = ["\(server.username)@\(host):\(server.port)", server.verificationStatus.title]
+        if server.lastLatencyMS > 0 {
+            parts.append("\(Int(server.lastLatencyMS)) ms")
+        }
+        if appState.isStale(server) {
+            parts.append("数据已过期")
+        }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         HStack(spacing: 12) {
+            Button(action: onBack) {
+                Label("返回\(backTitle)", systemImage: "chevron.backward")
+            }
+            .help("返回\(backTitle)")
+            .keyboardShortcut("[", modifiers: .command)
             StatusDot(status: status, size: 10)
             VStack(alignment: .leading, spacing: 2) {
-                Text(server.name)
+                Text(server.displayName)
                     .font(.system(size: 20, weight: .bold))
-                Text("\(server.username)@\(server.host):\(server.port)")
+                Text(headerSubtitle)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
@@ -468,6 +544,10 @@ private struct ServerDetailHeader: View {
                 Task { await appState.refresh(server) }
             } label: {
                 Label("刷新", systemImage: "arrow.clockwise")
+            }
+            Button("事件", systemImage: "list.bullet.rectangle", action: onEventLog)
+            if appState.diagnostics[server.id] != nil {
+                Button("诊断", systemImage: "stethoscope", action: onDiagnostics)
             }
             Button {
                 appState.openTerminal(for: server)

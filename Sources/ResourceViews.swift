@@ -128,7 +128,7 @@ private struct IdentityRow: View {
 
     var body: some View {
         HStack(spacing: AppleDesign.Spacing.sm) {
-            Image(systemName: identity.authentication == .password ? "lock" : "key")
+            Image(systemName: identity.authentication.usesPassword && !identity.authentication.usesPrivateKey ? "lock" : "key")
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .frame(width: 30)
@@ -140,7 +140,7 @@ private struct IdentityRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(identity.authentication == .password ? "密码" : (key?.name ?? "未选择密钥"))
+            Text(identity.authentication.title + (identity.authentication.usesPrivateKey ? " · \(key?.name ?? "未选择密钥")" : ""))
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text("\(serverCount) 台机器")
@@ -196,16 +196,16 @@ struct IdentityEditorView: View {
                             Text(method.title).tag(method)
                         }
                     }
-                    .pickerStyle(.segmented)
                 }
 
                 Section("凭据") {
-                    if authentication == .password {
+                    if authentication.usesPassword {
                         SecureField(
                             identity == nil ? "密码" : "新密码（留空则不修改）",
                             text: $password
                         )
-                    } else {
+                    }
+                    if authentication.usesPrivateKey {
                         Picker("SSH 密钥", selection: $sshKeyID) {
                             Text("请选择").tag(UUID?.none)
                             ForEach(keys) { key in
@@ -236,7 +236,7 @@ struct IdentityEditorView: View {
             }
             .padding(AppleDesign.Spacing.md)
         }
-        .frame(width: 520, height: 430)
+        .frame(width: 520, height: 480)
         .alert(
             "无法保存身份",
             isPresented: Binding(
@@ -253,7 +253,7 @@ struct IdentityEditorView: View {
     private var isValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        (authentication == .password || sshKeyID != nil)
+        (!authentication.usesPrivateKey || sshKeyID != nil)
     }
 
     private func save() {
@@ -278,11 +278,11 @@ struct IdentityEditorView: View {
             record.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
             record.username = username.trimmingCharacters(in: .whitespacesAndNewlines)
             record.authentication = authentication
-            record.sshKeyID = authentication == .privateKey ? sshKeyID : nil
+            record.sshKeyID = authentication.usesPrivateKey ? sshKeyID : nil
             record.notes = notes
             record.updatedAt = .now
 
-            if authentication == .password {
+            if authentication.usesPassword {
                 if !password.isEmpty {
                     try KeychainService.savePassword(password, for: record.id)
                 }
@@ -384,6 +384,8 @@ struct SSHKeyManagementView: View {
             Button("删除密钥", role: .destructive) {
                 guard let key = keyPendingDeletion else { return }
                 do {
+                    try? KeychainService.deleteSecret(account: KeychainService.importedKeyAccount(for: key.id))
+                    try? KeychainService.deleteSecret(account: KeychainService.passphraseAccount(for: key.id))
                     modelContext.delete(key)
                     try modelContext.save()
                     keyPendingDeletion = nil
@@ -463,12 +465,16 @@ struct SSHKeyEditorView: View {
     @State private var notes: String
     @State private var isInspecting = false
     @State private var errorMessage: String?
+    @State private var importIntoApp = false
+    @State private var passphrase = ""
+    @State private var revealedPublicKey = ""
 
     init(key: SSHKeyRecord?) {
         self.key = key
         _name = State(initialValue: key?.name ?? "")
         _filePath = State(initialValue: key?.filePath ?? "")
         _notes = State(initialValue: key?.notes ?? "")
+        _importIntoApp = State(initialValue: key?.storageMode == .imported)
     }
 
     var body: some View {
@@ -477,9 +483,12 @@ struct SSHKeyEditorView: View {
                 Section("密钥") {
                     TextField("名称", text: $name)
                     HStack {
-                        TextField("文件路径", text: $filePath)
+                        TextField("文件路径或粘贴私钥文本", text: $filePath, axis: .vertical)
+                            .lineLimit(2...6)
                         Button("选择…", action: chooseFile)
                     }
+                    Toggle("导入到应用 Keychain（不依赖外部文件）", isOn: $importIntoApp)
+                    SecureField("私钥口令（可选）", text: $passphrase)
                     TextField("备注", text: $notes, axis: .vertical)
                         .lineLimit(2...4)
                 }
@@ -487,6 +496,14 @@ struct SSHKeyEditorView: View {
                     Section("指纹") {
                         LabeledContent("算法", value: key.algorithm)
                         LabeledContent("SHA256", value: key.fingerprint)
+                        if !revealedPublicKey.isEmpty {
+                            Text(revealedPublicKey)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
+                        Button("查看并复制公钥") {
+                            Task { await revealPublicKey() }
+                        }
                     }
                 }
             }
@@ -513,7 +530,7 @@ struct SSHKeyEditorView: View {
             }
             .padding(AppleDesign.Spacing.md)
         }
-        .frame(width: 540, height: 360)
+        .frame(width: 560, height: 520)
         .alert(
             "无法导入密钥",
             isPresented: Binding(
@@ -546,10 +563,12 @@ struct SSHKeyEditorView: View {
         isInspecting = true
         Task {
             do {
-                let inspection = try await SSHKeyInspector.inspect(filePath: filePath)
+                let material = try resolvedKeyMaterial()
+                let inspection = try await SSHKeyInspector.inspect(filePath: material.path)
+                let publicKey = (try? await SSHKeyInspector.publicKey(filePath: material.path)) ?? ""
                 let record = key ?? SSHKeyRecord(
                     name: name,
-                    filePath: filePath,
+                    filePath: material.displayPath,
                     algorithm: inspection.algorithm,
                     fingerprint: inspection.fingerprint
                 )
@@ -557,10 +576,28 @@ struct SSHKeyEditorView: View {
                     modelContext.insert(record)
                 }
                 record.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                record.filePath = filePath
+                record.filePath = material.displayPath
                 record.algorithm = inspection.algorithm
                 record.fingerprint = inspection.fingerprint
                 record.notes = notes
+                record.storageMode = importIntoApp ? .imported : .file
+                record.hasPassphrase = !passphrase.isEmpty
+                record.publicKeyText = publicKey
+                if let bookmark = material.bookmark {
+                    record.bookmarkData = bookmark
+                }
+                if importIntoApp {
+                    try KeychainService.saveSecret(
+                        material.contents,
+                        account: KeychainService.importedKeyAccount(for: record.id)
+                    )
+                }
+                if !passphrase.isEmpty {
+                    try KeychainService.saveSecret(
+                        passphrase,
+                        account: KeychainService.passphraseAccount(for: record.id)
+                    )
+                }
 
                 let linkedIdentityIDs = Set(
                     identities.filter { $0.sshKeyID == record.id }.map(\.id)
@@ -576,6 +613,43 @@ struct SSHKeyEditorView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func revealPublicKey() async {
+        guard await LocalAuth.authenticate(reason: "查看 SSH 公钥") else { return }
+        if let existing = key?.publicKeyText, !existing.isEmpty {
+            revealedPublicKey = existing
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(existing, forType: .string)
+            return
+        }
+        do {
+            let value = try await SSHKeyInspector.publicKey(filePath: filePath)
+            revealedPublicKey = value
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func resolvedKeyMaterial() throws -> (path: String, displayPath: String, contents: String, bookmark: Data?) {
+        if filePath.contains("BEGIN") && filePath.contains("PRIVATE KEY") {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ServerDash/import", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appendingPathComponent(UUID().uuidString)
+            try Data(filePath.utf8).write(to: file, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            return (file.path, "imported", filePath, nil)
+        }
+        let url = URL(fileURLWithPath: NSString(string: filePath).expandingTildeInPath)
+        let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        return (url.path, url.path, contents, bookmark)
     }
 }
 

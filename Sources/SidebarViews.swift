@@ -23,6 +23,8 @@ struct AppSidebar: View {
                         .tag(SidebarDestination.sshKeys)
                     Label("代码片段", systemImage: "curlybraces")
                         .tag(SidebarDestination.snippets)
+                    Label("可信主机", systemImage: "checkmark.shield")
+                        .tag(SidebarDestination.trustedHosts)
                 }
 
                 Section("终端") {
@@ -69,6 +71,7 @@ struct MachineManagementView: View {
 
     let servers: [ServerRecord]
     @Binding var searchText: String
+    @Binding var scrollAnchor: UUID?
     let onSelect: (ServerRecord) -> Void
     let onAdd: () -> Void
     let onEdit: (ServerRecord) -> Void
@@ -112,6 +115,7 @@ struct MachineManagementView: View {
                             snapshot: appState.snapshot(for: server)
                         )
                     }
+                    .id(server.id)
                     .buttonStyle(.plain)
                     .contextMenu {
                         Button("编辑服务器", systemImage: "pencil") {
@@ -124,6 +128,7 @@ struct MachineManagementView: View {
                     }
                 }
                 .listStyle(.inset)
+                .scrollPosition(id: $scrollAnchor, anchor: .center)
             }
         }
     }

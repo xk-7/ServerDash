@@ -9,8 +9,7 @@ options:
 
 packages:
   SwiftTerm:
-    url: https://github.com/migueldeicaza/SwiftTerm.git
-    exactVersion: "1.11.2"
+    path: Vendor/SwiftTerm
 
 targets:
   ServerDash:
@@ -18,6 +17,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+      - path: Resources
+        buildPhase: resources
     dependencies:
       - package: SwiftTerm
     settings:

@@ -91,13 +91,6 @@ final class ResourceModelTests: XCTestCase {
     }
 
     func testCompleteSchemaCreatesInMemoryContainer() throws {
-        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
-        _ = try ModelContainer(
-            for: ServerRecord.self,
-            IdentityRecord.self,
-            SSHKeyRecord.self,
-            CommandSnippetRecord.self,
-            configurations: configuration
-        )
+        _ = try PersistenceController.makeInMemoryContainer()
     }
 }

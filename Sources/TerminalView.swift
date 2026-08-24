@@ -1,13 +1,14 @@
 import AppKit
 import SwiftData
-import SwiftTerm
 import SwiftUI
 
 struct TerminalWorkspaceView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \CommandSnippetRecord.title) private var snippets: [CommandSnippetRecord]
     @State private var snippetPendingExecution: CommandSnippetRecord?
+    @State private var showingAppearance = false
 
     let server: ServerRecord
 
@@ -15,35 +16,91 @@ struct TerminalWorkspaceView: View {
         appState.terminalSessions.first { $0.id == appState.selectedTerminalID }
     }
 
+    private var selectedController: TerminalSessionController? {
+        guard let selectedSession else { return nil }
+        return appState.terminalRegistry.controller(for: selectedSession.id)
+    }
+
+    private var selectedTheme: TerminalColorTheme? {
+        guard let selectedController else { return nil }
+        return TerminalThemeCatalog.shared.theme(
+            id: colorScheme == .dark
+                ? selectedController.appearanceProfile.darkThemeID
+                : selectedController.appearanceProfile.lightThemeID,
+            dark: colorScheme == .dark
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: AppleDesign.Spacing.xs) {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 3) {
                         ForEach(appState.terminalSessions) { session in
                             TerminalTab(
                                 session: session,
                                 isSelected: session.id == appState.selectedTerminalID,
+                                theme: theme(for: session),
                                 onSelect: {
-                                    appState.selectedTerminalID = session.id
+                                    appState.selectTerminal(session)
                                 },
                                 onClose: {
-                                    appState.closeTerminal(session)
+                                    appState.closeTerminal(session, context: modelContext)
                                 }
                             )
                         }
                     }
+                    .padding(.top, 5)
                 }
+                .scrollClipDisabled()
+
+                Divider()
+                    .frame(height: 20)
+
                 Button {
                     appState.newTerminal(for: server)
                 } label: {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(CompactActionButtonStyle())
-                .frame(minWidth: 44, minHeight: 44)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .frame(width: 28, height: 28)
                 .keyboardShortcut("t", modifiers: .command)
                 .help("新建 SSH 标签页")
-                .accessibilityLabel("新建 SSH 标签页")
+                if let selectedController {
+                    Menu {
+                        Button("终端外观…", systemImage: "paintpalette") {
+                            showingAppearance = true
+                        }
+                        Divider()
+                        Button("增大字号") {
+                            selectedController.changeFontSize(
+                                by: 1,
+                                dark: colorScheme == .dark
+                            )
+                        }
+                        .keyboardShortcut("+", modifiers: .command)
+                        Button("减小字号") {
+                            selectedController.changeFontSize(
+                                by: -1,
+                                dark: colorScheme == .dark
+                            )
+                        }
+                        .keyboardShortcut("-", modifiers: .command)
+                        Button("恢复初始字号") {
+                            selectedController.resetFontSize(
+                                dark: colorScheme == .dark
+                            )
+                        }
+                        .keyboardShortcut("0", modifiers: .command)
+                    } label: {
+                        Image(systemName: "paintpalette")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .controlSize(.small)
+                    .frame(width: 28, height: 28)
+                    .help("终端外观")
+                }
                 if let selectedSession, !snippets.isEmpty {
                     Menu {
                         ForEach(snippets) { snippet in
@@ -60,35 +117,36 @@ struct TerminalWorkspaceView: View {
                         Image(systemName: "curlybraces")
                     }
                     .menuStyle(.borderlessButton)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .controlSize(.small)
+                    .frame(width: 28, height: 28)
                     .help("插入代码片段")
-                    .accessibilityLabel("代码片段")
                 }
             }
-            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .padding(.horizontal, AppleDesign.Spacing.xs)
             .background(AppleChromeBackground())
 
-            Divider()
+            Rectangle()
+                .fill(Color.appHairline.opacity(0.55))
+                .frame(height: 1)
 
-            if let selectedSession {
-                SSHProcessTerminalView(
-                    sessionID: selectedSession.id,
-                    config: selectedSession.config
-                )
-                    .id(selectedSession.id)
-                    .background(Color.black)
+            if let selectedSession,
+               let controller = appState.terminalRegistry.controller(for: selectedSession.id) {
+                PersistentTerminalView(controller: controller)
+                    .background(selectedTheme?.background.color ?? Color.black)
+                if selectedSession.status == .disconnected || selectedSession.status == .failed {
+                    reconnectBanner(selectedSession)
+                }
             } else {
                 VStack(spacing: 0) {
                     ServerLocationMapView(server: server)
                         .frame(height: 260)
                         .padding(AppleDesign.Spacing.lg)
-
                     Divider()
-
                     ContentUnavailableView {
                         Label("没有打开的终端", systemImage: "terminal")
                     } description: {
-                        Text("地图显示服务器公网地址的大致位置。创建标签页以连接 \(server.name)。")
+                        Text("地图显示服务器公网出口的大致位置。创建标签页以连接 \(server.displayName)。")
                     } actions: {
                         Button("新建 SSH 终端") {
                             appState.newTerminal(for: server)
@@ -119,6 +177,49 @@ struct TerminalWorkspaceView: View {
         } message: {
             Text(snippetPendingExecution?.command ?? "")
         }
+        .sheet(isPresented: $showingAppearance) {
+            if let selectedController {
+                TerminalSessionAppearanceView(
+                    profile: selectedController.appearanceProfile,
+                    isDark: colorScheme == .dark,
+                    onApply: {
+                        selectedController.applyAppearance(
+                            $0,
+                            dark: colorScheme == .dark
+                        )
+                    },
+                    onApplyGlobal: {
+                        selectedController.applyGlobalAppearance(
+                            dark: colorScheme == .dark
+                        )
+                    },
+                    onReset: {
+                        selectedController.resetAppearance(
+                            dark: colorScheme == .dark
+                        )
+                    }
+                )
+            }
+        }
+    }
+
+    private func reconnectBanner(_ session: TerminalSession) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.status.title)
+                    .font(.headline)
+                Text(session.lastError ?? "重连会建立新的 Shell，不会恢复远端前台进程。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("重新连接") {
+                appState.reconnectTerminal(session)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(AppleDesign.Spacing.md)
+        .background(Color.appGround)
     }
 
     private func insert(
@@ -133,144 +234,128 @@ struct TerminalWorkspaceView: View {
         snippet.lastUsedAt = .now
         try? modelContext.save()
     }
+
+    private func theme(for session: TerminalSession) -> TerminalColorTheme? {
+        guard let controller = appState.terminalRegistry.controller(for: session.id) else {
+            return nil
+        }
+        return TerminalThemeCatalog.shared.theme(
+            id: colorScheme == .dark
+                ? controller.appearanceProfile.darkThemeID
+                : controller.appearanceProfile.lightThemeID,
+            dark: colorScheme == .dark
+        )
+    }
+}
+
+private struct PersistentTerminalView: NSViewRepresentable {
+    @ObservedObject var controller: TerminalSessionController
+    @Environment(\.colorScheme) private var colorScheme
+
+    func makeNSView(context: Context) -> TerminalHostView {
+        controller.hostView.applyAppearance(
+            controller.appearanceProfile,
+            dark: colorScheme == .dark
+        )
+        return controller.hostView
+    }
+
+    func updateNSView(_ nsView: TerminalHostView, context: Context) {
+        nsView.applyAppearance(
+            controller.appearanceProfile,
+            dark: colorScheme == .dark
+        )
+    }
 }
 
 private struct TerminalTab: View {
     let session: TerminalSession
     let isSelected: Bool
+    let theme: TerminalColorTheme?
     let onSelect: () -> Void
     let onClose: () -> Void
 
+    @State private var isHovering = false
+
+    private var statusColor: Color {
+        switch session.status {
+        case .connecting: .appWarning
+        case .connected: .appLive
+        case .disconnected: .secondary
+        case .failed: .appError
+        }
+    }
+
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Button(action: onSelect) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Color.appLive)
+                        .fill(statusColor)
                         .frame(width: 6, height: 6)
                     Text(session.serverName)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                        .lineLimit(1)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("切换到 \(session.serverName) 终端")
+            .accessibilityLabel("切换到 \(session.serverName) 终端，\(session.status.title)")
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .frame(minWidth: 24, minHeight: 24)
+            .foregroundStyle(isSelected ? selectedForeground.opacity(0.65) : Color.secondary)
+            .frame(width: 18, height: 18)
+            .opacity(isSelected || isHovering ? 1 : 0)
             .accessibilityLabel("关闭 \(session.serverName) 终端")
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
+        .foregroundStyle(isSelected ? selectedForeground : Color.primary)
+        .padding(.horizontal, 10)
+        .frame(minWidth: 110, idealWidth: 145, maxWidth: 190, minHeight: 32)
         .background(
-            RoundedRectangle(cornerRadius: AppleDesign.Radius.chip, style: .continuous)
-                .fill(isSelected ? Color.appSurface : Color.primary.opacity(0.04))
+            UnevenRoundedRectangle(
+                topLeadingRadius: AppleDesign.Radius.chip,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: AppleDesign.Radius.chip,
+                style: .continuous
+            )
+            .fill(tabBackground)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: AppleDesign.Radius.chip, style: .continuous)
-                .stroke(Color.primary.opacity(isSelected ? 0.10 : 0.04))
+            UnevenRoundedRectangle(
+                topLeadingRadius: AppleDesign.Radius.chip,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: AppleDesign.Radius.chip,
+                style: .continuous
+            )
+            .stroke(Color.appHairline.opacity(isSelected ? 0.5 : 0))
         }
-        .frame(minHeight: 36)
-    }
-}
-
-private struct SSHProcessTerminalView: NSViewRepresentable {
-    let sessionID: UUID
-    let config: ServerConnectionConfig
-    @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
-    @AppStorage("terminalFontName") private var terminalFontName = "SF Mono"
-
-    func makeNSView(context: Context) -> TerminalHostView {
-        TerminalHostView(
-            sessionID: sessionID,
-            config: config,
-            fontName: terminalFontName,
-            fontSize: terminalFontSize
-        )
-    }
-
-    func updateNSView(_ nsView: TerminalHostView, context: Context) {
-        nsView.updateFont(name: terminalFontName, size: terminalFontSize)
-    }
-}
-
-private final class TerminalHostView: NSView {
-    private let terminalView = LocalProcessTerminalView(frame: .zero)
-    private let sessionID: UUID
-    private let config: ServerConnectionConfig
-    private var didStart = false
-    private var commandObserver: NSObjectProtocol?
-
-    init(sessionID: UUID, config: ServerConnectionConfig, fontName: String, fontSize: Double) {
-        self.sessionID = sessionID
-        self.config = config
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
-        terminalView.autoresizingMask = [.width, .height]
-        terminalView.configureNativeColors()
-        addSubview(terminalView)
-        updateFont(name: fontName, size: fontSize)
-        commandObserver = NotificationCenter.default.addObserver(
-            forName: TerminalCommandBus.notification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  notification.userInfo?["sessionID"] as? UUID == self.sessionID,
-                  let command = notification.userInfo?["command"] as? String else {
-                return
+        .overlay(alignment: .bottom) {
+            if isSelected {
+                Rectangle()
+                    .fill(theme?.background.color ?? Color.appSurface)
+                    .frame(height: 1)
+                    .offset(y: 1)
             }
-            self.terminalView.send(txt: command)
         }
+        .onHover { isHovering = $0 }
+        .animation(AppleDesign.quick, value: isHovering)
+        .help("\(session.serverName) · \(session.status.title)")
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    private var selectedForeground: Color {
+        theme?.foreground.color ?? .primary
     }
 
-    deinit {
-        if let commandObserver {
-            NotificationCenter.default.removeObserver(commandObserver)
+    private var tabBackground: Color {
+        if isSelected {
+            return theme?.background.color ?? .appSurface
         }
-        if didStart {
-            terminalView.terminate()
-        }
-    }
-
-    override func layout() {
-        super.layout()
-        terminalView.frame = bounds
-        guard !didStart, bounds.width > 40, bounds.height > 40 else { return }
-        didStart = true
-        startSSH()
-    }
-
-    func updateFont(name: String, size: Double) {
-        terminalView.font = NSFont(name: name, size: size)
-            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-    }
-
-    private func startSSH() {
-        let arguments = SSHSupport.arguments(
-            for: config,
-            strictHostChecking: "ask"
-        )
-        let environment = SSHSupport.environment(for: config)
-            .map { "\($0.key)=\($0.value)" }
-            .sorted()
-
-        terminalView.startProcess(
-            executable: "/usr/bin/ssh",
-            args: arguments,
-            environment: environment,
-            execName: "ssh"
-        )
+        return isHovering ? Color.primary.opacity(0.06) : .clear
     }
 }
 

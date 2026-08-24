@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import MapKit
 import SwiftUI
@@ -28,37 +27,35 @@ struct ServerLocation: Hashable, Sendable {
 }
 
 enum ServerLocationError: LocalizedError {
-    case cannotResolveHost
     case invalidResponse
     case lookupFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .cannotResolveHost:
-            "无法解析服务器公网地址。"
         case .invalidResponse:
-            "位置服务返回了无效数据。"
+            "服务器端位置服务返回了无效数据。"
         case .lookupFailed(let message):
-            message.isEmpty ? "暂时无法获取服务器位置。" : message
+            message.isEmpty
+                ? "服务器无法访问 ipinfo.io，请检查服务器的出站网络。"
+                : message
         }
     }
 }
 
-private struct IPLocationResponse: Decodable {
-    let success: Bool
-    let message: String?
+private struct IPInfoLocationResponse: Decodable {
     let ip: String?
     let city: String?
     let region: String?
     let country: String?
-    let latitude: Double?
-    let longitude: Double?
+    let loc: String?
 
     var location: ServerLocation? {
-        guard success,
-              let ip,
-              let latitude,
-              let longitude else {
+        let coordinates = loc?
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .compactMap { Double($0) }
+        guard let ip,
+              let coordinates,
+              coordinates.count == 2 else {
             return nil
         }
         return ServerLocation(
@@ -66,8 +63,8 @@ private struct IPLocationResponse: Decodable {
             city: city ?? "",
             region: region ?? "",
             country: country ?? "",
-            latitude: latitude,
-            longitude: longitude
+            latitude: coordinates[0],
+            longitude: coordinates[1]
         )
     }
 }
@@ -75,85 +72,99 @@ private struct IPLocationResponse: Decodable {
 actor ServerLocationService {
     static let shared = ServerLocationService()
 
-    private var cache: [String: ServerLocation] = [:]
+    private static let remoteCommand = #"""
+    sh -lc '
+    if command -v curl >/dev/null 2>&1; then
+      exec curl -fsS --max-time 8 -H "User-Agent: ServerDash/0.1" https://ipinfo.io/json
+    fi
+    if command -v wget >/dev/null 2>&1; then
+      exec wget -qO- --timeout=8 --user-agent="ServerDash/0.1" https://ipinfo.io/json
+    fi
+    exit 127
+    '
+    """#
 
-    func location(for host: String) async throws -> ServerLocation {
-        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let cached = cache[normalizedHost] {
+    private var cache: [UUID: ServerLocation] = [:]
+
+    func clearCache() {
+        cache.removeAll()
+    }
+
+    func location(for config: ServerConnectionConfig) async throws -> ServerLocation {
+        if PrivacySettings.disableLocationLookup {
+            throw ServerLocationError.lookupFailed("已停止位置采集。")
+        }
+        if let cached = cache[config.id] {
             return cached
         }
 
-        let ip = try await resolveIPAddress(for: normalizedHost)
-        var components = URLComponents(string: "https://ipwho.is")
-        components?.path = "/\(ip)"
-        guard let url = components?.url else {
-            throw ServerLocationError.invalidResponse
-        }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        request.setValue("ServerDash/0.1", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200..<300).contains(httpResponse.statusCode) else {
-            throw ServerLocationError.invalidResponse
-        }
-
-        let payload = try JSONDecoder().decode(IPLocationResponse.self, from: data)
+        let data = try await requestFromServer(config)
+        let payload = try JSONDecoder().decode(IPInfoLocationResponse.self, from: data)
         guard let location = payload.location else {
-            throw ServerLocationError.lookupFailed(payload.message ?? "")
+            throw ServerLocationError.invalidResponse
         }
-        cache[normalizedHost] = location
+        cache[config.id] = location
         return location
     }
 
-    private func resolveIPAddress(for host: String) async throws -> String {
-        try await Task.detached(priority: .utility) {
-            var hints = addrinfo()
-            hints.ai_flags = AI_ADDRCONFIG
-            hints.ai_family = AF_UNSPEC
-            hints.ai_socktype = SOCK_STREAM
+    private func requestFromServer(_ config: ServerConnectionConfig) async throws -> Data {
+        let arguments = SSHSupport.arguments(
+            for: config,
+            strictHostChecking: "yes",
+            batchMode: config.authentication == .privateKey,
+            remoteCommand: Self.remoteCommand
+        )
+        let environment = SSHSupport.environment(for: config)
 
-            var result: UnsafeMutablePointer<addrinfo>?
-            guard getaddrinfo(host, nil, &hints, &result) == 0,
-                  let firstResult = result else {
-                throw ServerLocationError.cannotResolveHost
-            }
-            defer { freeaddrinfo(firstResult) }
-
-            var cursor: UnsafeMutablePointer<addrinfo>? = firstResult
-            var fallbackAddress: String?
-            while let current = cursor {
-                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-                let status = getnameinfo(
-                    current.pointee.ai_addr,
-                    current.pointee.ai_addrlen,
-                    &buffer,
-                    socklen_t(buffer.count),
-                    nil,
-                    0,
-                    NI_NUMERICHOST
+        do {
+            let result = try await ConnectionProcessController.shared.run(
+                ProcessRunRequest(
+                    executable: "/usr/bin/ssh",
+                    arguments: arguments,
+                    environment: environment,
+                    connectTimeout: config.connectTimeout,
+                    totalTimeout: max(16, config.connectTimeout + 8),
+                    maxOutputBytes: 1_048_576,
+                    serverID: config.id,
+                    module: .monitoring,
+                    host: config.host,
+                    port: config.port
                 )
-                if status == 0 {
-                    let address = String(cString: buffer)
-                    if current.pointee.ai_family == AF_INET {
-                        return address
-                    }
-                    fallbackAddress = fallbackAddress ?? address
-                }
-                cursor = current.pointee.ai_next
+            )
+            let output = Data(result.output.utf8)
+            guard !output.isEmpty else {
+                throw ServerLocationError.invalidResponse
             }
+            return output
+        } catch let error as ConnectionError {
+            throw ServerLocationError.lookupFailed(error.localizedDescription)
+        }
+    }
+}
 
-            guard let fallbackAddress else {
-                throw ServerLocationError.cannotResolveHost
-            }
-            return fallbackAddress
-        }.value
+private extension ServerLocation {
+    init?(geoLocation: ServerGeoLocation) {
+        guard let latitude = geoLocation.latitude,
+              let longitude = geoLocation.longitude else {
+            return nil
+        }
+        self.init(
+            ip: geoLocation.publicIP,
+            city: geoLocation.city,
+            region: geoLocation.region,
+            country: geoLocation.country,
+            latitude: latitude,
+            longitude: longitude
+        )
     }
 }
 
 struct ServerLocationMapView: View {
+    @EnvironmentObject private var appState: AppState
+
     let server: ServerRecord
+    let initialLocation: ServerGeoLocation?
+    let allowsInteraction: Bool
 
     @State private var location: ServerLocation?
     @State private var errorMessage: String?
@@ -161,10 +172,27 @@ struct ServerLocationMapView: View {
     @State private var mapPosition: MapCameraPosition = .automatic
     @State private var reloadID = UUID()
 
+    init(
+        server: ServerRecord,
+        initialLocation: ServerGeoLocation? = nil,
+        allowsInteraction: Bool = true
+    ) {
+        self.server = server
+        self.initialLocation = initialLocation
+        self.allowsInteraction = allowsInteraction
+    }
+
+    private var requestID: String {
+        "\(reloadID.uuidString)-\(initialLocation?.publicIP ?? "")"
+    }
+
     var body: some View {
         Group {
             if let location {
-                Map(position: $mapPosition, interactionModes: [.pan, .zoom]) {
+                Map(
+                    position: $mapPosition,
+                    interactionModes: allowsInteraction ? [.pan, .zoom] : []
+                ) {
                     Marker(
                         server.name,
                         systemImage: "server.rack",
@@ -173,12 +201,13 @@ struct ServerLocationMapView: View {
                     .tint(Color.appAccent)
                 }
                 .mapStyle(.standard(elevation: .realistic))
+                .allowsHitTesting(allowsInteraction)
                 .overlay(alignment: .topLeading) {
                     locationBadge(location)
                         .padding(AppleDesign.Spacing.md)
                 }
                 .overlay(alignment: .bottomTrailing) {
-                    Text("公网 IP 大致位置 · ipwho.is")
+                    Text("服务器公网出口大致位置 · ipinfo.io")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, AppleDesign.Spacing.xs)
@@ -194,7 +223,7 @@ struct ServerLocationMapView: View {
                     Color.appSurface
                     VStack(spacing: AppleDesign.Spacing.sm) {
                         ProgressView()
-                        Text("正在定位 \(server.name)")
+                        Text("正在通过服务器获取公网位置")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -203,7 +232,7 @@ struct ServerLocationMapView: View {
                 ContentUnavailableView {
                     Label("无法显示服务器位置", systemImage: "map")
                 } description: {
-                    Text(errorMessage ?? "此地址可能属于内网，或位置服务暂时不可用。")
+                    Text(errorMessage ?? "服务器无法访问位置服务。")
                 } actions: {
                     Button("重试", systemImage: "arrow.clockwise") {
                         reloadID = UUID()
@@ -218,7 +247,7 @@ struct ServerLocationMapView: View {
             RoundedRectangle(cornerRadius: AppleDesign.Radius.panel, style: .continuous)
                 .stroke(Color.appHairline.opacity(0.5))
         }
-        .task(id: reloadID) {
+        .task(id: requestID) {
             await loadLocation()
         }
     }
@@ -230,7 +259,7 @@ struct ServerLocationMapView: View {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text(location.displayName.isEmpty ? "服务器位置" : location.displayName)
                     .font(.headline)
-                Text(location.ip)
+                Text(PrivacySettings.hideIPInformation ? "[IP]" : location.ip)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
@@ -245,8 +274,22 @@ struct ServerLocationMapView: View {
     private func loadLocation() async {
         isLoading = true
         errorMessage = nil
+        if PrivacySettings.disableLocationLookup {
+            location = nil
+            errorMessage = "已停止位置采集。"
+            isLoading = false
+            return
+        }
         do {
-            let resolvedLocation = try await ServerLocationService.shared.location(for: server.host)
+            let resolvedLocation: ServerLocation
+            if let initialLocation,
+               let snapshotLocation = ServerLocation(geoLocation: initialLocation) {
+                resolvedLocation = snapshotLocation
+            } else {
+                resolvedLocation = try await ServerLocationService.shared.location(
+                    for: appState.connectionConfig(for: server)
+                )
+            }
             location = resolvedLocation
             mapPosition = .region(
                 MKCoordinateRegion(

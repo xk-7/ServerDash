@@ -27,7 +27,13 @@ struct ServerEditorView: View {
     @State private var errorMessage: String?
     @State private var isValidating = false
     @State private var pendingHostKey: SSHHostKeyProbe?
-    @State private var pendingValidationConfig: ServerConnectionConfig?
+    @State private var pendingHostKeyReplacing = false
+    @State private var pendingAction: EditorAction?
+    @State private var enableDashboardMonitor = true
+    @State private var defaultSFTPPath = "."
+    @State private var passphrase = ""
+    @State private var statusNote: String?
+    @State private var sshTestFeedback: SSHTestFeedback?
 
     init(server: ServerRecord?, onSave: ((ServerRecord) -> Void)? = nil) {
         self.server = server
@@ -43,6 +49,8 @@ struct ServerEditorView: View {
         _groupName = State(initialValue: server?.groupName ?? "默认分组")
         _tagsText = State(initialValue: server?.tagsText ?? "")
         _notes = State(initialValue: server?.notes ?? "")
+        _enableDashboardMonitor = State(initialValue: server?.enableDashboardMonitor ?? true)
+        _defaultSFTPPath = State(initialValue: server?.defaultSFTPPath ?? ".")
     }
 
     var body: some View {
@@ -51,7 +59,7 @@ struct ServerEditorView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(server == nil ? "添加服务器" : "编辑服务器")
                         .font(.title2.bold())
-                    Text(isValidating ? "正在验证 SSH 连接与资源采集…" : "验证成功后才会保存，凭据仅存入 macOS Keychain")
+                    Text(statusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -95,12 +103,13 @@ struct ServerEditorView: View {
                         }
                         .pickerStyle(.segmented)
 
-                        if authentication == .password {
+                        if authentication.usesPassword {
                             SecureField(
                                 server == nil ? "密码" : "新密码（留空则不修改）",
                                 text: $password
                             )
-                        } else {
+                        }
+                        if authentication.usesPrivateKey {
                             HStack {
                                 TextField(
                                     "私钥路径（留空使用 SSH 默认配置）",
@@ -108,6 +117,7 @@ struct ServerEditorView: View {
                                 )
                                 Button("选择…", action: choosePrivateKey)
                             }
+                            SecureField("私钥口令（可选）", text: $passphrase)
                         }
                     }
                 }
@@ -117,6 +127,8 @@ struct ServerEditorView: View {
                     TextField("标签（用逗号分隔）", text: $tagsText)
                     TextField("备注", text: $notes, axis: .vertical)
                         .lineLimit(2...5)
+                    TextField("默认 SFTP 路径", text: $defaultSFTPPath)
+                    Toggle("加入仪表盘自动监控", isOn: $enableDashboardMonitor)
                 }
 
                 if let errorMessage {
@@ -139,24 +151,25 @@ struct ServerEditorView: View {
                 Button("取消") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(isValidating)
-                Button(action: beginValidation) {
+                Button("测试 SSH") { begin(.testSSH) }
+                    .disabled(!isValid || isValidating)
+                Button(action: { begin(.save) }) {
                     if isValidating {
                         HStack(spacing: 7) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("正在验证")
+                            ProgressView().controlSize(.small)
+                            Text("处理中")
                         }
                     } else {
-                        Text(server == nil ? "连接" : "验证并保存")
+                        Text("保存配置")
                     }
                 }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!isValid || isValidating)
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!isValid || isValidating)
             }
             .padding(16)
         }
-        .frame(width: 560, height: 590)
+        .frame(width: 620, height: 680)
         .background(Color.appGround)
         .interactiveDismissDisabled(isValidating)
         .task {
@@ -169,7 +182,6 @@ struct ServerEditorView: View {
                 set: {
                     if !$0 {
                         pendingHostKey = nil
-                        pendingValidationConfig = nil
                     }
                 }
             ),
@@ -177,23 +189,46 @@ struct ServerEditorView: View {
         ) { probe in
             Button("取消", role: .cancel) {
                 pendingHostKey = nil
-                pendingValidationConfig = nil
+                isValidating = false
+                if pendingAction == .testSSH {
+                    pendingAction = nil
+                    DispatchQueue.main.async {
+                        sshTestFeedback = SSHTestFeedback(
+                            succeeded: false,
+                            message: "未确认主机指纹，SSH 测试已取消。"
+                        )
+                    }
+                }
             }
-            Button("信任并验证") {
+            Button(pendingHostKeyReplacing ? "替换并继续" : "信任并继续") {
                 trustHostKeyAndContinue(probe)
             }
         } message: { probe in
-            Text(
-                "\(probe.host):\(probe.port)\n\(probe.algorithm)  \(probe.fingerprint)\n\n请与服务商控制台显示的指纹核对后再信任。"
+            Text(hostKeyMessage(probe))
+        }
+        .alert(item: $sshTestFeedback) { feedback in
+            Alert(
+                title: Text(feedback.title),
+                message: Text(feedback.message),
+                dismissButton: .default(Text("好"))
             )
         }
     }
 
+    private var statusText: String {
+        if isValidating { return "正在处理连接…" }
+        if let statusNote { return statusNote }
+        return "可以先保存离线配置，SSH 测试可单独执行。"
+    }
+
     private var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         (1...65_535).contains(port)
+    }
+
+    private enum EditorAction {
+        case save, testSSH
     }
 
     private var selectedIdentity: IdentityRecord? {
@@ -205,7 +240,7 @@ struct ServerEditorView: View {
         guard let identity = selectedIdentity else { return }
         username = identity.username
         authentication = identity.authentication
-        if identity.authentication == .privateKey {
+        if identity.authentication.usesPrivateKey {
             privateKeyPath = sshKeys.first { $0.id == identity.sshKeyID }?.filePath ?? ""
         } else {
             privateKeyPath = ""
@@ -214,90 +249,156 @@ struct ServerEditorView: View {
     }
 
     private var draftConfig: ServerConnectionConfig {
-        ServerConnectionConfig(
+        if let identity = selectedIdentity {
+            let draft = ServerRecord(
+                id: draftID,
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+                port: port,
+                username: identity.username,
+                authentication: identity.authentication,
+                identityID: identity.id
+            )
+            return ConnectionConfigResolver.resolve(
+                server: draft,
+                identities: identities,
+                keys: sshKeys
+            )
+        }
+        let hasStoredPassphrase = (try? KeychainService.secret(
+            account: KeychainService.passphraseAccount(for: draftID)
+        )) != nil
+        return ServerConnectionConfig(
             id: draftID,
-            credentialID: selectedIdentityID ?? draftID,
+            credentialID: draftID,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             port: port,
             username: username.trimmingCharacters(in: .whitespacesAndNewlines),
             authentication: authentication,
-            privateKeyPath: privateKeyPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            privateKeyPath: privateKeyPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            sshKeyID: draftID,
+            hasPassphrase: !passphrase.isEmpty || hasStoredPassphrase
         )
     }
 
-    private func beginValidation() {
+    private func begin(_ action: EditorAction) {
         guard isValid else { return }
-        if authentication == .password,
+        if authentication.usesPassword,
            password.isEmpty,
-           !KeychainService.hasPassword(for: draftConfig.credentialID) {
-            errorMessage = ValidationError.missingPassword.localizedDescription
+           !KeychainService.hasPassword(for: draftConfig.credentialID),
+           action != .save {
+            presentSSHTestFailure(ValidationError.missingPassword)
             return
         }
 
-        let config = draftConfig
         errorMessage = nil
-        isValidating = true
+        statusNote = nil
+        pendingAction = action
+        if action == .save {
+            do {
+                try persistSecrets()
+                try commit(snapshot: nil, status: .unverified)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            return
+        }
 
+        isValidating = true
         Task {
             do {
-                if let probe = try await SSHConnectionValidator.pendingHostKey(for: config) {
-                    pendingValidationConfig = config
+                switch try await SSHConnectionValidator.inspect(draftConfig) {
+                case .trusted:
+                    try await perform(action)
+                case .unknown(let probe):
+                    pendingHostKeyReplacing = false
                     pendingHostKey = probe
                     isValidating = false
-                } else {
-                    try await validateAndCommit(config)
+                case .changed(_, let probe):
+                    pendingHostKeyReplacing = true
+                    pendingHostKey = probe
+                    isValidating = false
                 }
             } catch {
                 isValidating = false
-                errorMessage = error.localizedDescription
+                if action == .testSSH {
+                    presentSSHTestFailure(error)
+                } else {
+                    errorMessage = error.localizedDescription
+                }
             }
         }
     }
 
     private func trustHostKeyAndContinue(_ probe: SSHHostKeyProbe) {
-        guard let config = pendingValidationConfig else { return }
         pendingHostKey = nil
-        pendingValidationConfig = nil
         isValidating = true
-
         Task {
             do {
-                try await SSHConnectionValidator.trust(probe)
-                try await validateAndCommit(config)
+                try await SSHConnectionValidator.trust(probe, replacing: pendingHostKeyReplacing)
+                TrustedHostCatalog.upsert(probe: probe, in: modelContext)
+                if let action = pendingAction {
+                    try await perform(action)
+                }
             } catch {
                 isValidating = false
-                errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    private func validateAndCommit(_ config: ServerConnectionConfig) async throws {
-        var previousPassword: String?
-        var stagedPassword = false
-
-        if authentication == .password, !password.isEmpty {
-            previousPassword = try KeychainService.password(for: config.credentialID)
-            try KeychainService.savePassword(password, for: config.credentialID)
-            stagedPassword = true
-        }
-
-        do {
-            let snapshot = try await SSHMonitoringService.collect(config)
-            try commit(snapshot: snapshot)
-        } catch {
-            if stagedPassword {
-                if let previousPassword {
-                    try? KeychainService.savePassword(previousPassword, for: config.credentialID)
+                if pendingAction == .testSSH {
+                    presentSSHTestFailure(error)
                 } else {
-                    try? KeychainService.deletePassword(for: config.credentialID)
+                    errorMessage = error.localizedDescription
                 }
             }
-            throw error
         }
     }
 
-    private func commit(snapshot: ServerSnapshot) throws {
+    private func perform(_ action: EditorAction) async throws {
+        try persistSecrets()
+        switch action {
+        case .save:
+            try commit(snapshot: nil, status: .unverified)
+        case .testSSH:
+            let elapsed = try await SSHConnectionTester.test(draftConfig)
+            try commit(snapshot: nil, status: .sshReady)
+            statusNote = "SSH 测试成功，配置已保存。"
+            sshTestFeedback = SSHTestFeedback(
+                succeeded: true,
+                message: "已成功连接 \(draftConfig.username)@\(draftConfig.host):\(draftConfig.port)，延迟 \(Int(elapsed * 1_000)) ms。"
+            )
+        }
+        isValidating = false
+    }
+
+    private func presentSSHTestFailure(_ error: Error) {
+        errorMessage = error.localizedDescription
+        sshTestFeedback = SSHTestFeedback(
+            succeeded: false,
+            message: error.localizedDescription
+        )
+    }
+
+    private func persistSecrets() throws {
+        if authentication.usesPassword, !password.isEmpty {
+            try KeychainService.savePassword(password, for: draftConfig.credentialID)
+        }
+        if !passphrase.isEmpty {
+            try KeychainService.saveSecret(
+                passphrase,
+                account: KeychainService.passphraseAccount(
+                    for: selectedIdentity?.sshKeyID ?? draftID
+                )
+            )
+        }
+    }
+
+    private func hostKeyMessage(_ probe: SSHHostKeyProbe) -> String {
+        if pendingHostKeyReplacing {
+            return "\(probe.host):\(probe.port)\n主机密钥已变化，可能存在中间人风险。\n新指纹：\(probe.algorithm) \(probe.fingerprint)\n确认后才会替换应用内记录。"
+        }
+        return "\(probe.host):\(probe.port)\n\(probe.algorithm)  \(probe.fingerprint)\n\n请与服务商控制台显示的指纹核对后再信任。"
+    }
+
+    private func commit(snapshot: ServerSnapshot?, status: ServerVerificationStatus) throws {
         let record: ServerRecord
         let isNewRecord = server == nil
         if let server {
@@ -312,6 +413,9 @@ struct ServerEditorView: View {
             record.tagsText = tagsText
             record.notes = notes
             record.identityID = selectedIdentityID
+            record.enableDashboardMonitor = enableDashboardMonitor
+            record.defaultSFTPPath = defaultSFTPPath.isEmpty ? "." : defaultSFTPPath
+            record.verificationStatus = status
         } else {
             record = ServerRecord(
                 id: draftID,
@@ -324,23 +428,33 @@ struct ServerEditorView: View {
                 groupName: groupName.isEmpty ? "默认分组" : groupName,
                 tagsText: tagsText,
                 notes: notes,
-                identityID: selectedIdentityID
+                identityID: selectedIdentityID,
+                verificationStatus: status,
+                enableDashboardMonitor: enableDashboardMonitor,
+                defaultSFTPPath: defaultSFTPPath.isEmpty ? "." : defaultSFTPPath
             )
             modelContext.insert(record)
         }
 
         do {
-            if authentication == .privateKey {
+            if !authentication.usesPassword {
                 try KeychainService.deletePassword(for: record.id)
             }
-            if selectedIdentityID != nil {
+            if selectedIdentityID != nil, !authentication.usesPassword {
                 try? KeychainService.deletePassword(for: record.id)
             }
             try modelContext.save()
-            appState.applyValidatedSnapshot(snapshot, to: record)
-            try? modelContext.save()
-            onSave?(record)
-            dismiss()
+            appState.cacheConfig(draftConfig)
+            if let snapshot {
+                appState.applyValidatedSnapshot(snapshot, to: record)
+                try? modelContext.save()
+            } else {
+                appState.initializeRuntime(for: record)
+            }
+            if pendingAction == .save {
+                onSave?(record)
+                dismiss()
+            }
         } catch {
             if isNewRecord {
                 modelContext.delete(record)
@@ -363,6 +477,16 @@ struct ServerEditorView: View {
     }
 }
 
+private struct SSHTestFeedback: Identifiable {
+    let id = UUID()
+    let succeeded: Bool
+    let message: String
+
+    var title: String {
+        succeeded ? "SSH 连接成功" : "SSH 连接失败"
+    }
+}
+
 private enum ValidationError: LocalizedError {
     case missingPassword
 
@@ -373,13 +497,16 @@ private enum ValidationError: LocalizedError {
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @AppStorage("terminalFontSize") private var terminalFontSize = 13.0
-    @AppStorage("terminalFontName") private var terminalFontName = "SF Mono"
     @AppStorage("confirmHostFingerprint") private var confirmHostFingerprint = true
     @AppStorage("appAppearance") private var appAppearanceRawValue = AppAppearance.system.rawValue
+    @AppStorage("networkDisplayInBits") private var networkDisplayInBits = false
+    @AppStorage("hideIPInformation") private var hideIPInformation = false
+    @AppStorage("disableLocationLookup") private var disableLocationLookup = false
+    @AppStorage("sshConnectTimeout") private var sshConnectTimeout = 8.0
 
     var body: some View {
-        Form {
+        TabView {
+            Form {
             Section("外观") {
                 Picker("显示模式", selection: $appAppearanceRawValue) {
                     ForEach(AppAppearance.allCases) { appearance in
@@ -403,34 +530,59 @@ struct SettingsView: View {
                     )
                 ) {
                     Text("关闭").tag(0.0)
+                    Text("每 1 秒").tag(1.0)
                     Text("每 5 秒").tag(5.0)
                     Text("每 10 秒").tag(10.0)
                     Text("每 30 秒").tag(30.0)
                     Text("每分钟").tag(60.0)
                 }
+                if appState.refreshInterval > 0 && appState.refreshInterval < 5 {
+                    Text("低于 5 秒会增加服务器和本机负载。")
+                        .font(.caption)
+                        .foregroundStyle(Color.appWarning)
+                }
             }
 
-            Section("终端") {
-                TextField("字体", text: $terminalFontName)
-                HStack {
-                    Slider(value: $terminalFontSize, in: 10...24, step: 1)
-                    Text("\(Int(terminalFontSize)) pt")
-                        .monospacedDigit()
-                        .frame(width: 48, alignment: .trailing)
-                }
+            Section("监控面板") {
+                Toggle("网络速度使用 bit/s", isOn: $networkDisplayInBits)
+                Toggle("隐藏 IP 与位置信息", isOn: $hideIPInformation)
+                Toggle("停止位置采集", isOn: $disableLocationLookup)
+                    .onChange(of: disableLocationLookup) {
+                        if disableLocationLookup {
+                            Task { await ServerLocationService.shared.clearCache() }
+                        }
+                    }
+                Text("停止采集后，服务器不会再请求 ipinfo.io，并清理本机缓存。隐藏 IP 会影响界面、Markdown 和诊断。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("安全") {
                 Toggle("首次连接时确认主机指纹", isOn: $confirmHostFingerprint)
-                    .disabled(true)
-                Text("ServerDash 使用 OpenSSH 的 known_hosts 校验。主机指纹变化时，连接会被阻止。")
+                HStack {
+                    Text("SSH 超时")
+                    Slider(value: $sshConnectTimeout, in: 5...300, step: 5)
+                    Text("\(Int(sshConnectTimeout))s")
+                        .monospacedDigit()
+                        .frame(width: 44)
+                }
+                Text("主机指纹保存在应用专属 known_hosts。密钥变化时默认拒绝，需同时看到新旧指纹后才能替换。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            }
+            .formStyle(.grouped)
+            .tabItem {
+                Label("通用", systemImage: "gearshape")
+            }
+
+            TerminalAppearanceSettingsView()
+                .tabItem {
+                    Label("终端主题", systemImage: "terminal")
+                }
         }
-        .formStyle(.grouped)
         .preferredColorScheme(appAppearance.colorScheme)
-        .frame(width: 500, height: 420)
+        .frame(width: 920, height: 720)
     }
 
     private var appAppearance: AppAppearance {

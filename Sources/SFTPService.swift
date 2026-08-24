@@ -26,10 +26,40 @@ struct SFTPDirectoryListing: Sendable {
     let items: [RemoteFileItem]
 }
 
+enum SFTPConflictPolicy: String, CaseIterable, Identifiable, Sendable {
+    case overwrite
+    case skip
+    case rename
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overwrite: "覆盖"
+        case .skip: "跳过"
+        case .rename: "重命名"
+        }
+    }
+}
+
+struct SFTPProgress: Sendable {
+    var transferredBytes: Int64
+    var totalBytes: Int64
+    var speedBytesPerSecond: Double
+    var remaining: TimeInterval
+    var message: String
+
+    var fraction: Double {
+        guard totalBytes > 0 else { return 0 }
+        return min(1, Double(transferredBytes) / Double(totalBytes))
+    }
+}
+
 enum SFTPError: LocalizedError {
     case commandFailed(String)
     case invalidResponse
     case invalidName
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -39,6 +69,8 @@ enum SFTPError: LocalizedError {
             "无法解析服务器返回的目录信息。"
         case .invalidName:
             "名称不能为空，也不能包含“/”。"
+        case .cancelled:
+            "传输已取消。"
         }
     }
 }
@@ -72,6 +104,21 @@ enum RemotePath {
             }
         }
         return "/" + components.joined(separator: "/")
+    }
+
+    static func uniquedName(_ name: String, existing: Set<String>) -> String {
+        if !existing.contains(name) { return name }
+        let ns = name as NSString
+        let ext = ns.pathExtension
+        let base = ext.isEmpty ? name : ns.deletingPathExtension
+        var index = 2
+        while true {
+            let candidate = ext.isEmpty ? "\(base) \(index)" : "\(base) \(index).\(ext)"
+            if !existing.contains(candidate) {
+                return candidate
+            }
+            index += 1
+        }
     }
 }
 
@@ -140,6 +187,32 @@ enum SFTPListingParser {
     }
 }
 
+enum LocalTransferMeasure {
+    static func size(of url: URL) -> Int64 {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return 0
+        }
+        if !isDirectory.boolValue {
+            return Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
+        ) else {
+            return 0
+        }
+        var total: Int64 = 0
+        while let file = enumerator.nextObject() as? URL {
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            if values?.isRegularFile == true {
+                total += Int64(values?.fileSize ?? 0)
+            }
+        }
+        return total
+    }
+}
+
 enum SFTPService {
     static func list(
         config: ServerConnectionConfig,
@@ -159,27 +232,87 @@ enum SFTPService {
     static func upload(
         localURLs: [URL],
         to remoteDirectory: String,
-        config: ServerConnectionConfig
+        config: ServerConnectionConfig,
+        policy: SFTPConflictPolicy,
+        existingNames: Set<String>,
+        onProgress: (@Sendable (SFTPProgress) -> Void)? = nil
     ) async throws {
-        let commands = localURLs.map { url in
-            let destination = RemotePath.child(url.lastPathComponent, of: remoteDirectory)
-            return "put -p \(quote(url.path)) \(quote(destination))"
+        var commands: [String] = []
+        var totalBytes: Int64 = 0
+        var destinations: [String] = []
+        for url in localURLs {
+            var name = url.lastPathComponent
+            if existingNames.contains(name) {
+                switch policy {
+                case .skip:
+                    continue
+                case .rename:
+                    name = RemotePath.uniquedName(name, existing: existingNames)
+                case .overwrite:
+                    break
+                }
+            }
+            let destination = RemotePath.child(name, of: remoteDirectory)
+            destinations.append(destination)
+            totalBytes += LocalTransferMeasure.size(of: url)
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            let flag = isDirectory.boolValue ? "put -pr" : "put -p"
+            commands.append("\(flag) \(quote(url.path)) \(quote(destination))")
         }
-        _ = try await run(config: config, commands: commands)
+        guard !commands.isEmpty else { return }
+        try await runTransfer(
+            config: config,
+            commands: commands,
+            totalBytes: totalBytes,
+            measure: {
+                var total: Int64 = 0
+                for path in destinations {
+                    total += (try? await remoteSize(config: config, path: path)) ?? 0
+                }
+                return total
+            },
+            onProgress: onProgress
+        )
     }
 
     static func download(
         item: RemoteFileItem,
         to localURL: URL,
-        config: ServerConnectionConfig
+        config: ServerConnectionConfig,
+        policy: SFTPConflictPolicy,
+        onProgress: (@Sendable (SFTPProgress) -> Void)? = nil
     ) async throws {
-        guard item.kind == .file || item.kind == .symbolicLink else {
-            throw SFTPError.commandFailed("首版仅支持下载文件。")
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            switch policy {
+            case .skip:
+                return
+            case .rename:
+                let renamed = uniquedLocalURL(localURL)
+                try await download(
+                    item: item,
+                    to: renamed,
+                    config: config,
+                    policy: .overwrite,
+                    onProgress: onProgress
+                )
+                return
+            case .overwrite:
+                break
+            }
         }
-        _ = try await run(
+        let flag = item.isDirectory ? "get -pr" : "get -p"
+        let total = item.isDirectory ? max(item.size, 1) : item.size
+        try await runTransfer(
             config: config,
-            commands: ["get -p \(quote(item.path)) \(quote(localURL.path))"]
+            commands: ["\(flag) \(quote(item.path)) \(quote(localURL.path))"],
+            totalBytes: total,
+            measure: { LocalTransferMeasure.size(of: localURL) },
+            onProgress: onProgress
         )
+        guard FileManager.default.fileExists(atPath: localURL.path) else {
+            throw SFTPError.commandFailed("传输未完成，未将半成品标为成功。")
+        }
     }
 
     static func createDirectory(
@@ -191,6 +324,24 @@ enum SFTPService {
         _ = try await run(
             config: config,
             commands: ["mkdir \(quote(RemotePath.child(name, of: remoteDirectory)))"]
+        )
+    }
+
+    static func createFile(
+        named name: String,
+        in remoteDirectory: String,
+        config: ServerConnectionConfig
+    ) async throws {
+        try validateName(name)
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ServerDash-empty-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: temporary.path, contents: Data())
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        _ = try await run(
+            config: config,
+            commands: [
+                "put \(quote(temporary.path)) \(quote(RemotePath.child(name, of: remoteDirectory)))"
+            ]
         )
     }
 
@@ -207,14 +358,37 @@ enum SFTPService {
         )
     }
 
-    static func delete(
+    static func move(
         item: RemoteFileItem,
+        to remoteDirectory: String,
         config: ServerConnectionConfig
     ) async throws {
-        let command = item.isDirectory
-            ? "rmdir \(quote(item.path))"
-            : "rm \(quote(item.path))"
+        let destination = RemotePath.child(item.name, of: remoteDirectory)
+        _ = try await run(
+            config: config,
+            commands: ["rename \(quote(item.path)) \(quote(destination))"]
+        )
+    }
+
+    static func delete(
+        item: RemoteFileItem,
+        config: ServerConnectionConfig,
+        recursive: Bool = false
+    ) async throws {
+        let command: String
+        if item.isDirectory {
+            command = recursive ? "rm -r \(quote(item.path))" : "rmdir \(quote(item.path))"
+        } else {
+            command = "rm \(quote(item.path))"
+        }
         _ = try await run(config: config, commands: [command])
+    }
+
+    static func quote(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 
     private static func validateName(_ name: String) throws {
@@ -227,97 +401,141 @@ enum SFTPService {
         }
     }
 
+    private static func uniquedLocalURL(_ url: URL) -> URL {
+        let existing = Set(
+            ((try? FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? [])
+                .map(\.lastPathComponent)
+        )
+        let name = RemotePath.uniquedName(url.lastPathComponent, existing: existing)
+        return url.deletingLastPathComponent().appendingPathComponent(name)
+    }
+
+    private static func remoteSize(config: ServerConnectionConfig, path: String) async throws -> Int64 {
+        let listing = try await list(config: config, path: RemotePath.parent(of: path))
+        return listing.items.first { $0.path == path }?.size ?? 0
+    }
+
+    private static func runTransfer(
+        config: ServerConnectionConfig,
+        commands: [String],
+        totalBytes: Int64,
+        measure: @escaping @Sendable () async -> Int64,
+        onProgress: (@Sendable (SFTPProgress) -> Void)?
+    ) async throws {
+        let started = Date()
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                _ = try await run(
+                    config: config,
+                    commands: commands,
+                    totalTimeout: 21_600
+                )
+            }
+            if let onProgress {
+                group.addTask {
+                    while !Task.isCancelled {
+                        let transferred = await measure()
+                        let elapsed = max(0.1, Date().timeIntervalSince(started))
+                        let speed = Double(transferred) / elapsed
+                        let remaining = speed > 0
+                            ? Double(max(0, totalBytes - transferred)) / speed
+                            : 0
+                        onProgress(
+                            SFTPProgress(
+                                transferredBytes: transferred,
+                                totalBytes: totalBytes,
+                                speedBytesPerSecond: speed,
+                                remaining: remaining,
+                                message: "已传输 \(DisplayFormat.bytes(Double(transferred)))"
+                            )
+                        )
+                        try await Task.sleep(for: .milliseconds(400))
+                    }
+                }
+            }
+            try await group.next()
+            group.cancelAll()
+        }
+    }
+
     private static func run(
         config: ServerConnectionConfig,
-        commands: [String]
+        commands: [String],
+        totalTimeout: TimeInterval = 60
     ) async throws -> String {
-        try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            let inputPipe = Pipe()
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/sftp")
-            process.arguments = arguments(for: config)
-            process.environment = SSHSupport.environment(for: config)
-            process.standardInput = inputPipe
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-
-            do {
-                try process.run()
-            } catch {
-                throw SFTPError.commandFailed(error.localizedDescription)
-            }
-
-            let outputTask = Task.detached {
-                outputPipe.fileHandleForReading.readDataToEndOfFile()
-            }
-            let errorTask = Task.detached {
-                errorPipe.fileHandleForReading.readDataToEndOfFile()
-            }
-
-            do {
-                let commandText = (commands + ["bye"]).joined(separator: "\n") + "\n"
-                try inputPipe.fileHandleForWriting.write(contentsOf: Data(commandText.utf8))
-                try inputPipe.fileHandleForWriting.close()
-            } catch {
-                process.terminate()
-                throw SFTPError.commandFailed(error.localizedDescription)
-            }
-            process.waitUntilExit()
-
-            let output = String(
-                decoding: await outputTask.value,
-                as: UTF8.self
+        let stdin = Data((commands + ["bye"]).joined(separator: "\n").appending("\n").utf8)
+        do {
+            let result = try await ConnectionProcessController.shared.run(
+                ProcessRunRequest(
+                    executable: "/usr/bin/sftp",
+                    arguments: arguments(for: config),
+                    environment: SSHSupport.environment(for: config),
+                    stdin: stdin,
+                    connectTimeout: config.connectTimeout,
+                    totalTimeout: totalTimeout,
+                    maxOutputBytes: 4_000_000,
+                    serverID: config.id,
+                    module: .sftp,
+                    host: config.host,
+                    port: config.port
+                )
             )
-            let errorOutput = String(
-                decoding: await errorTask.value,
-                as: UTF8.self
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard process.terminationStatus == 0 else {
-                throw SFTPError.commandFailed(errorOutput)
-            }
-            if let commandError = firstCommandError(in: output + "\n" + errorOutput) {
+            if let commandError = firstCommandError(in: result.output + "\n" + result.error) {
                 throw SFTPError.commandFailed(commandError)
             }
-            return output
-        }.value
+            EventLogStore.shared.append(
+                serverID: config.id,
+                module: .sftp,
+                message: "SFTP 命令完成"
+            )
+            return result.output
+        } catch is CancellationError {
+            throw SFTPError.cancelled
+        } catch let error as ConnectionError {
+            if error == .cancelled {
+                throw SFTPError.cancelled
+            }
+            EventLogStore.shared.append(
+                serverID: config.id,
+                module: .sftp,
+                level: "error",
+                message: error.localizedDescription
+            )
+            throw SFTPError.commandFailed(error.localizedDescription)
+        }
     }
 
     private static func arguments(for config: ServerConnectionConfig) -> [String] {
         var arguments = [
             "-q",
             "-P", String(config.port),
-            "-o", "ConnectTimeout=10",
+            "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
-            "-o", "StrictHostKeyChecking=yes"
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", SSHSupport.userKnownHostsOption,
+            "-o", "GlobalKnownHostsFile=/dev/null",
+            "-o", "UpdateHostKeys=no"
         ]
+        let keyPath = (try? KeyMaterialStore.materializePrivateKey(for: config)) ?? ""
         switch config.authentication {
         case .privateKey:
-            if !config.privateKeyPath.isEmpty {
-                arguments += [
-                    "-i", NSString(string: config.privateKeyPath).expandingTildeInPath,
-                    "-o", "IdentitiesOnly=yes"
-                ]
+            if !keyPath.isEmpty {
+                arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
             }
         case .password:
             arguments += [
                 "-o", "PreferredAuthentications=password,keyboard-interactive",
                 "-o", "PubkeyAuthentication=no"
             ]
+        case .keyThenPassword:
+            if !keyPath.isEmpty {
+                arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+            }
+            arguments += ["-o", "PreferredAuthentications=publickey,password"]
         }
         arguments.append("\(config.username)@\(config.host)")
         return arguments
-    }
-
-    private static func quote(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
     }
 
     private static func firstCommandError(in output: String) -> String? {
