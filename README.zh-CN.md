@@ -93,6 +93,14 @@ xcodebuild \
   test
 ```
 
+生成无需 Apple Developer 账号的 Ad-hoc 测试 DMG：
+
+```bash
+./Scripts/build-test-dmg.sh
+```
+
+DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 点击 App 并选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。
+
 ## 项目结构
 
 ```text

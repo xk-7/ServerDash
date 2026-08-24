@@ -93,6 +93,14 @@ xcodebuild \
   test
 ```
 
+Create an ad-hoc signed test DMG (no Apple Developer account required):
+
+```bash
+./Scripts/build-test-dmg.sh
+```
+
+The DMG is written to `dist/`. On another Mac, open the app with Control-click → **Open**, or allow it under **System Settings → Privacy & Security** when Gatekeeper reports that the developer cannot be verified.
+
 ## Project Layout
 
 ```text
