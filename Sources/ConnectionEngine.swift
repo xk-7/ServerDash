@@ -133,11 +133,10 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
             let oldFingerprint = host.flatMap {
                 TrustedHostStore.existingFingerprint(host: $0, port: port ?? 22)
             }
-            let parsed = extractedFingerprint(from: text)
-            if parsed == nil, let host, let probe = try? TrustedHostStore.scan(host: host, port: port ?? 22) {
-                return .hostKeyChanged(oldFingerprint: oldFingerprint, newFingerprint: probe.fingerprint)
-            }
-            return .hostKeyChanged(oldFingerprint: oldFingerprint, newFingerprint: parsed)
+            return .hostKeyChanged(
+                oldFingerprint: oldFingerprint,
+                newFingerprint: extractedFingerprint(from: text)
+            )
         }
         if lowered.contains("host key verification failed") {
             if let host {
@@ -145,14 +144,6 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
                 let existing = TrustedHostStore.existingFingerprint(host: host, port: resolvedPort)
                 if let existing {
                     let newFingerprint = extractedFingerprint(from: text)
-                        ?? (try? TrustedHostStore.scan(
-                            host: host,
-                            port: resolvedPort,
-                            preferredAlgorithm: TrustedHostStore.existingKeys(
-                                host: host,
-                                port: resolvedPort
-                            ).first?.algorithm
-                        ).fingerprint)
                     if newFingerprint == existing {
                         return .commandFailed(
                             "主机指纹一致，但 OpenSSH 无法读取应用信任文件。"
@@ -253,31 +244,87 @@ struct ProcessRunResult: Sendable {
     let elapsed: TimeInterval
 }
 
+enum ProcessTerminationReason: String, Sendable, Equatable {
+    case running
+    case exited
+    case cancelled
+    case timeout
+    case outputLimitExceeded
+    case scopedTermination
+}
+
+struct ProcessRunSummary: Sendable, Equatable {
+    let runID: UUID
+    let serverID: UUID?
+    let module: DiagnosticModule
+    let processIdentifier: Int32
+    let processGroupIdentifier: Int32?
+    let startedAt: Date
+    var terminationReason: ProcessTerminationReason
+}
+
 actor ConnectionLimiter {
     static let shared = ConnectionLimiter()
 
+    private struct Waiter {
+        let id: UUID
+        let serverID: UUID?
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
     private var globalCount = 0
     private var perServer: [UUID: Int] = [:]
-    private let maxGlobal = 6
-    private let maxPerServer = 2
+    private var waiters: [Waiter] = []
+    private var timeoutTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingWaiterIDs: Set<UUID> = []
+    private var cancelledWaiterIDs: Set<UUID> = []
+    private let maxGlobal: Int
+    private let maxPerServer: Int
+    private let waitTimeout: TimeInterval
+
+    init(maxGlobal: Int = 6, maxPerServer: Int = 2, waitTimeout: TimeInterval = 20) {
+        self.maxGlobal = max(1, maxGlobal)
+        self.maxPerServer = max(1, maxPerServer)
+        self.waitTimeout = max(0.1, waitTimeout)
+    }
 
     func acquire(serverID: UUID?) async throws {
-        let started = Date()
-        while !Task.isCancelled {
-            let serverCount = serverID.flatMap { perServer[$0] } ?? 0
-            if globalCount < maxGlobal, serverCount < maxPerServer {
-                globalCount += 1
-                if let serverID {
-                    perServer[serverID, default: 0] += 1
-                }
-                return
-            }
-            if Date().timeIntervalSince(started) > 20 {
-                throw ConnectionError.timeout
-            }
-            try await Task.sleep(for: .milliseconds(120))
+        let interval = PerformanceTrace.begin(.processQueueWait)
+        defer { PerformanceTrace.end(interval) }
+
+        try Task.checkCancellation()
+        if waiters.isEmpty, canAcquire(serverID: serverID) {
+            grant(serverID: serverID)
+            return
         }
-        throw ConnectionError.cancelled
+
+        let waiterID = UUID()
+        let timeout = waitTimeout
+        pendingWaiterIDs.insert(waiterID)
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, Error>) in
+                pendingWaiterIDs.remove(waiterID)
+                if cancelledWaiterIDs.remove(waiterID) != nil {
+                    continuation.resume(throwing: ConnectionError.cancelled)
+                    return
+                }
+                waiters.append(
+                    Waiter(id: waiterID, serverID: serverID, continuation: continuation)
+                )
+                timeoutTasks[waiterID] = Task { [weak self] in
+                    do {
+                        try await Task.sleep(for: .seconds(timeout))
+                    } catch {
+                        return
+                    }
+                    await self?.expire(waiterID: waiterID)
+                }
+                drainWaiters()
+            }
+        } onCancel: {
+            Task { await self.cancel(waiterID: waiterID) }
+        }
     }
 
     func release(serverID: UUID?) {
@@ -290,57 +337,136 @@ actor ConnectionLimiter {
                 perServer[serverID] = next
             }
         }
+        drainWaiters()
+    }
+
+    func waitingCount() -> Int {
+        waiters.count
+    }
+
+    private func canAcquire(serverID: UUID?) -> Bool {
+        let serverCount = serverID.flatMap { perServer[$0] } ?? 0
+        return globalCount < maxGlobal && serverCount < maxPerServer
+    }
+
+    private func grant(serverID: UUID?) {
+        globalCount += 1
+        if let serverID {
+            perServer[serverID, default: 0] += 1
+        }
+    }
+
+    private func drainWaiters() {
+        while let waiter = waiters.first, canAcquire(serverID: waiter.serverID) {
+            waiters.removeFirst()
+            timeoutTasks.removeValue(forKey: waiter.id)?.cancel()
+            grant(serverID: waiter.serverID)
+            waiter.continuation.resume()
+        }
+    }
+
+    private func cancel(waiterID: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == waiterID }) else {
+            if pendingWaiterIDs.contains(waiterID) {
+                cancelledWaiterIDs.insert(waiterID)
+            }
+            return
+        }
+        let waiter = waiters.remove(at: index)
+        timeoutTasks.removeValue(forKey: waiterID)?.cancel()
+        waiter.continuation.resume(throwing: ConnectionError.cancelled)
+        drainWaiters()
+    }
+
+    private func expire(waiterID: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == waiterID }) else { return }
+        let waiter = waiters.remove(at: index)
+        timeoutTasks[waiterID] = nil
+        waiter.continuation.resume(throwing: ConnectionError.timeout)
+        drainWaiters()
     }
 }
 
 actor ConnectionProcessController {
     static let shared = ConnectionProcessController()
 
-    private var processes: [UUID: Process] = [:]
+    private struct ActiveProcess {
+        let process: Process
+        var summary: ProcessRunSummary
+    }
+
+    private var processes: [UUID: ActiveProcess] = [:]
+    private var recentRuns: [ProcessRunSummary] = []
+    private var cancellationIntervals: [UUID: PerformanceInterval] = [:]
+    private var escalationTasks: [UUID: Task<Void, Never>] = [:]
+    private let limiter: ConnectionLimiter
+    private let terminationGrace: TimeInterval
+
+    init(
+        limiter: ConnectionLimiter = .shared,
+        terminationGrace: TimeInterval = 1
+    ) {
+        self.limiter = limiter
+        self.terminationGrace = max(0.1, terminationGrace)
+    }
 
     func run(_ request: ProcessRunRequest) async throws -> ProcessRunResult {
-        try Task.checkCancellation()
-        try await ConnectionLimiter.shared.acquire(serverID: request.serverID)
-        defer {
-            Task { await ConnectionLimiter.shared.release(serverID: request.serverID) }
+        let interval = PerformanceTrace.begin(.processRun)
+        defer { PerformanceTrace.end(interval) }
+        guard !Task.isCancelled else { throw ConnectionError.cancelled }
+        do {
+            try await limiter.acquire(serverID: request.serverID)
+        } catch is CancellationError {
+            throw ConnectionError.cancelled
         }
 
         let runID = UUID()
         let started = Date()
         DiagnosticLog.logger(for: request.module).debug(
-            "启动 \(request.executable, privacy: .public) 参数 \(request.arguments.count, privacy: .public) 个"
+            "启动子进程，参数 \(request.arguments.count, privacy: .public) 个"
         )
 
-        return try await withTaskCancellationHandler {
-            try await execute(request, runID: runID, started: started)
-        } onCancel: {
-            Task { await self.terminate(runID: runID, escalate: false) }
+        do {
+            let result = try await withTaskCancellationHandler {
+                try await execute(request, runID: runID, started: started)
+            } onCancel: {
+                Task { await self.requestTermination(runID: runID, reason: .cancelled) }
+            }
+            await limiter.release(serverID: request.serverID)
+            return result
+        } catch {
+            await limiter.release(serverID: request.serverID)
+            throw error
         }
     }
 
     func terminate(runID: UUID, escalate: Bool) {
-        guard let process = processes[runID], process.isRunning else {
-            processes[runID] = nil
-            return
-        }
-        process.terminate()
-        if escalate {
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-                if process.isRunning {
-                    kill(process.processIdentifier, SIGKILL)
-                }
-            }
-        }
+        requestTermination(runID: runID, reason: .cancelled)
+        _ = escalate
     }
 
     func terminateAll(for serverID: UUID? = nil) {
-        for (id, process) in processes {
-            if process.isRunning {
-                process.terminate()
-            }
-            processes[id] = nil
+        let runIDs = processes.compactMap { runID, active in
+            serverID == nil || active.summary.serverID == serverID ? runID : nil
         }
-        _ = serverID
+        for runID in runIDs {
+            requestTermination(runID: runID, reason: .scopedTermination)
+        }
+    }
+
+    func activeProcessSummaries() -> [ProcessRunSummary] {
+        processes.values
+            .map(\.summary)
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    func activeProcessCount(for serverID: UUID? = nil) -> Int {
+        guard let serverID else { return processes.count }
+        return processes.values.count { $0.summary.serverID == serverID }
+    }
+
+    func recentProcessSummaries() -> [ProcessRunSummary] {
+        recentRuns
     }
 
     private func execute(
@@ -364,59 +490,132 @@ actor ConnectionProcessController {
         } catch {
             throw ConnectionError.commandFailed(error.localizedDescription)
         }
-        processes[runID] = process
+        let processID = process.processIdentifier
+        let rawProcessGroupID = getpgid(processID)
+        let processGroupID = rawProcessGroupID == processID ? rawProcessGroupID : nil
+        processes[runID] = ActiveProcess(
+            process: process,
+            summary: ProcessRunSummary(
+                runID: runID,
+                serverID: request.serverID,
+                module: request.module,
+                processIdentifier: processID,
+                processGroupIdentifier: processGroupID,
+                startedAt: started,
+                terminationReason: .running
+            )
+        )
 
         if let stdin = request.stdin {
             try? inputPipe.fileHandleForWriting.write(contentsOf: stdin)
         }
         try? inputPipe.fileHandleForWriting.close()
 
+        let controller = self
         let outputTask = Task.detached(priority: .utility) {
             try Self.readCapped(
                 outputPipe.fileHandleForReading,
-                limit: request.maxOutputBytes
+                limit: request.maxOutputBytes,
+                onLimit: {
+                    Task {
+                        await controller.requestTermination(
+                            runID: runID,
+                            reason: .outputLimitExceeded
+                        )
+                    }
+                }
             )
         }
         let errorTask = Task.detached(priority: .utility) {
             try Self.readCapped(
                 errorPipe.fileHandleForReading,
-                limit: min(request.maxOutputBytes, 256_000)
+                limit: min(request.maxOutputBytes, 128_000),
+                onLimit: {
+                    Task {
+                        await controller.requestTermination(
+                            runID: runID,
+                            reason: .outputLimitExceeded
+                        )
+                    }
+                }
             )
         }
 
-        let timeoutTask = Task {
-            try await Task.sleep(for: .seconds(request.totalTimeout))
-            await self.terminate(runID: runID, escalate: true)
+        let timeoutTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(request.totalTimeout))
+            } catch {
+                return
+            }
+            await self?.requestTermination(runID: runID, reason: .timeout)
         }
 
         await waitForExit(process)
         timeoutTask.cancel()
-        processes[runID] = nil
+        if let cancellationInterval = cancellationIntervals.removeValue(forKey: runID) {
+            PerformanceTrace.end(cancellationInterval)
+        }
 
-        let output: Data
-        let errorData: Data
+        var output = Data()
+        var errorData = Data()
+        var readFailure: Error?
         do {
             output = try await outputTask.value
-            errorData = try await errorTask.value
-        } catch is CancellationError {
-            throw ConnectionError.cancelled
         } catch {
-            process.terminate()
-            throw error
+            readFailure = error
+        }
+        do {
+            errorData = try await errorTask.value
+        } catch {
+            if readFailure == nil {
+                readFailure = error
+            }
         }
 
         try? outputPipe.fileHandleForReading.close()
         try? errorPipe.fileHandleForReading.close()
 
-        if Task.isCancelled {
-            throw ConnectionError.cancelled
+        var terminationReason = processes[runID]?.summary.terminationReason ?? .exited
+        if terminationReason == .running {
+            terminationReason = .exited
         }
+        if (readFailure as? ConnectionError) == .outputLimitExceeded {
+            terminationReason = .outputLimitExceeded
+        } else if Task.isCancelled, terminationReason == .exited {
+            terminationReason = .cancelled
+        }
+        if var summary = processes[runID]?.summary {
+            summary.terminationReason = terminationReason
+            recentRuns.append(summary)
+            recentRuns = Array(recentRuns.suffix(100))
+        }
+        processes[runID] = nil
+        escalationTasks.removeValue(forKey: runID)?.cancel()
 
         let outputText = String(decoding: output, as: UTF8.self)
         let errorText = String(decoding: errorData, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let elapsed = Date().timeIntervalSince(started)
 
+        switch terminationReason {
+        case .timeout:
+            throw ConnectionError.timeout
+        case .outputLimitExceeded:
+            throw ConnectionError.outputLimitExceeded
+        case .cancelled, .scopedTermination:
+            throw ConnectionError.cancelled
+        case .running, .exited:
+            break
+        }
+        if let connectionError = readFailure as? ConnectionError {
+            throw connectionError
+        }
+        if readFailure is CancellationError || Task.isCancelled {
+            throw ConnectionError.cancelled
+        }
+        if let readFailure {
+            throw ConnectionError.commandFailed(readFailure.localizedDescription)
+        }
         if process.terminationStatus != 0 {
             throw ConnectionError.classify(
                 errorText + "\n" + outputText,
@@ -430,6 +629,43 @@ actor ConnectionProcessController {
             error: errorText,
             elapsed: elapsed
         )
+    }
+
+    private func requestTermination(runID: UUID, reason: ProcessTerminationReason) {
+        guard var active = processes[runID] else { return }
+        if active.summary.terminationReason == .running {
+            active.summary.terminationReason = reason
+            processes[runID] = active
+        }
+        if cancellationIntervals[runID] == nil {
+            cancellationIntervals[runID] = PerformanceTrace.begin(.processCancelToExit)
+        }
+        send(signal: SIGTERM, to: active)
+        guard escalationTasks[runID] == nil else { return }
+        let grace = terminationGrace
+        escalationTasks[runID] = Task.detached(priority: .utility) { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(grace))
+            } catch {
+                return
+            }
+            await self?.forceKill(runID: runID)
+        }
+    }
+
+    private func forceKill(runID: UUID) {
+        guard let active = processes[runID] else { return }
+        send(signal: SIGKILL, to: active)
+    }
+
+    private func send(signal: Int32, to active: ActiveProcess) {
+        if let groupID = active.summary.processGroupIdentifier,
+           kill(-groupID, signal) == 0 {
+            return
+        }
+        if active.process.isRunning {
+            _ = kill(active.summary.processIdentifier, signal)
+        }
     }
 
     private func waitForExit(_ process: Process) async {
@@ -450,17 +686,35 @@ actor ConnectionProcessController {
         }
     }
 
-    private static func readCapped(_ handle: FileHandle, limit: Int) throws -> Data {
-        let data = handle.readDataToEndOfFile()
-        if data.count > limit {
-            throw ConnectionError.outputLimitExceeded
+    private static func readCapped(
+        _ handle: FileHandle,
+        limit: Int,
+        chunkSize: Int = 32_768,
+        onLimit: @escaping @Sendable () -> Void
+    ) throws -> Data {
+        let resolvedLimit = max(0, limit)
+        let resolvedChunkSize = min(65_536, max(16_384, chunkSize))
+        var data = Data()
+        data.reserveCapacity(min(resolvedLimit, resolvedChunkSize * 2))
+        while true {
+            try Task.checkCancellation()
+            guard let chunk = try handle.read(upToCount: resolvedChunkSize), !chunk.isEmpty else {
+                return data
+            }
+            let remaining = max(0, resolvedLimit - data.count)
+            guard chunk.count <= remaining else {
+                onLimit()
+                throw ConnectionError.outputLimitExceeded
+            }
+            data.append(chunk)
         }
-        return data
     }
 }
 
 enum SSHConnectionTester {
     static func test(_ config: ServerConnectionConfig) async throws -> TimeInterval {
+        let interval = PerformanceTrace.begin(.sshHandshake)
+        defer { PerformanceTrace.end(interval) }
         let started = Date()
         let result = try await ConnectionProcessController.shared.run(
             ProcessRunRequest(

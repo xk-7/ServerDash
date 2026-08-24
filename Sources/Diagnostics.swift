@@ -31,6 +31,121 @@ enum DiagnosticLog {
     }
 }
 
+/// Fixed, privacy-reviewed performance markers for Instruments.
+///
+/// Operation names are deliberately closed over an enum. Callers cannot attach
+/// host names, addresses, user names, paths, commands, fingerprints, or secrets.
+enum PerformanceOperation: String, CaseIterable, Sendable {
+    case appLaunchToFirstFrame = "app.launch_to_first_frame"
+    case appLaunchToInteractive = "app.launch_to_interactive"
+    case databaseOpen = "database.open"
+    case monitorCollect = "monitor.collect"
+    case monitorParse = "monitor.parse"
+    case monitorPublish = "monitor.publish"
+    case monitorSchedulerDispatch = "monitor.scheduler_dispatch"
+    case monitorSchedulerCancel = "monitor.scheduler_cancel"
+    case hostKeyInspect = "hostkey.inspect"
+    case hostKeyScan = "hostkey.scan"
+    case sshHandshake = "ssh.handshake"
+    case sshRemoteCommand = "ssh.remote_command"
+    case processQueueWait = "process.queue_wait"
+    case processRun = "process.run"
+    case processCancelToExit = "process.cancel_to_exit"
+    case dashboardCardBodyUpdate = "dashboard.card_body_update"
+    case terminalOpen = "terminal.open"
+    case terminalInteractive = "terminal.interactive"
+    case terminalTabSwitch = "terminal.tab_switch"
+    case sftpList = "sftp.list"
+    case sftpTransfer = "sftp.transfer"
+    case sftpProgressPublish = "sftp.progress_publish"
+
+    fileprivate var signpostName: StaticString {
+        switch self {
+        case .appLaunchToFirstFrame: "app.launch_to_first_frame"
+        case .appLaunchToInteractive: "app.launch_to_interactive"
+        case .databaseOpen: "database.open"
+        case .monitorCollect: "monitor.collect"
+        case .monitorParse: "monitor.parse"
+        case .monitorPublish: "monitor.publish"
+        case .monitorSchedulerDispatch: "monitor.scheduler_dispatch"
+        case .monitorSchedulerCancel: "monitor.scheduler_cancel"
+        case .hostKeyInspect: "hostkey.inspect"
+        case .hostKeyScan: "hostkey.scan"
+        case .sshHandshake: "ssh.handshake"
+        case .sshRemoteCommand: "ssh.remote_command"
+        case .processQueueWait: "process.queue_wait"
+        case .processRun: "process.run"
+        case .processCancelToExit: "process.cancel_to_exit"
+        case .dashboardCardBodyUpdate: "dashboard.card_body_update"
+        case .terminalOpen: "terminal.open"
+        case .terminalInteractive: "terminal.interactive"
+        case .terminalTabSwitch: "terminal.tab_switch"
+        case .sftpList: "sftp.list"
+        case .sftpTransfer: "sftp.transfer"
+        case .sftpProgressPublish: "sftp.progress_publish"
+        }
+    }
+}
+
+struct PerformanceInterval {
+    fileprivate let operation: PerformanceOperation
+    fileprivate let state: OSSignpostIntervalState
+}
+
+enum PerformanceTrace {
+    private static let signposter = OSSignposter(
+        subsystem: "com.serverdash.app",
+        category: "Performance"
+    )
+
+    @discardableResult
+    static func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
+        let state = signposter.beginInterval(
+            operation.signpostName,
+            id: signposter.makeSignpostID()
+        )
+        return PerformanceInterval(operation: operation, state: state)
+    }
+
+    static func end(_ interval: PerformanceInterval) {
+        signposter.endInterval(interval.operation.signpostName, interval.state)
+    }
+
+    static func event(_ operation: PerformanceOperation) {
+        signposter.emitEvent(operation.signpostName)
+    }
+}
+
+@MainActor
+final class LaunchPerformanceTracker {
+    static let shared = LaunchPerformanceTracker()
+
+    private var firstFrame: PerformanceInterval?
+    private var interactive: PerformanceInterval?
+
+    private init() {
+        firstFrame = PerformanceTrace.begin(.appLaunchToFirstFrame)
+        interactive = PerformanceTrace.begin(.appLaunchToInteractive)
+    }
+
+    func start() {
+        // Accessing the singleton starts both intervals. This method makes that
+        // intent explicit at the application entry point.
+    }
+
+    func markFirstFrame() {
+        guard let firstFrame else { return }
+        PerformanceTrace.end(firstFrame)
+        self.firstFrame = nil
+    }
+
+    func markInteractive() {
+        guard let interactive else { return }
+        PerformanceTrace.end(interactive)
+        self.interactive = nil
+    }
+}
+
 enum DiagnosticRedactor {
     private static let secretPatterns: [NSRegularExpression] = {
         let raw = [
@@ -41,7 +156,7 @@ enum DiagnosticRedactor {
         return raw.compactMap { try? NSRegularExpression(pattern: $0) }
     }()
 
-    static func redact(_ text: String, hideIP: Bool = false) -> String {
+    static func redact(_ text: String, hideIP: Bool = true) -> String {
         var result = text
         for pattern in secretPatterns.dropLast() {
             result = pattern.stringByReplacingMatches(
@@ -84,7 +199,7 @@ struct DiagnosticEvent: Identifiable, Hashable, Sendable {
         self.level = level
         self.message = DiagnosticRedactor.redact(
             message,
-            hideIP: PrivacySettings.hideIPInformation
+            hideIP: true
         )
     }
 }
@@ -145,16 +260,13 @@ enum SSHDiagnostics {
         remoteOS: String? = nil
     ) -> String {
         let connectionError = error as? ConnectionError
-        let hideIP = PrivacySettings.hideIPInformation
-        let host = hideIP ? "[IP]" : config.host
+        _ = config
         return """
         App: ServerDash 0.1.0
         macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Remote OS: \(remoteOS ?? "未知")
-        Host: \(config.username)@\(host):\(config.port)
         Phase: \(connectionError?.phase.title ?? ConnectionPhase.failed.title)
         Code: \(connectionError?.code ?? "UNKNOWN")
-        Message: \(DiagnosticRedactor.redact(error.localizedDescription, hideIP: hideIP))
         """
     }
 }

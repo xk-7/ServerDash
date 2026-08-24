@@ -11,31 +11,6 @@ struct DashboardOverviewView: View {
     let onOpenTerminal: (ServerRecord) -> Void
     let onAdd: () -> Void
 
-    private var onlineCount: Int {
-        servers.filter { appState.status(for: $0) == .online }.count
-    }
-
-    private var offlineCount: Int {
-        servers.filter {
-            let status = appState.status(for: $0)
-            return status == .failed || status == .offline
-        }.count
-    }
-
-    private var refreshingCount: Int {
-        servers.filter { appState.isRefreshing($0) }.count
-    }
-
-    private var averageCPU: Double {
-        let online = servers.filter { appState.status(for: $0) == .online }
-        guard !online.isEmpty else { return 0 }
-        return online.reduce(0) { $0 + appState.snapshot(for: $1).cpuUsage } / Double(online.count)
-    }
-
-    private var refreshTaskID: String {
-        servers.map(\.id.uuidString).joined(separator: ",") + ":\(appState.refreshInterval)"
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -67,33 +42,10 @@ struct DashboardOverviewView: View {
                     .frame(maxWidth: .infinity, minHeight: 340)
                     .applePanel()
                 } else {
-                    AppleUnifiedPanel {
-                        HStack(spacing: 0) {
-                        DashboardSummaryCard(
-                            title: "服务器总数",
-                            value: "\(servers.count)",
-                            subtitle: "平均 CPU \(DisplayFormat.percent(averageCPU))",
-                            icon: "server.rack",
-                            tint: .appAccent
-                        )
-                        Divider().frame(height: 64)
-                        DashboardSummaryCard(
-                            title: "在线",
-                            value: "\(onlineCount)",
-                            subtitle: refreshingCount > 0 ? "\(refreshingCount) 台后台刷新" : "资源采集正常",
-                            icon: "checkmark.circle.fill",
-                            tint: .appLive
-                        )
-                        Divider().frame(height: 64)
-                        DashboardSummaryCard(
-                            title: "离线 / 异常",
-                            value: "\(offlineCount)",
-                            subtitle: offlineCount == 0 ? "所有服务器状态正常" : "请检查连接或认证",
-                            icon: "exclamationmark.triangle.fill",
-                            tint: offlineCount == 0 ? .secondary : .appError
-                        )
-                        }
-                    }
+                    DashboardFleetSummary(
+                        serverCount: servers.count,
+                        state: appState.fleetSummaryState
+                    )
 
                     LazyVGrid(
                         columns: [GridItem(.adaptive(minimum: 310), spacing: 14)],
@@ -103,6 +55,11 @@ struct DashboardOverviewView: View {
                         ForEach(servers) { server in
                             VPSSummaryCard(
                                 server: server,
+                                runtime: appState.runtime(for: server),
+                                refreshInterval: appState.refreshInterval,
+                                onVisibilityChange: { visible in
+                                    appState.setMonitorVisible(visible, serverID: server.id)
+                                },
                                 onSelect: { onSelect(server) },
                                 onOpenTerminal: { onOpenTerminal(server) }
                             )
@@ -116,23 +73,46 @@ struct DashboardOverviewView: View {
             .frame(maxWidth: 1100, alignment: .leading)
         }
         .scrollPosition(id: $scrollAnchor, anchor: .center)
-        .task(id: refreshTaskID) {
-            await monitorAllServers()
-        }
     }
+}
 
-    private func monitorAllServers() async {
-        guard !servers.isEmpty else { return }
-        await appState.refreshAll(servers)
+private struct DashboardFleetSummary: View {
+    let serverCount: Int
+    @ObservedObject var state: FleetMonitoringSummaryState
 
-        while !Task.isCancelled, appState.refreshInterval > 0 {
-            do {
-                try await Task.sleep(for: .seconds(appState.refreshInterval))
-            } catch {
-                return
+    private var summary: FleetMonitoringSummary { state.value }
+
+    var body: some View {
+        AppleUnifiedPanel {
+            HStack(spacing: 0) {
+                DashboardSummaryCard(
+                    title: "服务器总数",
+                    value: "\(serverCount)",
+                    subtitle: "平均 CPU \(DisplayFormat.percent(summary.averageCPU))",
+                    icon: "server.rack",
+                    tint: .appAccent
+                )
+                Divider().frame(height: 64)
+                DashboardSummaryCard(
+                    title: "在线",
+                    value: "\(summary.onlineCount)",
+                    subtitle: summary.refreshingCount > 0
+                        ? "\(summary.refreshingCount) 台后台刷新"
+                        : "资源采集正常",
+                    icon: "checkmark.circle.fill",
+                    tint: .appLive
+                )
+                Divider().frame(height: 64)
+                DashboardSummaryCard(
+                    title: "离线 / 异常",
+                    value: "\(summary.issueCount)",
+                    subtitle: summary.issueCount == 0
+                        ? "所有服务器状态正常"
+                        : "请检查连接或认证",
+                    icon: "exclamationmark.triangle.fill",
+                    tint: summary.issueCount == 0 ? .secondary : .appError
+                )
             }
-            guard !Task.isCancelled else { return }
-            await appState.refreshAll(servers)
         }
     }
 }
@@ -173,16 +153,18 @@ private struct DashboardSummaryCard: View {
 }
 
 private struct VPSSummaryCard: View {
-    @EnvironmentObject private var appState: AppState
-
     let server: ServerRecord
+    @ObservedObject var runtime: ServerRuntimeState
+    let refreshInterval: TimeInterval
+    let onVisibilityChange: (Bool) -> Void
     let onSelect: () -> Void
     let onOpenTerminal: () -> Void
 
-    private var snapshot: ServerSnapshot { appState.snapshot(for: server) }
-    private var status: ServerConnectionStatus { appState.status(for: server) }
+    private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
+    private var status: ServerConnectionStatus { runtime.renderState.status }
 
     var body: some View {
+        let _ = PerformanceTrace.event(.dashboardCardBodyUpdate)
         VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 8) {
                 StatusDot(status: status)
@@ -200,35 +182,56 @@ private struct VPSSummaryCard: View {
                 .accessibilityLabel("打开 \(server.name) SSH 终端")
             }
 
-            HStack(spacing: 12) {
-                DashboardMetadata(icon: "cpu", value: "\(snapshot.coreCount) 核")
-                DashboardMetadata(icon: "memorychip", value: DisplayFormat.bytes(snapshot.memoryTotalBytes))
-                DashboardMetadata(icon: "internaldrive", value: DisplayFormat.bytes(snapshot.diskTotalBytes))
-                Spacer(minLength: 0)
-                DashboardMetadata(icon: "clock", value: snapshot.uptime)
-            }
-
-            HStack(spacing: 18) {
-                CircularResourceGauge(title: "CPU", value: snapshot.cpuUsage, tint: .appAccent)
-                CircularResourceGauge(title: "内存", value: snapshot.memoryUsage, tint: .appLive)
-                VStack(spacing: 8) {
-                    DashboardResourceRow(
-                        title: "磁盘",
-                        leading: DisplayFormat.percent(snapshot.diskUsage),
-                        trailing: DisplayFormat.bytes(snapshot.diskUsedBytes)
-                    )
-                    DashboardResourceRow(
-                        title: "网络",
-                        leading: "↓ \(DisplayFormat.speed(snapshot.downloadBytesPerSecond))",
-                        trailing: "↑ \(DisplayFormat.speed(snapshot.uploadBytesPerSecond))"
-                    )
-                    DashboardResourceRow(
-                        title: "负载",
-                        leading: snapshot.load1.formatted(.number.precision(.fractionLength(2))),
-                        trailing: "\(snapshot.processCount) 进程"
-                    )
+            if runtime.renderState.hasSnapshot {
+                HStack(spacing: 12) {
+                    DashboardMetadata(icon: "cpu", value: "\(snapshot.coreCount) 核")
+                    DashboardMetadata(icon: "memorychip", value: DisplayFormat.bytes(snapshot.memoryTotalBytes))
+                    DashboardMetadata(icon: "internaldrive", value: DisplayFormat.bytes(snapshot.diskTotalBytes))
+                    Spacer(minLength: 0)
+                    DashboardMetadata(icon: "clock", value: snapshot.uptime)
                 }
-                .frame(maxWidth: .infinity)
+
+                HStack(spacing: 18) {
+                    CircularResourceGauge(title: "CPU", value: snapshot.cpuUsage, tint: .appAccent)
+                    CircularResourceGauge(title: "内存", value: snapshot.memoryUsage, tint: .appLive)
+                    VStack(spacing: 8) {
+                        DashboardResourceRow(
+                            title: "磁盘",
+                            leading: DisplayFormat.percent(snapshot.diskUsage),
+                            trailing: DisplayFormat.bytes(snapshot.diskUsedBytes)
+                        )
+                        DashboardResourceRow(
+                            title: "网络",
+                            leading: "↓ \(DisplayFormat.speed(snapshot.downloadBytesPerSecond))",
+                            trailing: "↑ \(DisplayFormat.speed(snapshot.uploadBytesPerSecond))"
+                        )
+                        DashboardResourceRow(
+                            title: "负载",
+                            leading: snapshot.load1.formatted(.number.precision(.fractionLength(2))),
+                            trailing: "\(snapshot.processCount) 进程"
+                        )
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            } else {
+                HStack(spacing: AppleDesign.Spacing.sm) {
+                    if runtime.renderState.isRefreshing || status == .connecting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "hourglass")
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                        Text("等待首次资源采集")
+                            .font(.callout.weight(.semibold))
+                        Text("采集完成前不会把空快照显示为真实的 0%。")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: 105)
             }
 
             HStack {
@@ -251,6 +254,12 @@ private struct VPSSummaryCard: View {
         .accessibilityAction {
             onSelect()
         }
+        .onAppear {
+            onVisibilityChange(true)
+        }
+        .onDisappear {
+            onVisibilityChange(false)
+        }
     }
 
     private var statusColor: Color {
@@ -263,10 +272,10 @@ private struct VPSSummaryCard: View {
     }
 
     private var footerText: String {
-        if let error = appState.errors[server.id] {
+        if let error = runtime.renderState.error {
             return error
         }
-        if appState.isStale(server) {
+        if runtime.renderState.isStale(refreshInterval: refreshInterval) {
             return "监控数据已过期"
         }
         if status == .unknown {
@@ -352,6 +361,7 @@ struct ServerDetailView: View {
     @EnvironmentObject private var appState: AppState
 
     let server: ServerRecord
+    @ObservedObject var runtime: ServerRuntimeState
     @Binding var mode: DetailMode
     let backTitle: String
     let onBack: () -> Void
@@ -359,13 +369,14 @@ struct ServerDetailView: View {
     let onDelete: () -> Void
     @State private var presentedOverlay: ServerDetailOverlay?
 
-    private var snapshot: ServerSnapshot { appState.snapshot(for: server) }
-    private var status: ServerConnectionStatus { appState.status(for: server) }
+    private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
+    private var status: ServerConnectionStatus { runtime.renderState.status }
 
     var body: some View {
         VStack(spacing: 0) {
             ServerDetailHeader(
                 server: server,
+                runtime: runtime,
                 status: status,
                 mode: $mode,
                 backTitle: backTitle,
@@ -379,7 +390,7 @@ struct ServerDetailView: View {
 
             switch mode {
             case .monitor:
-                ServerMonitorLayoutView(server: server)
+                ServerMonitorLayoutView(server: server, runtime: runtime)
             case .terminal:
                 TerminalWorkspaceView(server: server)
             case .sftp:
@@ -404,12 +415,12 @@ struct ServerDetailView: View {
                         )
                     case .diagnostics:
                         DiagnosticsPreviewView(
-                            text: appState.diagnostics[server.id] ?? "暂无诊断信息。",
+                            text: runtime.renderState.diagnostics ?? "暂无诊断信息。",
                             onDismiss: { self.presentedOverlay = nil }
                         ) {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(
-                                appState.diagnostics[server.id] ?? "",
+                                runtime.renderState.diagnostics ?? "",
                                 forType: .string
                             )
                         }
@@ -423,7 +434,7 @@ struct ServerDetailView: View {
     private var monitoringContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let error = appState.errors[server.id], status == .failed {
+                if let error = runtime.renderState.error, status == .failed {
                     HStack(spacing: 9) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(Color.appError)
@@ -477,7 +488,7 @@ struct ServerDetailView: View {
                     }
                 }
 
-                ResourceTrendCard(points: appState.history(for: server))
+                ResourceTrendCard(points: runtime.renderState.history)
                 SystemAndProcessesCard(snapshot: snapshot)
             }
             .padding(18)
@@ -495,6 +506,7 @@ private struct ServerDetailHeader: View {
     @EnvironmentObject private var appState: AppState
 
     let server: ServerRecord
+    @ObservedObject var runtime: ServerRuntimeState
     let status: ServerConnectionStatus
     @Binding var mode: DetailMode
     let backTitle: String
@@ -510,7 +522,7 @@ private struct ServerDetailHeader: View {
         if server.lastLatencyMS > 0 {
             parts.append("\(Int(server.lastLatencyMS)) ms")
         }
-        if appState.isStale(server) {
+        if runtime.renderState.isStale(refreshInterval: appState.refreshInterval) {
             parts.append("数据已过期")
         }
         return parts.joined(separator: " · ")
@@ -546,7 +558,7 @@ private struct ServerDetailHeader: View {
                 Label("刷新", systemImage: "arrow.clockwise")
             }
             Button("事件", systemImage: "list.bullet.rectangle", action: onEventLog)
-            if appState.diagnostics[server.id] != nil {
+            if runtime.renderState.diagnostics != nil {
                 Button("诊断", systemImage: "stethoscope", action: onDiagnostics)
             }
             Button {

@@ -218,6 +218,8 @@ enum SFTPService {
         config: ServerConnectionConfig,
         path: String
     ) async throws -> SFTPDirectoryListing {
+        let interval = PerformanceTrace.begin(.sftpList)
+        defer { PerformanceTrace.end(interval) }
         let output = try await run(
             config: config,
             commands: [
@@ -422,6 +424,8 @@ enum SFTPService {
         measure: @escaping @Sendable () async -> Int64,
         onProgress: (@Sendable (SFTPProgress) -> Void)?
     ) async throws {
+        let interval = PerformanceTrace.begin(.sftpTransfer)
+        defer { PerformanceTrace.end(interval) }
         let started = Date()
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
@@ -440,6 +444,7 @@ enum SFTPService {
                         let remaining = speed > 0
                             ? Double(max(0, totalBytes - transferred)) / speed
                             : 0
+                        PerformanceTrace.event(.sftpProgressPublish)
                         onProgress(
                             SFTPProgress(
                                 transferredBytes: transferred,
@@ -499,8 +504,14 @@ enum SFTPService {
                 serverID: config.id,
                 module: .sftp,
                 level: "error",
-                message: error.localizedDescription
+                message: "SFTP 命令失败（\(error.code)）"
             )
+            switch error {
+            case .hostKeyChanged, .hostKeyUntrusted:
+                throw error
+            default:
+                break
+            }
             throw SFTPError.commandFailed(error.localizedDescription)
         }
     }

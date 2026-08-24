@@ -328,8 +328,11 @@ enum SSHConnectionValidator {
         }
     }
 
-    static func inspect(_ config: ServerConnectionConfig) async throws -> HostTrustDecision {
-        try await TrustedHostStore.inspect(config)
+    static func inspect(
+        _ config: ServerConnectionConfig,
+        forceScan: Bool = false
+    ) async throws -> HostTrustDecision {
+        try await TrustedHostStore.inspect(config, forceScan: forceScan)
     }
 
     static func trust(_ probe: SSHHostKeyProbe, replacing: Bool = false) async throws {
@@ -638,6 +641,8 @@ enum SSHMonitoringService {
     }
 
     static func collect(_ config: ServerConnectionConfig) async throws -> ServerSnapshot {
+        let interval = PerformanceTrace.begin(.monitorCollect)
+        defer { PerformanceTrace.end(interval) }
         if await MonitoringCompatibilityRegistry.shared.requiresFallback(for: config.id) {
             let output = try await run(config, command: fallbackRemoteCommand)
             return try MonitoringResponseParser.parse(output)
@@ -657,6 +662,8 @@ enum SSHMonitoringService {
         _ config: ServerConnectionConfig,
         command: String
     ) async throws -> String {
+        let interval = PerformanceTrace.begin(.sshRemoteCommand)
+        defer { PerformanceTrace.end(interval) }
         let result = try await ConnectionProcessController.shared.run(
             ProcessRunRequest(
                 executable: "/usr/bin/ssh",
@@ -669,7 +676,7 @@ enum SSHMonitoringService {
                 environment: SSHSupport.environment(for: config),
                 connectTimeout: config.connectTimeout,
                 totalTimeout: 60,
-                maxOutputBytes: 2_000_000,
+                maxOutputBytes: 512_000,
                 serverID: config.id,
                 module: .monitoring,
                 host: config.host,
@@ -696,6 +703,8 @@ private actor MonitoringCompatibilityRegistry {
 
 enum MonitoringResponseParser {
     static func parse(_ output: String) throws -> ServerSnapshot {
+        let interval = PerformanceTrace.begin(.monitorParse)
+        defer { PerformanceTrace.end(interval) }
         var values: [String: String] = [:]
         var processes: [ProcessMetric] = []
         var cores: [CPUCoreMetric] = []

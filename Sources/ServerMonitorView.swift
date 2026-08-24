@@ -9,14 +9,15 @@ struct ServerMonitorLayoutView: View {
     @AppStorage("hideIPInformation") private var hideIPInformation = false
 
     let server: ServerRecord
+    @ObservedObject var runtime: ServerRuntimeState
 
     @State private var showingLayoutEditor = false
     @State private var presentedDetail: MonitorCardKind?
     @State private var copiedMarkdown = false
 
-    private var snapshot: ServerSnapshot { appState.snapshot(for: server) }
-    private var history: [MetricPoint] { appState.history(for: server) }
-    private var status: ServerConnectionStatus { appState.status(for: server) }
+    private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
+    private var history: [MetricPoint] { runtime.renderState.history }
+    private var status: ServerConnectionStatus { runtime.renderState.status }
     private var cards: [MonitorCardKind] {
         layoutStore.visibleCards(
             for: server.id,
@@ -30,7 +31,7 @@ struct ServerMonitorLayoutView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
                 monitorToolbar
-                if let error = appState.errors[server.id], status == .failed {
+                if let error = runtime.renderState.error, status == .failed {
                     errorBanner(error)
                 } else if server.verificationStatus == .monitorUnsupported {
                     Label("SSH 可用，但当前主机不支持完整监控。终端和 SFTP 仍可使用。", systemImage: "info.circle")
@@ -42,7 +43,26 @@ struct ServerMonitorLayoutView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if cards.isEmpty {
+                if !runtime.renderState.hasSnapshot {
+                    VStack(spacing: AppleDesign.Spacing.sm) {
+                        if runtime.renderState.isRefreshing || status == .connecting {
+                            ProgressView()
+                                .controlSize(.regular)
+                        } else {
+                            Image(systemName: "hourglass")
+                                .font(.system(size: 28, weight: .light))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("等待首次资源采集")
+                            .font(.headline)
+                        Text(firstSnapshotDescription)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 360)
+                    .applePanel()
+                } else if cards.isEmpty {
                     ContentUnavailableView {
                         Label("没有可见卡片", systemImage: "rectangle.grid.2x2")
                     } description: {
@@ -109,7 +129,11 @@ struct ServerMonitorLayoutView: View {
                     .font(.title2.weight(.bold))
                 Text(monitorStatusText)
                 .font(.caption)
-                .foregroundStyle(appState.isStale(server) ? Color.appWarning : .secondary)
+                .foregroundStyle(
+                    runtime.renderState.isStale(refreshInterval: appState.refreshInterval)
+                        ? Color.appWarning
+                        : .secondary
+                )
             }
             Spacer()
             if copiedMarkdown {
@@ -154,13 +178,26 @@ struct ServerMonitorLayoutView: View {
         if server.lastLatencyMS > 0 {
             parts.append("延迟 \(Int(server.lastLatencyMS)) ms")
         }
-        if let capabilities = appState.capabilities[server.id] {
+        if let capabilities = runtime.renderState.capabilities {
             parts.append(capabilities.summary)
         }
-        if appState.isStale(server) {
+        if runtime.renderState.isStale(refreshInterval: appState.refreshInterval) {
             parts.append("已过期")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private var firstSnapshotDescription: String {
+        if status == .failed {
+            return "首次采集未完成。请检查上方错误后重试；空快照不会显示为资源读数。"
+        }
+        if server.verificationStatus == .monitorUnsupported {
+            return "当前主机不支持完整监控，终端和 SFTP 仍可使用。"
+        }
+        if !server.enableDashboardMonitor {
+            return "此服务器未启用自动监控，可使用上方刷新操作手动采集。"
+        }
+        return "正在准备监控数据，完成前不会显示占位的 0% 指标。"
     }
 
     @ViewBuilder

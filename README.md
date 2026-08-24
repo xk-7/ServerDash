@@ -15,7 +15,8 @@ ServerDash is a native macOS monitoring, SSH terminal, and SFTP client for Linux
 - Docker version, container states, images, and runtime details.
 - Reorderable and hideable monitoring cards with automatic capability-based visibility.
 - Capability probing, SSH latency, last-success timestamps, data age, and stale-data indicators.
-- Non-overlapping collection per server with configurable 1–60 second refresh intervals or manual mode.
+- A single bounded monitoring coordinator with per-server deduplication, priority scheduling, capped retry backoff, low-power behavior, and configurable 1–60 second refresh intervals or manual mode.
+- Independent per-server runtime state, incremental fleet summaries, explicit first-snapshot waiting UI, and preservation of the last successful data after a collection failure.
 
 Primary targets are Ubuntu LTS, Debian Stable, AlmaLinux, and Rocky Linux. Alpine and BusyBox-based environments have limited support.
 
@@ -26,6 +27,7 @@ Primary targets are Ubuntu LTS, Debian Stable, AlmaLinux, and Rocky Linux. Alpin
 - Private keys can reference external files or be imported into macOS Keychain.
 - Passwords, private-key contents, and passphrases are never stored in SwiftData or placed on command lines.
 - App-specific `known_hosts` with first-use fingerprint confirmation, changed-key comparison, and trusted-host management.
+- Trusted hosts use a steady-state `known_hosts` fast path; `ssh-keyscan` is limited to first use, explicit revalidation, and recovery from a host-key error.
 - Server profiles can be saved offline, while SSH tests report results independently.
 
 ### Persistent Multi-Session Terminal
@@ -46,6 +48,14 @@ Primary targets are Ubuntu LTS, Debian Stable, AlmaLinux, and Rocky Linux. Alpin
 - Conflict handling for overwrite, skip, or automatic rename.
 - Supports Chinese characters, spaces, special-character paths, and per-server default directories.
 
+### Performance and Process Lifecycle
+
+- stdout and stderr are consumed in bounded 32 KiB chunks; output-limit, timeout, cancellation, and natural exit remain distinct outcomes.
+- Cancellation targets the owned process group, escalates from TERM to KILL, and can be scoped to one server without affecting another server's work.
+- Monitoring capacity uses continuation-backed FIFO waiters instead of polling and refills immediately when a slot becomes available.
+- The central scheduler prioritizes manual, selected, and visible-server work, rate-limits new starts, staggers retries, and suspends monitoring across sleep or network loss.
+- Fixed-name, metadata-free OS Signposts cover launch, database, monitoring, host trust, subprocess, dashboard, terminal, and SFTP boundaries.
+
 ### Data and Diagnostics
 
 - SwiftData persistence for servers, identities, SSH key references, snippets, trusted hosts, and terminal history.
@@ -53,6 +63,7 @@ Primary targets are Ubuntu LTS, Debian Stable, AlmaLinux, and Rocky Linux. Alpin
 - OSLog categories for App, Data, SSH, Monitoring, Terminal, and SFTP.
 - Per-server event logs and previewable, copyable, redacted SSH diagnostics.
 - IP hiding applies to the UI, Markdown exports, and diagnostics. Disabling location collection prevents remote requests to `ipinfo.io`.
+- Performance markers and touched diagnostic paths do not record hosts, users, paths, commands, fingerprints, or credentials.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete update history.
 
@@ -63,6 +74,12 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete update history.
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
 The project uses the local `Vendor/SwiftTerm` package and does not download SwiftTerm separately.
+
+## Development Status
+
+P0 performance hardening is being delivered in independently verifiable batches. Measurement, subprocess lifecycle, trusted-host coordination, the central monitoring scheduler, and per-server RuntimeState have passed a Universal Release build and the complete 77-test suite. Instruments and real-server performance thresholds are intentionally tracked as pending rather than reported as complete.
+
+See [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining real-device checks.
 
 ## Build and Run
 
@@ -93,6 +110,20 @@ xcodebuild \
   test
 ```
 
+Run only the application test bundle while iterating:
+
+```bash
+xcodebuild \
+  -project ServerDash.xcodeproj \
+  -scheme ServerDash \
+  -destination 'platform=macOS' \
+  -skipPackagePluginValidation \
+  -only-testing:ServerDashTests \
+  test
+```
+
+The checked-in Xcode project is generated from `project.yml`. Run `xcodegen generate` after changing the project definition; ordinary source-only changes do not require regeneration.
+
 Create an ad-hoc signed test DMG (no Apple Developer account required):
 
 ```bash
@@ -106,6 +137,7 @@ The DMG is written to `dist/`. On another Mac, open the app with Control-click �
 ```text
 Sources/                    SwiftUI app, connection services, and data models
 Tests/                      Unit and foundation integration tests
+Docs/                       Design reviews and P0 implementation/verification status
 Resources/TerminalThemes/   Local terminal themes and licensing notes
 Vendor/SwiftTerm/           Pinned and extended SwiftTerm 1.11.2
 project.yml                 XcodeGen project definition

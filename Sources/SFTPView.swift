@@ -368,7 +368,13 @@ struct SFTPBrowserView: View {
         busyMessage = "正在读取 \(path)"
         errorMessage = nil
         do {
-            let listing = try await SFTPService.list(config: connectionConfig, path: path)
+            let config = connectionConfig
+            let listing = try await appState.performTrustedConnection(
+                config,
+                source: .sftp
+            ) {
+                try await SFTPService.list(config: config, path: path)
+            }
             currentPath = listing.path
             pathText = listing.path
             items = listing.items
@@ -381,7 +387,7 @@ struct SFTPBrowserView: View {
                 serverID: server.id,
                 module: .sftp,
                 level: "error",
-                message: error.localizedDescription
+                message: "SFTP 目录读取失败"
             )
         }
         busyMessage = nil
@@ -409,16 +415,19 @@ struct SFTPBrowserView: View {
         busyMessage = urls.count == 1 ? "正在上传 \(urls[0].lastPathComponent)" : "正在上传 \(urls.count) 个项目"
         transferTask = Task {
             do {
-                try await SFTPService.upload(
-                    localURLs: urls,
-                    to: currentPath,
-                    config: connectionConfig,
-                    policy: policy,
-                    existingNames: Set(items.map(\.name))
-                ) { update in
-                    Task { @MainActor in
-                        progress = update
-                        busyMessage = update.message
+                let config = connectionConfig
+                try await appState.performTrustedConnection(config, source: .sftp) {
+                    try await SFTPService.upload(
+                        localURLs: urls,
+                        to: currentPath,
+                        config: config,
+                        policy: policy,
+                        existingNames: Set(items.map(\.name))
+                    ) { update in
+                        Task { @MainActor in
+                            progress = update
+                            busyMessage = update.message
+                        }
                     }
                 }
                 busyMessage = nil
@@ -469,15 +478,18 @@ struct SFTPBrowserView: View {
         busyMessage = "正在下载 \(item.name)"
         transferTask = Task {
             do {
-                try await SFTPService.download(
-                    item: item,
-                    to: destination,
-                    config: connectionConfig,
-                    policy: policy
-                ) { update in
-                    Task { @MainActor in
-                        progress = update
-                        busyMessage = update.message
+                let config = connectionConfig
+                try await appState.performTrustedConnection(config, source: .sftp) {
+                    try await SFTPService.download(
+                        item: item,
+                        to: destination,
+                        config: config,
+                        policy: policy
+                    ) { update in
+                        Task { @MainActor in
+                            progress = update
+                            busyMessage = update.message
+                        }
                     }
                 }
                 statusMessage = "已下载到 \(destination.path)"
@@ -567,7 +579,10 @@ struct SFTPBrowserView: View {
         busyMessage = message
         transferTask = Task {
             do {
-                try await work()
+                let config = connectionConfig
+                try await appState.performTrustedConnection(config, source: .sftp) {
+                    try await work()
+                }
                 busyMessage = nil
                 statusMessage = success()
                 await loadDirectory(currentPath)

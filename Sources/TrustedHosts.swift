@@ -111,6 +111,8 @@ enum TrustedHostStore {
     }
 
     static func scan(host: String, port: Int, preferredAlgorithm: String? = nil) throws -> SSHHostKeyProbe {
+        let interval = PerformanceTrace.begin(.hostKeyScan)
+        defer { PerformanceTrace.end(interval) }
         let scan = run(
             "/usr/bin/ssh-keyscan",
             ["-T", "8", "-p", String(port), host]
@@ -145,13 +147,36 @@ enum TrustedHostStore {
         )
     }
 
-    static func inspect(_ config: ServerConnectionConfig) async throws -> HostTrustDecision {
-        try await Task.detached(priority: .utility) {
+    static func inspect(
+        _ config: ServerConnectionConfig,
+        forceScan: Bool = false
+    ) async throws -> HostTrustDecision {
+        try await inspect(config, forceScan: forceScan) { host, port, preferredAlgorithm in
+            try scan(host: host, port: port, preferredAlgorithm: preferredAlgorithm)
+        }
+    }
+
+    static func inspect(
+        _ config: ServerConnectionConfig,
+        forceScan: Bool,
+        scanProvider: @escaping @Sendable (String, Int, String?) throws -> SSHHostKeyProbe
+    ) async throws -> HostTrustDecision {
+        let interval = PerformanceTrace.begin(.hostKeyInspect)
+        defer { PerformanceTrace.end(interval) }
+        return try await Task.detached(priority: .utility) {
             let stored = existingKeys(host: config.host, port: config.port)
-            let probe = try scan(
+            if !forceScan, let probe = probeFromStoredKeys(
+                stored,
                 host: config.host,
-                port: config.port,
-                preferredAlgorithm: stored.first?.algorithm
+                port: config.port
+            ) {
+                return HostTrustDecision.trusted(probe)
+            }
+
+            let probe = try scanProvider(
+                config.host,
+                config.port,
+                stored.first?.algorithm
             )
             if stored.isEmpty {
                 if allKeys().contains(where: { $0.fingerprint == probe.fingerprint }) {
@@ -168,6 +193,22 @@ enum TrustedHostStore {
             }
             return .changed(oldFingerprint: stored[0].fingerprint, probe: probe)
         }.value
+    }
+
+    private static func probeFromStoredKeys(
+        _ stored: [(algorithm: String, fingerprint: String, line: String)],
+        host: String,
+        port: Int
+    ) -> SSHHostKeyProbe? {
+        guard let primary = stored.first else { return nil }
+        return SSHHostKeyProbe(
+            host: host,
+            port: port,
+            algorithm: algorithmDisplayName(primary.algorithm),
+            fingerprint: primary.fingerprint,
+            keyLine: primary.line,
+            additionalKeyLines: stored.dropFirst().map(\.line)
+        )
     }
 
     static func rawAlgorithm(from probe: SSHHostKeyProbe) -> String {
@@ -287,4 +328,184 @@ enum HostTrustDecision: Sendable {
     case trusted(SSHHostKeyProbe)
     case unknown(SSHHostKeyProbe)
     case changed(oldFingerprint: String, probe: SSHHostKeyProbe)
+}
+
+enum HostTrustSource: String, Sendable {
+    case monitoring
+    case terminal
+    case sftp
+    case sshTest
+
+    var title: String {
+        switch self {
+        case .monitoring: "监控"
+        case .terminal: "终端"
+        case .sftp: "SFTP"
+        case .sshTest: "SSH 测试"
+        }
+    }
+}
+
+struct HostTrustRequest: Identifiable, Sendable {
+    let id: UUID
+    let config: ServerConnectionConfig
+    let source: HostTrustSource
+    let probe: SSHHostKeyProbe
+    let replacing: Bool
+    let oldFingerprint: String?
+    let createdAt: Date
+
+    var serverID: UUID { config.id }
+}
+
+@MainActor
+final class HostTrustCoordinator {
+    typealias Inspector = @Sendable (
+        _ config: ServerConnectionConfig,
+        _ forceScan: Bool
+    ) async throws -> HostTrustDecision
+    typealias Truster = @Sendable (
+        _ probe: SSHHostKeyProbe,
+        _ replacing: Bool
+    ) async throws -> Void
+
+    private struct QueuedRequest {
+        let request: HostTrustRequest
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private(set) var current: HostTrustRequest?
+    var currentDidChange: ((HostTrustRequest?) -> Void)?
+
+    private var queue: [QueuedRequest] = []
+    private let inspector: Inspector
+    private let truster: Truster
+
+    init(
+        inspector: @escaping Inspector = { config, forceScan in
+            try await SSHConnectionValidator.inspect(config, forceScan: forceScan)
+        },
+        truster: @escaping Truster = { probe, replacing in
+            try await SSHConnectionValidator.trust(probe, replacing: replacing)
+        }
+    ) {
+        self.inspector = inspector
+        self.truster = truster
+    }
+
+    var queuedCount: Int { queue.count }
+
+    func authorize(
+        _ config: ServerConnectionConfig,
+        source: HostTrustSource,
+        forceScan: Bool = false
+    ) async throws {
+        try Task.checkCancellation()
+        switch try await inspector(config, forceScan) {
+        case .trusted(let probe):
+            if !TrustedHostStore.hasUsableHostName(host: config.host, port: config.port) {
+                try await truster(probe, false)
+            }
+        case .unknown(let probe):
+            try await enqueue(
+                config: config,
+                source: source,
+                probe: probe,
+                replacing: false,
+                oldFingerprint: nil
+            )
+        case .changed(let oldFingerprint, let probe):
+            try await enqueue(
+                config: config,
+                source: source,
+                probe: probe,
+                replacing: true,
+                oldFingerprint: oldFingerprint
+            )
+        }
+    }
+
+    func accept(_ requestID: UUID) async throws -> SSHHostKeyProbe? {
+        guard queue.first?.request.id == requestID else { return nil }
+        let item = queue.removeFirst()
+        do {
+            try await truster(item.request.probe, item.request.replacing)
+            item.continuation.resume()
+            resumeAlreadyTrustedRequests(matching: item.request.probe)
+            publishNext()
+            return item.request.probe
+        } catch {
+            item.continuation.resume(throwing: error)
+            publishNext()
+            throw error
+        }
+    }
+
+    func reject(_ requestID: UUID) {
+        cancel(requestID)
+    }
+
+    private func enqueue(
+        config: ServerConnectionConfig,
+        source: HostTrustSource,
+        probe: SSHHostKeyProbe,
+        replacing: Bool,
+        oldFingerprint: String?
+    ) async throws {
+        let request = HostTrustRequest(
+            id: UUID(),
+            config: config,
+            source: source,
+            probe: probe,
+            replacing: replacing,
+            oldFingerprint: oldFingerprint,
+            createdAt: .now
+        )
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: ConnectionError.cancelled)
+                    return
+                }
+                queue.append(QueuedRequest(request: request, continuation: continuation))
+                if queue.count == 1 {
+                    publishNext()
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancel(request.id)
+            }
+        }
+    }
+
+    private func cancel(_ requestID: UUID) {
+        guard let index = queue.firstIndex(where: { $0.request.id == requestID }) else { return }
+        let wasCurrent = index == queue.startIndex
+        let item = queue.remove(at: index)
+        item.continuation.resume(throwing: ConnectionError.cancelled)
+        if wasCurrent {
+            publishNext()
+        }
+    }
+
+    private func resumeAlreadyTrustedRequests(matching acceptedProbe: SSHHostKeyProbe) {
+        var retained: [QueuedRequest] = []
+        for item in queue {
+            let request = item.request
+            if request.config.host == acceptedProbe.host,
+               request.config.port == acceptedProbe.port,
+               request.probe.fingerprint == acceptedProbe.fingerprint {
+                item.continuation.resume()
+            } else {
+                retained.append(item)
+            }
+        }
+        queue = retained
+    }
+
+    private func publishNext() {
+        current = queue.first?.request
+        currentDidChange?(current)
+    }
 }

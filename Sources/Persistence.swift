@@ -84,13 +84,15 @@ final class PersistenceSession: ObservableObject {
     }
 
     func open() {
+        let interval = PerformanceTrace.begin(.databaseOpen)
+        defer { PerformanceTrace.end(interval) }
         do {
             container = try PersistenceController.makeContainer()
             openError = nil
         } catch {
             container = nil
             openError = error
-            DiagnosticLog.logger(for: .data).error("打开数据库失败：\(error.localizedDescription, privacy: .public)")
+            DiagnosticLog.logger(for: .data).error("打开数据库失败")
         }
     }
 

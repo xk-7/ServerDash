@@ -45,6 +45,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     @Published var status: TerminalConnectionStatus = .connecting
     @Published var lastError: String?
     @Published var appearanceProfile: TerminalAppearanceProfile
+    var onHostKeyFailure: ((UUID) -> Void)?
 
     var session: TerminalSession {
         TerminalSession(
@@ -88,6 +89,10 @@ final class TerminalSessionController: ObservableObject, Identifiable {
                 level: "warn",
                 message: self.lastError ?? "终端已断开"
             )
+        }
+        hostView.onHostKeyFailure = { [weak self] in
+            guard let self else { return }
+            self.onHostKeyFailure?(self.id)
         }
     }
 
@@ -161,12 +166,17 @@ final class TerminalSessionRegistry: ObservableObject {
     func open(
         for server: ServerRecord,
         forceNew: Bool,
-        config: ServerConnectionConfig? = nil
+        config: ServerConnectionConfig? = nil,
+        onHostKeyFailure: ((UUID) -> Void)? = nil
     ) -> TerminalSessionController {
+        let interval = PerformanceTrace.begin(.terminalOpen)
+        defer { PerformanceTrace.end(interval) }
         if !forceNew, let existing = controllers.first(where: { $0.serverID == server.id }) {
+            existing.onHostKeyFailure = onHostKeyFailure
             return existing
         }
         let controller = TerminalSessionController(server: server, config: config)
+        controller.onHostKeyFailure = onHostKeyFailure
         controllers.append(controller)
         controller.start()
         return controller
@@ -197,10 +207,52 @@ final class TerminalSessionRegistry: ObservableObject {
 
 final class ServerDashTerminalView: LocalProcessTerminalView {
     var onTerminated: ((Int32?) -> Void)?
+    var onHostKeyFailure: (() -> Void)?
+    private var hostKeyFailureDetector = TerminalHostKeyFailureDetector()
 
     override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
         super.processTerminated(source, exitCode: exitCode)
         onTerminated?(exitCode)
+    }
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        super.dataReceived(slice: slice)
+        if hostKeyFailureDetector.ingest(slice) {
+            onHostKeyFailure?()
+        }
+    }
+
+    func resetHostKeyFailureDetection() {
+        hostKeyFailureDetector.reset()
+    }
+}
+
+struct TerminalHostKeyFailureDetector {
+    private static let maximumTailBytes = 4_096
+    private var tail = Data()
+    private var reported = false
+
+    mutating func ingest(_ bytes: ArraySlice<UInt8>) -> Bool {
+        guard !reported else { return false }
+        tail.append(contentsOf: bytes)
+        if tail.count > Self.maximumTailBytes {
+            tail.removeFirst(tail.count - Self.maximumTailBytes)
+        }
+        let text = String(decoding: tail, as: UTF8.self).lowercased()
+        guard text.contains("remote host identification has changed") ||
+                text.contains("offending ed25519 key") ||
+                text.contains("offending ecdsa key") ||
+                text.contains("offending rsa key") else {
+            return false
+        }
+        reported = true
+        tail.removeAll(keepingCapacity: false)
+        return true
+    }
+
+    mutating func reset() {
+        tail.removeAll(keepingCapacity: false)
+        reported = false
     }
 }
 
@@ -212,6 +264,7 @@ final class TerminalHostView: NSView {
     private var commandObserver: NSObjectProtocol?
     private var appearanceProfile: TerminalAppearanceProfile
     var onTerminated: ((Int32?) -> Void)?
+    var onHostKeyFailure: (() -> Void)?
 
     init(
         sessionID: UUID,
@@ -226,6 +279,9 @@ final class TerminalHostView: NSView {
         terminalView.autoresizingMask = [.width, .height]
         terminalView.onTerminated = { [weak self] code in
             self?.onTerminated?(code)
+        }
+        terminalView.onHostKeyFailure = { [weak self] in
+            self?.onHostKeyFailure?()
         }
         addSubview(terminalView)
         applyAppearance(
@@ -320,6 +376,7 @@ final class TerminalHostView: NSView {
     }
 
     private func startSSH() {
+        terminalView.resetHostKeyFailureDetection()
         let arguments = SSHSupport.arguments(
             for: config,
             strictHostChecking: "yes"

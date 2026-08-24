@@ -182,7 +182,7 @@ struct ContentView: View {
                         serverID: server.id,
                         module: .data,
                         level: "error",
-                        message: "删除服务器失败：\(error.localizedDescription)"
+                        message: "删除服务器失败"
                     )
                 }
                 serverPendingDeletion = nil
@@ -193,6 +193,7 @@ struct ContentView: View {
         .task {
             synchronizeIdentityConnections()
             appState.bootstrap(servers: servers, context: modelContext)
+            LaunchPerformanceTracker.shared.markInteractive()
         }
         .onChange(of: servers.count) {
             appState.bootstrap(servers: servers, context: modelContext)
@@ -233,16 +234,25 @@ struct ContentView: View {
         .alert(
             appState.pendingTrust?.replacing == true ? "主机密钥已变化" : "确认 SSH 主机指纹",
             isPresented: Binding(
-                get: { appState.pendingTrust != nil },
-                set: { if !$0 { appState.pendingTrust = nil } }
+                get: {
+                    appState.pendingTrust != nil &&
+                    !showingNewServer &&
+                    editingServer == nil
+                },
+                set: { _ in }
             )
         ) {
-            Button("取消", role: .cancel) { appState.pendingTrust = nil }
+            Button("取消", role: .cancel) {
+                if let requestID = appState.pendingTrust?.id {
+                    appState.cancelTrust(requestID)
+                }
+            }
             Button(appState.pendingTrust?.replacing == true ? "替换指纹" : "信任") {
                 if let prompt = appState.pendingTrust {
                     Task {
-                        await appState.resolveTrust(prompt.probe, replacing: prompt.replacing)
-                        TrustedHostCatalog.upsert(probe: prompt.probe, in: modelContext)
+                        if let probe = await appState.resolveTrust(prompt.id) {
+                            TrustedHostCatalog.upsert(probe: probe, in: modelContext)
+                        }
                     }
                 }
             }
@@ -256,11 +266,11 @@ struct ContentView: View {
         }
     }
 
-    private func trustMessage(_ prompt: HostTrustPrompt) -> String {
+    private func trustMessage(_ prompt: HostTrustRequest) -> String {
         if prompt.replacing {
-            return "旧指纹：\(prompt.oldFingerprint ?? "未知")\n新指纹：\(prompt.probe.fingerprint)\n替换前请确认这是你预期的主机。"
+            return "来源：\(prompt.source.title)\n旧指纹：\(prompt.oldFingerprint ?? "未知")\n新指纹：\(prompt.probe.fingerprint)\n替换前请确认这是你预期的主机。"
         }
-        return "\(prompt.probe.host):\(prompt.probe.port)\n\(prompt.probe.algorithm) \(prompt.probe.fingerprint)"
+        return "来源：\(prompt.source.title)\n\(prompt.probe.host):\(prompt.probe.port)\n\(prompt.probe.algorithm) \(prompt.probe.fingerprint)"
     }
 
     @ViewBuilder
@@ -269,6 +279,7 @@ struct ContentView: View {
            case .server(_, let origin, _) = route {
             ServerDetailView(
                 server: selectedServer,
+                runtime: appState.runtime(for: selectedServer),
                 mode: detailModeBinding,
                 backTitle: origin.title,
                 onBack: returnToOrigin,

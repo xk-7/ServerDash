@@ -15,7 +15,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - Docker 版本、容器状态、镜像与运行详情。
 - 可排序、可隐藏的监控卡片；不可用能力自动隐藏。
 - 能力探测、SSH 延迟、最后成功时间、数据年龄和过期提示。
-- 同一服务器不会重叠采集，刷新间隔支持 1–60 秒或关闭。
+- 唯一中央监控调度器负责每服务器去重、优先级、封顶退避、低电量策略，以及 1–60 秒自动刷新或手动模式。
+- 每服务器独立运行时状态、增量舰队汇总、首次快照等待界面；采集失败后保留最后成功数据。
 
 当前主要支持 Ubuntu LTS、Debian Stable、AlmaLinux 和 Rocky Linux；Alpine/BusyBox 环境属于有限支持。
 
@@ -26,6 +27,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 私钥可引用外部文件，也可导入 macOS Keychain。
 - 密码、私钥内容和 Passphrase 不写入 SwiftData 数据库或命令行。
 - 应用专属 `known_hosts`，支持首次指纹确认、密钥变化对比和可信主机管理。
+- 已信任主机走 `known_hosts` 稳态快路径；只有首次使用、显式复核或主机密钥错误恢复时才执行 `ssh-keyscan`。
 - 服务器可离线保存；SSH 测试结果使用独立弹窗反馈。
 
 ### 多会话终端
@@ -46,6 +48,14 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 同名目标支持覆盖、跳过或自动重命名。
 - 支持中文、空格和特殊字符路径，以及服务器默认进入目录。
 
+### 性能与进程生命周期
+
+- stdout/stderr 以受限的 32 KiB 分块消费，输出超限、超时、用户取消和自然退出保持不同结果语义。
+- 取消针对应用拥有的进程组执行 TERM → KILL 升级，也可以只终止一台服务器的工作而不影响其他服务器。
+- 监控连接容量使用 continuation/FIFO 等待队列，不再轮询；任一槽位释放后立即补位。
+- 中央调度器优先处理手动、选中和可见服务器，限制新连接启动速率，错峰重试，并在睡眠或断网时暂停监控。
+- 固定名称且无运行时元数据的 OS Signpost 覆盖启动、数据库、监控、主机信任、子进程、仪表盘、终端和 SFTP 边界。
+
 ### 数据与诊断
 
 - SwiftData 持久化服务器、身份、SSH 密钥引用、代码片段、可信主机和终端历史。
@@ -53,6 +63,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - OSLog 按 App、Data、SSH、Monitoring、Terminal、SFTP 分类。
 - 每台服务器独立事件日志及可复制、可预览的脱敏 SSH Diagnostics。
 - 隐藏 IP 会覆盖界面、Markdown 和诊断；停止位置采集后服务器不再请求 `ipinfo.io`。
+- 性能标记及本轮涉及的诊断路径不记录主机、用户名、路径、命令、指纹或凭据。
 
 完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -63,6 +74,12 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
 项目使用仓库内的 `Vendor/SwiftTerm` 本地 package，不需要单独下载 SwiftTerm。
+
+## 开发与验证状态
+
+P0 性能加固按可独立验证的小批次实施。性能测量、子进程生命周期、可信主机协调、中央监控调度器和每服务器 RuntimeState 已通过 Universal Release 构建及完整的 77 项测试。依赖 Instruments 或真实服务器的性能阈值继续明确标记为待验证，不会当作已经达标。
+
+需求到代码的对应关系、各批次结果、验收覆盖和待实机项目见 [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md)。
 
 ## 运行
 
@@ -93,6 +110,20 @@ xcodebuild \
   test
 ```
 
+开发过程中只运行应用测试 Bundle：
+
+```bash
+xcodebuild \
+  -project ServerDash.xcodeproj \
+  -scheme ServerDash \
+  -destination 'platform=macOS' \
+  -skipPackagePluginValidation \
+  -only-testing:ServerDashTests \
+  test
+```
+
+仓库中的 Xcode 工程由 `project.yml` 生成。修改工程定义后运行 `xcodegen generate`；普通源码修改不需要重新生成。
+
 生成无需 Apple Developer 账号的 Ad-hoc 测试 DMG：
 
 ```bash
@@ -106,6 +137,7 @@ DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 
 ```text
 Sources/                    SwiftUI 应用、连接服务和数据模型
 Tests/                      单元与基础集成测试
+Docs/                       设计审查及 P0 实施/验证状态
 Resources/TerminalThemes/   本地终端主题与许可证说明
 Vendor/SwiftTerm/           固定并扩展的 SwiftTerm 1.11.2
 project.yml                 XcodeGen 工程定义

@@ -26,8 +26,6 @@ struct ServerEditorView: View {
     @State private var notes: String
     @State private var errorMessage: String?
     @State private var isValidating = false
-    @State private var pendingHostKey: SSHHostKeyProbe?
-    @State private var pendingHostKeyReplacing = false
     @State private var pendingAction: EditorAction?
     @State private var enableDashboardMonitor = true
     @State private var defaultSFTPPath = "."
@@ -176,35 +174,30 @@ struct ServerEditorView: View {
             applySelectedIdentity()
         }
         .alert(
-            "确认 SSH 主机指纹",
+            appState.pendingTrust?.replacing == true ? "主机密钥已变化" : "确认 SSH 主机指纹",
             isPresented: Binding(
-                get: { pendingHostKey != nil },
-                set: {
-                    if !$0 {
-                        pendingHostKey = nil
-                    }
-                }
-            ),
-            presenting: pendingHostKey
-        ) { probe in
+                get: { appState.pendingTrust != nil },
+                set: { _ in }
+            )
+        ) {
             Button("取消", role: .cancel) {
-                pendingHostKey = nil
-                isValidating = false
-                if pendingAction == .testSSH {
-                    pendingAction = nil
-                    DispatchQueue.main.async {
-                        sshTestFeedback = SSHTestFeedback(
-                            succeeded: false,
-                            message: "未确认主机指纹，SSH 测试已取消。"
-                        )
+                if let requestID = appState.pendingTrust?.id {
+                    appState.cancelTrust(requestID)
+                }
+            }
+            Button(appState.pendingTrust?.replacing == true ? "替换指纹" : "信任") {
+                if let request = appState.pendingTrust {
+                    Task {
+                        if let probe = await appState.resolveTrust(request.id) {
+                            TrustedHostCatalog.upsert(probe: probe, in: modelContext)
+                        }
                     }
                 }
             }
-            Button(pendingHostKeyReplacing ? "替换并继续" : "信任并继续") {
-                trustHostKeyAndContinue(probe)
+        } message: {
+            if let request = appState.pendingTrust {
+                Text(hostTrustMessage(request))
             }
-        } message: { probe in
-            Text(hostKeyMessage(probe))
         }
         .alert(item: $sshTestFeedback) { feedback in
             Alert(
@@ -308,42 +301,10 @@ struct ServerEditorView: View {
         isValidating = true
         Task {
             do {
-                switch try await SSHConnectionValidator.inspect(draftConfig) {
-                case .trusted:
-                    try await perform(action)
-                case .unknown(let probe):
-                    pendingHostKeyReplacing = false
-                    pendingHostKey = probe
-                    isValidating = false
-                case .changed(_, let probe):
-                    pendingHostKeyReplacing = true
-                    pendingHostKey = probe
-                    isValidating = false
-                }
+                try await perform(action)
             } catch {
                 isValidating = false
                 if action == .testSSH {
-                    presentSSHTestFailure(error)
-                } else {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func trustHostKeyAndContinue(_ probe: SSHHostKeyProbe) {
-        pendingHostKey = nil
-        isValidating = true
-        Task {
-            do {
-                try await SSHConnectionValidator.trust(probe, replacing: pendingHostKeyReplacing)
-                TrustedHostCatalog.upsert(probe: probe, in: modelContext)
-                if let action = pendingAction {
-                    try await perform(action)
-                }
-            } catch {
-                isValidating = false
-                if pendingAction == .testSSH {
                     presentSSHTestFailure(error)
                 } else {
                     errorMessage = error.localizedDescription
@@ -358,7 +319,13 @@ struct ServerEditorView: View {
         case .save:
             try commit(snapshot: nil, status: .unverified)
         case .testSSH:
-            let elapsed = try await SSHConnectionTester.test(draftConfig)
+            let config = draftConfig
+            let elapsed = try await appState.performTrustedConnection(
+                config,
+                source: .sshTest
+            ) {
+                try await SSHConnectionTester.test(config)
+            }
             try commit(snapshot: nil, status: .sshReady)
             statusNote = "SSH 测试成功，配置已保存。"
             sshTestFeedback = SSHTestFeedback(
@@ -377,6 +344,13 @@ struct ServerEditorView: View {
         )
     }
 
+    private func hostTrustMessage(_ request: HostTrustRequest) -> String {
+        if request.replacing {
+            return "来源：\(request.source.title)\n旧指纹：\(request.oldFingerprint ?? "未知")\n新指纹：\(request.probe.fingerprint)\n替换前请确认这是你预期的主机。"
+        }
+        return "来源：\(request.source.title)\n\(request.probe.host):\(request.probe.port)\n\(request.probe.algorithm) \(request.probe.fingerprint)"
+    }
+
     private func persistSecrets() throws {
         if authentication.usesPassword, !password.isEmpty {
             try KeychainService.savePassword(password, for: draftConfig.credentialID)
@@ -389,13 +363,6 @@ struct ServerEditorView: View {
                 )
             )
         }
-    }
-
-    private func hostKeyMessage(_ probe: SSHHostKeyProbe) -> String {
-        if pendingHostKeyReplacing {
-            return "\(probe.host):\(probe.port)\n主机密钥已变化，可能存在中间人风险。\n新指纹：\(probe.algorithm) \(probe.fingerprint)\n确认后才会替换应用内记录。"
-        }
-        return "\(probe.host):\(probe.port)\n\(probe.algorithm)  \(probe.fingerprint)\n\n请与服务商控制台显示的指纹核对后再信任。"
     }
 
     private func commit(snapshot: ServerSnapshot?, status: ServerVerificationStatus) throws {

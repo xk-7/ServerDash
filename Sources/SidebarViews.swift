@@ -111,8 +111,7 @@ struct MachineManagementView: View {
                     } label: {
                         MachineListRow(
                             server: server,
-                            status: appState.status(for: server),
-                            snapshot: appState.snapshot(for: server)
+                            runtime: appState.runtime(for: server)
                         )
                     }
                     .id(server.id)
@@ -136,8 +135,10 @@ struct MachineManagementView: View {
 
 private struct MachineListRow: View {
     let server: ServerRecord
-    let status: ServerConnectionStatus
-    let snapshot: ServerSnapshot
+    @ObservedObject var runtime: ServerRuntimeState
+
+    private var status: ServerConnectionStatus { runtime.renderState.status }
+    private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -157,9 +158,24 @@ private struct MachineListRow: View {
                 .padding(.vertical, 3)
                 .background(Color.primary.opacity(0.05))
                 .clipShape(Capsule())
-            MachineMetric(title: "CPU", value: DisplayFormat.percent(snapshot.cpuUsage))
-            MachineMetric(title: "内存", value: DisplayFormat.percent(snapshot.memoryUsage))
-            MachineMetric(title: "磁盘", value: DisplayFormat.percent(snapshot.diskUsage))
+            MachineMetric(
+                title: "CPU",
+                value: runtime.renderState.hasSnapshot
+                    ? DisplayFormat.percent(snapshot.cpuUsage)
+                    : "—"
+            )
+            MachineMetric(
+                title: "内存",
+                value: runtime.renderState.hasSnapshot
+                    ? DisplayFormat.percent(snapshot.memoryUsage)
+                    : "—"
+            )
+            MachineMetric(
+                title: "磁盘",
+                value: runtime.renderState.hasSnapshot
+                    ? DisplayFormat.percent(snapshot.diskUsage)
+                    : "—"
+            )
             Text(status.title)
                 .font(.caption2.weight(.semibold))
                 .frame(width: 55, alignment: .trailing)
