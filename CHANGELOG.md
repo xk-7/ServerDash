@@ -2,6 +2,29 @@
 
 本项目的重要变更记录在此文件中。
 
+## 0.1.0-test.5 - S11 专业 SSH 路线与隧道（2026-08-25）
+
+### Added
+
+- 增加统一 `ConnectionProvider`、`ConnectionRoute`、逐跳身份/信任/超时和结构化失败阶段，监控、终端、SFTP 与隧道共享同一 route revision。
+- 增加 SSH Config 导入报告、ProxyJump、多跳、SOCKS5/HTTP CONNECT、Local/Remote/Dynamic 转发和连接路线管理页。
+- 增加 SwiftData V3 与 V2 → V3 迁移，持久化路线和转发规则；代理 Secret 仅保存于 Keychain。
+- 增加 19 项 S11 自动化测试及三跳临时 sshd 隔离验证脚本；详细证据见 [S11 实施状态](Docs/S11_IMPLEMENTATION_STATUS.md)。
+- 增加 [0.1.0-test.5 发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.5.md)。
+
+### Security and Reliability
+
+- 明确身份不可读时 fail-closed，不回退到 Agent 或其他默认身份；Agent Forwarding 保持关闭。
+- 默认仅监听 `127.0.0.1`；Remote Forward 与 `0.0.0.0`/`::` 每次启动前必须确认并写入脱敏风险/复查审计。
+- 隧道启动与 Ready 分离，停止使用 TERM → KILL 并复查进程与本地端口，App Quit 会 drain 全部 app-scoped 隧道。
+
+### Verification
+
+- 完整 Debug 测试 117 项通过、0 失败、0 跳过。
+- `arm64`/`x86_64` Release 构建通过；三个本机临时 sshd 的独立身份三跳链路通过。
+- Xcode 静态分析通过；仅保留仓库内既有 SwiftTerm 的两个未使用变量警告。
+- 未连接真实 VPS，真实代理握手、真实 Remote Forward、硬件密钥和多跳业务长稳仍待隔离环境或实机验证。
+
 ## 0.1.0-test.4 - S07 监控历史与 Data Gap（2026-08-25）
 
 ### Added

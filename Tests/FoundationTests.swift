@@ -793,7 +793,7 @@ final class PersistenceSchemaTests: XCTestCase {
 
         XCTAssertEqual(try context.fetch(FetchDescriptor<TrustedHostKey>()).count, 1)
         XCTAssertEqual(try context.fetch(FetchDescriptor<TerminalSessionHistory>()).count, 1)
-        XCTAssertEqual(PersistenceController.currentSchemaVersion, 2)
+        XCTAssertEqual(PersistenceController.currentSchemaVersion, 3)
     }
 }
 

@@ -565,6 +565,7 @@ final class AppState: ObservableObject {
     @Published var selectedTerminalID: UUID?
     @Published private(set) var pendingTrust: HostTrustRequest?
     @Published private(set) var monitoringHistoryError: String?
+    @Published private(set) var portForwardSnapshots: [UUID: PortForwardSnapshot] = [:]
     @Published var refreshInterval: TimeInterval {
         didSet {
             UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
@@ -589,6 +590,7 @@ final class AppState: ObservableObject {
     private var runtimeStates: [UUID: ServerRuntimeState] = [:]
     private var historyBootstrappedServerIDs: Set<UUID> = []
     private let trustCoordinator: HostTrustCoordinator
+    private let portForwardSupervisor: PortForwardSupervisor
     private let monitoringClock: any MonitoringClock
     private var monitoringHistory: MonitoringHistoryRepository?
     private let connectivityMonitor = NWPathMonitor()
@@ -602,16 +604,19 @@ final class AppState: ObservableObject {
     convenience init() {
         self.init(
             trustCoordinator: HostTrustCoordinator(),
-            monitoringClock: SystemMonitoringClock()
+            monitoringClock: SystemMonitoringClock(),
+            portForwardSupervisor: .shared
         )
     }
 
     init(
         trustCoordinator: HostTrustCoordinator,
-        monitoringClock: any MonitoringClock = SystemMonitoringClock()
+        monitoringClock: any MonitoringClock = SystemMonitoringClock(),
+        portForwardSupervisor: PortForwardSupervisor = .shared
     ) {
         self.trustCoordinator = trustCoordinator
         self.monitoringClock = monitoringClock
+        self.portForwardSupervisor = portForwardSupervisor
         let savedInterval = UserDefaults.standard.double(forKey: "refreshInterval")
         refreshInterval = savedInterval == 0 && !UserDefaults.standard.bool(forKey: "refreshIntervalConfigured")
             ? 5
@@ -961,6 +966,14 @@ final class AppState: ObservableObject {
         } catch {
             reportHistoryFailure()
         }
+        let tunnelSupervisor = portForwardSupervisor
+        let drain = DispatchSemaphore(value: 0)
+        Task.detached {
+            await tunnelSupervisor.stopAll()
+            drain.signal()
+        }
+        _ = drain.wait(timeout: .now() + 1.1)
+        RouteKeyMaterialStore.cleanupAll()
         Task {
             await monitoringCoordinator.stop()
             await ConnectionProcessController.shared.terminateAll()
@@ -1166,6 +1179,24 @@ final class AppState: ObservableObject {
         forceScan: Bool = false
     ) async throws {
         try validateConnectionConfiguration(config)
+        for hop in config.route.hops {
+            let hopConfig = ServerConnectionConfig(
+                id: config.id,
+                credentialID: config.credentialID,
+                name: hop.name,
+                host: hop.endpoint.host,
+                port: hop.endpoint.port,
+                username: hop.endpoint.username,
+                authentication: .privateKey,
+                privateKeyPath: "",
+                connectTimeout: hop.connectTimeout
+            )
+            try await trustCoordinator.authorize(
+                hopConfig,
+                source: .connectionRoute,
+                forceScan: forceScan
+            )
+        }
         try await trustCoordinator.authorize(
             config,
             source: source,
@@ -1174,6 +1205,17 @@ final class AppState: ObservableObject {
     }
 
     private func validateConnectionConfiguration(_ config: ServerConnectionConfig) throws {
+        _ = try config.route.validated(
+            finalEndpoint: ConnectionEndpoint(
+                host: config.host,
+                port: config.port,
+                username: config.username
+            )
+        )
+        let credentialProvider = SystemCredentialProvider()
+        for hop in config.route.hops {
+            _ = try credentialProvider.resolve(hop.credential, hopID: hop.id)
+        }
         if config.identityReferenceMissing {
             throw ConnectionError.identityReferenceMissing
         }
@@ -1191,6 +1233,14 @@ final class AppState: ObservableObject {
                 }
             } else if config.privateKeyPath.isEmpty {
                 throw ConnectionError.privateKeyMissing
+            } else {
+                let expanded = NSString(string: config.privateKeyPath).expandingTildeInPath
+                guard FileManager.default.isReadableFile(atPath: expanded) else {
+                    throw ConnectionRouteError.credentialUnavailable(
+                        hopID: config.id,
+                        reason: "目标私钥不可读"
+                    )
+                }
             }
         }
         if config.authentication == .keyThenPassword,
@@ -1199,6 +1249,64 @@ final class AppState: ObservableObject {
            !hasPassword {
             throw ConnectionError.credentialMissing
         }
+    }
+
+    func startPortForward(
+        rule: PortForwardRule,
+        server: ServerRecord,
+        exposureConfirmed: Bool = false,
+        remoteForwardConfirmed: Bool = false
+    ) async throws {
+        let config = connectionConfig(for: server)
+        eventLog.append(
+            serverID: server.id,
+            module: .ssh,
+            message: "SSH 隧道启动请求（风险：\(rule.operationRisk)，规则级幂等）"
+        )
+        do {
+            try await authorizeConnection(config, source: .tunnel)
+            let snapshot = try await portForwardSupervisor.start(
+                rule: rule,
+                config: config,
+                exposureConfirmed: exposureConfirmed,
+                remoteForwardConfirmed: remoteForwardConfirmed
+            )
+            portForwardSnapshots[rule.id] = snapshot
+            eventLog.append(
+                serverID: server.id,
+                module: .ssh,
+                message: "SSH 隧道启动后复查为 Ready"
+            )
+        } catch {
+            eventLog.append(
+                serverID: server.id,
+                module: .ssh,
+                level: "error",
+                message: "SSH 隧道启动失败（已脱敏）"
+            )
+            throw error
+        }
+    }
+
+    func stopPortForward(ruleID: UUID, serverID: UUID?) async throws {
+        eventLog.append(
+            serverID: serverID,
+            module: .ssh,
+            message: "SSH 隧道停止请求（规则级幂等）"
+        )
+        if let snapshot = try await portForwardSupervisor.stop(ruleID: ruleID) {
+            portForwardSnapshots[ruleID] = snapshot
+        }
+        eventLog.append(
+            serverID: serverID,
+            module: .ssh,
+            message: "SSH 隧道停止后复查为 Stopped"
+        )
+    }
+
+    func refreshPortForwardSnapshots() async {
+        let snapshots = await portForwardSupervisor.snapshots()
+        portForwardSnapshots = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.ruleID, $0) })
     }
 
     func performTrustedConnection<T>(

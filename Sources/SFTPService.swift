@@ -263,13 +263,14 @@ enum SFTPService {
             commands.append("\(flag) \(quote(url.path)) \(quote(destination))")
         }
         guard !commands.isEmpty else { return }
+        let resolvedDestinations = destinations
         try await runTransfer(
             config: config,
             commands: commands,
             totalBytes: totalBytes,
             measure: {
                 var total: Int64 = 0
-                for path in destinations {
+                for path in resolvedDestinations {
                     total += (try? await remoteSize(config: config, path: path)) ?? 0
                 }
                 return total
@@ -470,11 +471,15 @@ enum SFTPService {
     ) async throws -> String {
         let stdin = Data((commands + ["bye"]).joined(separator: "\n").appending("\n").utf8)
         do {
+            let plan = try SystemOpenSSHConnectionProvider().launchPlan(
+                for: config,
+                purpose: .fileTransfer
+            )
             let result = try await ConnectionProcessController.shared.run(
                 ProcessRunRequest(
-                    executable: "/usr/bin/sftp",
-                    arguments: arguments(for: config),
-                    environment: SSHSupport.environment(for: config),
+                    executable: plan.executable,
+                    arguments: plan.arguments,
+                    environment: plan.environment,
                     stdin: stdin,
                     connectTimeout: config.connectTimeout,
                     totalTimeout: totalTimeout,
@@ -514,39 +519,6 @@ enum SFTPService {
             }
             throw SFTPError.commandFailed(error.localizedDescription)
         }
-    }
-
-    private static func arguments(for config: ServerConnectionConfig) -> [String] {
-        var arguments = [
-            "-q",
-            "-P", String(config.port),
-            "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
-            "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=3",
-            "-o", "StrictHostKeyChecking=yes",
-            "-o", SSHSupport.userKnownHostsOption,
-            "-o", "GlobalKnownHostsFile=/dev/null",
-            "-o", "UpdateHostKeys=no"
-        ]
-        let keyPath = (try? KeyMaterialStore.materializePrivateKey(for: config)) ?? ""
-        switch config.authentication {
-        case .privateKey:
-            if !keyPath.isEmpty {
-                arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
-            }
-        case .password:
-            arguments += [
-                "-o", "PreferredAuthentications=password,keyboard-interactive",
-                "-o", "PubkeyAuthentication=no"
-            ]
-        case .keyThenPassword:
-            if !keyPath.isEmpty {
-                arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
-            }
-            arguments += ["-o", "PreferredAuthentications=publickey,password"]
-        }
-        arguments.append("\(config.username)@\(config.host)")
-        return arguments
     }
 
     private static func firstCommandError(in output: String) -> String? {

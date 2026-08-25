@@ -32,6 +32,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 ### SSH 连接与安全
 
 - 基于 macOS `/usr/bin/ssh`，统一管理超时、取消、并发和子进程退出。
+- 导入 SSH Config 并展示最终值、来源和不支持项；支持逐跳独立身份、信任和超时的 ProxyJump 多跳路线。
+- 支持结构化 SOCKS5/HTTP CONNECT 代理及 Local、Remote、Dynamic 转发；默认回环监听，远端或广域监听必须确认。
 - 密码、SSH 私钥、加密私钥口令及“私钥优先，密码回退”。
 - 私钥可引用外部文件，也可导入 macOS Keychain。
 - 密码、私钥内容和 Passphrase 不写入 SwiftData 数据库或命令行。
@@ -67,8 +69,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 
 ### 数据与诊断
 
-- SwiftData 持久化服务器、身份、SSH 密钥引用、代码片段、可信主机、终端历史、监控样本、聚合和 Data Gap。
-- VersionedSchema V1/V2 与 V1 → V2 迁移计划；数据库打开失败时提供重试、备份和重建。
+- SwiftData 持久化服务器、身份、SSH 密钥引用、连接路线、转发规则、代码片段、可信主机、终端历史、监控样本、聚合和 Data Gap。
+- VersionedSchema V1/V2/V3 与 V1 → V2、V2 → V3 迁移阶段；数据库打开失败时提供重试、备份和重建。
 - OSLog 按 App、Data、SSH、Monitoring、Terminal、SFTP 分类。
 - 每台服务器独立事件日志及可复制、可预览的脱敏 SSH Diagnostics。
 - 隐藏 IP 会覆盖界面、Markdown 和诊断；冻结的 1.0 隐私约束要求远端位置查询显式选择加入，其当前界面与默认值接线仍属于内部测试前待完成工作。
@@ -86,13 +88,13 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 
 ## 开发与验证状态
 
-S07 本地监控历史和真实 Data Gap 展示已经接入既有中央调度器与每服务器 RuntimeState。当前内部构建通过 98 项自动化测试、Debug 构建和 Universal Release 构建；1/10/50 台服务器规模语义使用可重复 fixture 验证。Instruments、真实服务器性能阈值、睡眠/切网和长时间稳定性仍明确列为待实机验证。
+S11 专业 SSH 路线与隧道已经接入 S07 基线。当前内部构建通过 117 项自动化测试、Debug 构建和 Universal Release 构建；三个临时 sshd 的隔离 fixture 已验证真实系统 OpenSSH 三跳链路。生产多跳、认证代理、Remote Forward、硬件密钥和长时间稳定性仍明确列为待隔离环境或实机验证。
 
-需求到代码的对应关系、各批次结果、验收覆盖和待实机项目见 [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md)。
+需求到代码的对应关系、各批次结果、验收覆盖和待实机项目见 [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md)。
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
-最新内部预览版：[ServerDash 0.1.0 test.4](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.4)（Build 3）。安装前请阅读[发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.4.md)；该构建使用 ad-hoc 签名、未经公证，仅供已知测试人员使用。
+最新内部预览版：[ServerDash 0.1.0 test.5](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.5)（Build 4）。安装前请阅读[发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.5.md)；该构建使用 ad-hoc 签名、未经公证，仅供已知测试人员使用。
 
 ## 运行
 
@@ -167,4 +169,4 @@ project.yml                 XcodeGen 工程定义
 
 ## 分发与范围
 
-应用需要启动 OpenSSH/SFTP 子进程，因此当前关闭 App Sandbox。1.0 内部测试路线使用本地 ad-hoc 签名，只在本人和少量已知测试人员之间手动分发；不依赖 Apple Developer Program、Developer ID、公证或 Mac App Store。CloudKit、付费分层、7×24 告警承诺、Mosh、端口转发和完整 Docker 运维面板不在当前范围内。详见[已接受的分发与 SSH 决策](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md)。
+应用需要启动 OpenSSH/SFTP 子进程，因此当前关闭 App Sandbox。1.0 内部测试路线使用本地 ad-hoc 签名，只在本人和少量已知测试人员之间手动分发；不依赖 Apple Developer Program、Developer ID、公证或 Mac App Store。S11 端口转发属于可选高级本地能力；CloudKit、付费分层、7×24 告警承诺、Mosh 和完整 Docker 运维面板仍不在当前已实现范围内。详见[已接受的分发与 SSH 决策](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md)。

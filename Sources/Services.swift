@@ -145,6 +145,10 @@ enum KeychainService {
     static func importedKeyAccount(for keyID: UUID) -> String {
         "imported-key.\(keyID.uuidString)"
     }
+
+    static func proxyAccount(for routeID: UUID, revision: UUID) -> String {
+        "proxy.\(routeID.uuidString).\(revision.uuidString)"
+    }
 }
 
 enum KeyMaterialStore {
@@ -195,12 +199,35 @@ enum SSHSupport {
         return "\"\(escaped)\""
     }
 
+    /// Compatibility helper for previews/tests. Production connection entry points use
+    /// `ConnectionProvider.launchPlan` so executable, arguments and environment stay atomic.
+    /// A credential error returns a fail-closed identity configuration and never lets OpenSSH
+    /// try ssh-agent or default key files.
     static func arguments(
         for config: ServerConnectionConfig,
         strictHostChecking: String,
         batchMode: Bool = false,
         remoteCommand: String? = nil
     ) -> [String] {
+        (try? directArguments(
+            for: config,
+            strictHostChecking: strictHostChecking,
+            batchMode: batchMode,
+            remoteCommand: remoteCommand
+        )) ?? failClosedArguments(
+            for: config,
+            strictHostChecking: strictHostChecking,
+            batchMode: batchMode,
+            remoteCommand: remoteCommand
+        )
+    }
+
+    static func directArguments(
+        for config: ServerConnectionConfig,
+        strictHostChecking: String,
+        batchMode: Bool = false,
+        remoteCommand: String? = nil
+    ) throws -> [String] {
         var arguments = [
             "-p", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
@@ -212,17 +239,21 @@ enum SSHSupport {
             "-o", "UpdateHostKeys=no"
         ]
 
-        let keyPath = (try? KeyMaterialStore.materializePrivateKey(for: config)) ?? ""
+        let keyPath = try explicitKeyPath(for: config)
         switch config.authentication {
         case .privateKey:
-            if !keyPath.isEmpty {
-                arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+            guard let keyPath else {
+                throw ConnectionRouteError.credentialUnavailable(
+                    hopID: config.id,
+                    reason: "目标私钥缺失"
+                )
             }
+            arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
         case .password:
             arguments += ["-o", "PreferredAuthentications=password,keyboard-interactive"]
             arguments += ["-o", "PubkeyAuthentication=no"]
         case .keyThenPassword:
-            if !keyPath.isEmpty {
+            if let keyPath {
                 arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
             } else {
                 // Do not silently fall back to unrelated ssh-agent or default-file identities.
@@ -238,6 +269,90 @@ enum SSHSupport {
         if let remoteCommand {
             arguments.append(remoteCommand)
         }
+        return arguments
+    }
+
+    static func directArgumentsForSFTP(config: ServerConnectionConfig) throws -> [String] {
+        var arguments = [
+            "-q",
+            "-P", String(config.port),
+            "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=3",
+            "-o", "StrictHostKeyChecking=yes",
+            "-o", userKnownHostsOption,
+            "-o", "GlobalKnownHostsFile=/dev/null",
+            "-o", "UpdateHostKeys=no"
+        ]
+        let keyPath = try explicitKeyPath(for: config)
+        switch config.authentication {
+        case .privateKey:
+            guard let keyPath else {
+                throw ConnectionRouteError.credentialUnavailable(
+                    hopID: config.id,
+                    reason: "目标私钥缺失"
+                )
+            }
+            arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+        case .password:
+            arguments += [
+                "-o", "PreferredAuthentications=password,keyboard-interactive",
+                "-o", "PubkeyAuthentication=no"
+            ]
+        case .keyThenPassword:
+            if let keyPath {
+                arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+            } else {
+                arguments += ["-o", "PubkeyAuthentication=no"]
+            }
+            arguments += ["-o", "PreferredAuthentications=publickey,password"]
+        }
+        arguments.append("\(config.username)@\(config.host)")
+        return arguments
+    }
+
+    private static func explicitKeyPath(for config: ServerConnectionConfig) throws -> String? {
+        let path: String?
+        do {
+            path = try KeyMaterialStore.materializePrivateKey(for: config)
+        } catch {
+            throw ConnectionRouteError.credentialUnavailable(
+                hopID: config.id,
+                reason: "私钥读取失败"
+            )
+        }
+        guard let path, !path.isEmpty else { return nil }
+        guard FileManager.default.isReadableFile(atPath: path) else {
+            throw ConnectionRouteError.credentialUnavailable(
+                hopID: config.id,
+                reason: "私钥文件不可读"
+            )
+        }
+        return path
+    }
+
+    private static func failClosedArguments(
+        for config: ServerConnectionConfig,
+        strictHostChecking: String,
+        batchMode: Bool,
+        remoteCommand: String?
+    ) -> [String] {
+        var arguments = [
+            "-p", String(config.port),
+            "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "StrictHostKeyChecking=\(strictHostChecking)",
+            "-o", userKnownHostsOption,
+            "-o", "GlobalKnownHostsFile=/dev/null",
+            "-o", "UpdateHostKeys=no",
+            "-o", "IdentitiesOnly=yes",
+            "-o", "IdentityAgent=none",
+            "-o", "PubkeyAuthentication=no",
+            "-o", "PasswordAuthentication=no",
+            "-o", "KbdInteractiveAuthentication=no"
+        ]
+        if batchMode { arguments += ["-o", "BatchMode=yes"] }
+        arguments.append("\(config.username)@\(config.host)")
+        if let remoteCommand { arguments.append(remoteCommand) }
         return arguments
     }
 
@@ -667,16 +782,15 @@ enum SSHMonitoringService {
     ) async throws -> String {
         let interval = PerformanceTrace.begin(.sshRemoteCommand)
         defer { PerformanceTrace.end(interval) }
+        let plan = try SystemOpenSSHConnectionProvider().launchPlan(
+            for: config,
+            purpose: .remoteCommand(command)
+        )
         let result = try await ConnectionProcessController.shared.run(
             ProcessRunRequest(
-                executable: "/usr/bin/ssh",
-                arguments: SSHSupport.arguments(
-                    for: config,
-                    strictHostChecking: "yes",
-                    batchMode: !config.authentication.usesPassword,
-                    remoteCommand: command
-                ),
-                environment: SSHSupport.environment(for: config),
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: plan.environment,
                 connectTimeout: config.connectTimeout,
                 totalTimeout: 60,
                 maxOutputBytes: 512_000,

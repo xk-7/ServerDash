@@ -9,6 +9,7 @@ enum SidebarDestination: String, Identifiable, Hashable {
     case sshKeys
     case snippets
     case trustedHosts
+    case connections
     case terminal
 
     var id: String { rawValue }
@@ -21,7 +22,35 @@ enum SidebarDestination: String, Identifiable, Hashable {
         case .sshKeys: "SSH 密钥"
         case .snippets: "代码片段"
         case .trustedHosts: "可信主机"
+        case .connections: "连接与隧道"
         case .terminal: "终端"
+        }
+    }
+}
+
+private struct HostTrustAlertModifier: ViewModifier {
+    let pendingTrust: HostTrustRequest?
+    let isSuppressed: Bool
+    let message: String
+    let onCancel: (UUID) -> Void
+    let onAccept: (HostTrustRequest) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(
+            pendingTrust?.replacing == true ? "主机密钥已变化" : "确认 SSH 主机指纹",
+            isPresented: Binding(
+                get: { pendingTrust != nil && !isSuppressed },
+                set: { _ in }
+            )
+        ) {
+            Button("取消", role: .cancel) {
+                if let requestID = pendingTrust?.id { onCancel(requestID) }
+            }
+            Button(pendingTrust?.replacing == true ? "替换指纹" : "信任") {
+                if let pendingTrust { onAccept(pendingTrust) }
+            }
+        } message: {
+            Text(message)
         }
     }
 }
@@ -61,6 +90,8 @@ struct ContentView: View {
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
     @Query(sort: \IdentityRecord.name) private var identities: [IdentityRecord]
     @Query(sort: \SSHKeyRecord.name) private var sshKeys: [SSHKeyRecord]
+    @Query(sort: \ConnectionRouteRecord.updatedAt) private var connectionRoutes: [ConnectionRouteRecord]
+    @Query(sort: \PortForwardRuleRecord.updatedAt) private var portForwardRules: [PortForwardRuleRecord]
 
     @State private var searchText = ""
     @State private var showingNewServer = false
@@ -98,7 +129,20 @@ struct ContentView: View {
         )
     }
 
+    private var serverDeletionSummary: String {
+        guard let server = serverPendingDeletion else {
+            return "服务器配置和专用凭据会被移除。"
+        }
+        let routeCount = connectionRoutes.count { $0.serverID == server.id }
+        let ruleCount = portForwardRules.count { $0.serverID == server.id }
+        return "服务器配置、专用凭据、\(routeCount) 条连接路线和 \(ruleCount) 条隧道规则都会被移除；活动隧道会先停止，共享身份会保留。此操作无法撤销。"
+    }
+
     var body: some View {
+        lifecycleView
+    }
+
+    private var navigationView: some View {
         NavigationSplitView {
             AppSidebar(
                 selection: sidebarDestination,
@@ -140,6 +184,10 @@ struct ContentView: View {
                 .keyboardShortcut("n", modifiers: .command)
             }
         }
+    }
+
+    private var presentationView: some View {
+        navigationView
         .sheet(isPresented: $showingNewServer) {
             ServerEditorView(server: nil) { server in
                 openServerDetail(
@@ -161,35 +209,15 @@ struct ContentView: View {
         ) {
             Button("删除服务器", role: .destructive) {
                 guard let server = serverPendingDeletion else { return }
-                do {
-                    try KeychainService.deletePassword(for: server.id)
-                    try? KeychainService.deleteSecret(
-                        account: KeychainService.passphraseAccount(for: server.id)
-                    )
-                    appState.removeRuntimeData(for: server.id)
-                    modelContext.delete(server)
-                    try modelContext.save()
-                    if route.serverID == server.id {
-                        route = route.returningToOrigin
-                    }
-                    EventLogStore.shared.append(
-                        serverID: server.id,
-                        module: .data,
-                        message: "已删除服务器配置"
-                    )
-                } catch {
-                    EventLogStore.shared.append(
-                        serverID: server.id,
-                        module: .data,
-                        level: "error",
-                        message: "删除服务器失败"
-                    )
-                }
-                serverPendingDeletion = nil
+                Task { await deleteServerAndReferences(server) }
             }
         } message: {
-            Text("服务器配置、服务器专用凭据和终端会话都会被移除；共享身份会保留。此操作无法撤销。")
+            Text(serverDeletionSummary)
         }
+    }
+
+    private var lifecycleView: some View {
+        presentationView
         .task {
             synchronizeIdentityConnections()
             appState.bootstrap(servers: servers, context: modelContext)
@@ -204,66 +232,66 @@ struct ContentView: View {
         .onChange(of: sshKeys.count) {
             synchronizeIdentityConnections()
         }
+        .onChange(of: connectionRoutes.map(\.revision)) {
+            synchronizeIdentityConnections()
+        }
         .onChange(of: appState.selectedServerID) { _, serverID in
-            guard let serverID,
-                  servers.contains(where: { $0.id == serverID }),
-                  case .server(_, let origin, _) = route else {
-                return
-            }
-            route = .server(
-                id: serverID,
-                origin: origin,
-                mode: appState.detailMode
-            )
+            handleSelectedServerChange(serverID)
         }
         .onChange(of: appState.detailMode) { _, mode in
-            guard case .server(let id, let origin, let currentMode) = route,
-                  currentMode != mode else {
-                return
-            }
-            route = .server(id: id, origin: origin, mode: mode)
+            handleDetailModeChange(mode)
         }
         .onChange(of: servers.map(\.id)) { _, serverIDs in
-            guard let serverID = route.serverID,
-                  !serverIDs.contains(serverID) else {
-                return
-            }
-            route = route.returningToOrigin
-            appState.select(nil)
+            handleServerListChange(serverIDs)
         }
-        .alert(
-            appState.pendingTrust?.replacing == true ? "主机密钥已变化" : "确认 SSH 主机指纹",
-            isPresented: Binding(
-                get: {
-                    appState.pendingTrust != nil &&
-                    !showingNewServer &&
-                    editingServer == nil
-                },
-                set: { _ in }
-            )
-        ) {
-            Button("取消", role: .cancel) {
-                if let requestID = appState.pendingTrust?.id {
-                    appState.cancelTrust(requestID)
-                }
-            }
-            Button(appState.pendingTrust?.replacing == true ? "替换指纹" : "信任") {
-                if let prompt = appState.pendingTrust {
+        .modifier(
+            HostTrustAlertModifier(
+                pendingTrust: appState.pendingTrust,
+                isSuppressed: showingNewServer || editingServer != nil,
+                message: appState.pendingTrust.map(trustMessage) ?? "",
+                onCancel: { requestID in appState.cancelTrust(requestID) },
+                onAccept: { prompt in
                     Task {
                         if let probe = await appState.resolveTrust(prompt.id) {
                             TrustedHostCatalog.upsert(probe: probe, in: modelContext)
                         }
                     }
                 }
-            }
-        } message: {
-            if let prompt = appState.pendingTrust {
-                Text(trustMessage(prompt))
-            }
-        }
+            )
+        )
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             appState.shutdown()
         }
+    }
+
+    private func handleSelectedServerChange(_ serverID: UUID?) {
+        guard let serverID,
+              servers.contains(where: { $0.id == serverID }),
+              case .server(_, let origin, _) = route else {
+            return
+        }
+        route = .server(
+            id: serverID,
+            origin: origin,
+            mode: appState.detailMode
+        )
+    }
+
+    private func handleDetailModeChange(_ mode: DetailMode) {
+        guard case .server(let id, let origin, let currentMode) = route,
+              currentMode != mode else {
+            return
+        }
+        route = .server(id: id, origin: origin, mode: mode)
+    }
+
+    private func handleServerListChange(_ serverIDs: [UUID]) {
+        guard let serverID = route.serverID,
+              !serverIDs.contains(serverID) else {
+            return
+        }
+        route = route.returningToOrigin
+        appState.select(nil)
     }
 
     private func trustMessage(_ prompt: HostTrustRequest) -> String {
@@ -334,6 +362,8 @@ struct ContentView: View {
                 SnippetManagementView()
             case .trustedHosts:
                 TrustedHostsView()
+            case .connections:
+                ProfessionalConnectionsView()
             case .terminal:
                 TerminalSessionsLandingView(
                     sessions: appState.terminalSessions,
@@ -393,10 +423,53 @@ struct ContentView: View {
             resolved[server.id] = ConnectionConfigResolver.resolve(
                 server: server,
                 identities: identities,
-                keys: sshKeys
+                keys: sshKeys,
+                routes: connectionRoutes
             )
         }
         appState.applyResolvedConfigs(resolved)
         try? modelContext.save()
+    }
+
+    @MainActor
+    private func deleteServerAndReferences(_ server: ServerRecord) async {
+        do {
+            let proxySecretAccounts = connectionRoutes
+                .filter { $0.serverID == server.id }
+                .compactMap { $0.route?.proxy?.secretAccount }
+            for rule in portForwardRules where rule.serverID == server.id {
+                try? await appState.stopPortForward(ruleID: rule.id, serverID: server.id)
+                modelContext.delete(rule)
+            }
+            for connectionRoute in connectionRoutes where connectionRoute.serverID == server.id {
+                modelContext.delete(connectionRoute)
+            }
+            try KeychainService.deletePassword(for: server.id)
+            try? KeychainService.deleteSecret(
+                account: KeychainService.passphraseAccount(for: server.id)
+            )
+            appState.removeRuntimeData(for: server.id)
+            modelContext.delete(server)
+            try modelContext.save()
+            for account in proxySecretAccounts {
+                try? KeychainService.deleteSecret(account: account)
+            }
+            if route.serverID == server.id {
+                route = route.returningToOrigin
+            }
+            EventLogStore.shared.append(
+                serverID: server.id,
+                module: .data,
+                message: "已删除服务器配置及连接引用"
+            )
+        } catch {
+            EventLogStore.shared.append(
+                serverID: server.id,
+                module: .data,
+                level: "error",
+                message: "删除服务器失败"
+            )
+        }
+        serverPendingDeletion = nil
     }
 }

@@ -729,16 +729,15 @@ enum SSHConnectionTester {
         let interval = PerformanceTrace.begin(.sshHandshake)
         defer { PerformanceTrace.end(interval) }
         let started = Date()
+        let plan = try SystemOpenSSHConnectionProvider().launchPlan(
+            for: config,
+            purpose: .remoteCommand("printf serverdash-ok")
+        )
         let result = try await ConnectionProcessController.shared.run(
             ProcessRunRequest(
-                executable: "/usr/bin/ssh",
-                arguments: SSHSupport.arguments(
-                    for: config,
-                    strictHostChecking: "yes",
-                    batchMode: config.authentication != .password,
-                    remoteCommand: "printf serverdash-ok"
-                ),
-                environment: SSHSupport.environment(for: config),
+                executable: plan.executable,
+                arguments: plan.arguments,
+                environment: plan.environment,
                 connectTimeout: config.connectTimeout,
                 totalTimeout: max(12, config.connectTimeout + 8),
                 maxOutputBytes: 4_096,

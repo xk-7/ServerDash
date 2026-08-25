@@ -25,6 +25,8 @@ struct AppSidebar: View {
                         .tag(SidebarDestination.snippets)
                     Label("可信主机", systemImage: "checkmark.shield")
                         .tag(SidebarDestination.trustedHosts)
+                    Label("连接与隧道", systemImage: "point.3.connected.trianglepath.dotted")
+                        .tag(SidebarDestination.connections)
                 }
 
                 Section("终端") {

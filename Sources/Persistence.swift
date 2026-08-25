@@ -29,22 +29,41 @@ enum PersistenceSchemaV2: VersionedSchema {
     ]
 }
 
+enum PersistenceSchemaV3: VersionedSchema {
+    static let versionIdentifier = Schema.Version(3, 0, 0)
+    static let models: [any PersistentModel.Type] = [
+        ServerRecord.self,
+        IdentityRecord.self,
+        SSHKeyRecord.self,
+        CommandSnippetRecord.self,
+        TrustedHostKey.self,
+        TerminalSessionHistory.self,
+        MonitoringSampleRecord.self,
+        MonitoringAggregateRecord.self,
+        MonitoringGapRecord.self,
+        ConnectionRouteRecord.self,
+        PortForwardRuleRecord.self
+    ]
+}
+
 enum ServerDashMigrationPlan: SchemaMigrationPlan {
     static let schemas: [any VersionedSchema.Type] = [
         PersistenceSchemaV1.self,
-        PersistenceSchemaV2.self
+        PersistenceSchemaV2.self,
+        PersistenceSchemaV3.self
     ]
     static let stages: [MigrationStage] = [
-        .lightweight(fromVersion: PersistenceSchemaV1.self, toVersion: PersistenceSchemaV2.self)
+        .lightweight(fromVersion: PersistenceSchemaV1.self, toVersion: PersistenceSchemaV2.self),
+        .lightweight(fromVersion: PersistenceSchemaV2.self, toVersion: PersistenceSchemaV3.self)
     ]
 }
 
 enum PersistenceController {
     static let schemaVersionKey = "serverDashSchemaVersion"
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     static var schema: Schema {
-        Schema(versionedSchema: PersistenceSchemaV2.self)
+        Schema(versionedSchema: PersistenceSchemaV3.self)
     }
 
     static func makeContainer(migrateLegacyStore: Bool = true) throws -> ModelContainer {

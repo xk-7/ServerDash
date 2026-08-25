@@ -32,6 +32,8 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 ### SSH Connectivity and Security
 
 - Uses macOS `/usr/bin/ssh` with unified timeout, cancellation, concurrency, and process lifecycle management.
+- Imports SSH Config with final-value/source/unsupported reports and supports multi-hop ProxyJump routes with per-hop identity, trust, and timeout.
+- Supports structured SOCKS5/HTTP CONNECT proxies plus Local, Remote, and Dynamic forwarding; loopback is the default and remote/wildcard listeners require confirmation.
 - Supports passwords, SSH private keys, encrypted-key passphrases, and key-first password fallback.
 - Private keys can reference external files or be imported into macOS Keychain.
 - Passwords, private-key contents, and passphrases are never stored in SwiftData or placed on command lines.
@@ -67,8 +69,8 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 
 ### Data and Diagnostics
 
-- SwiftData persistence for servers, identities, SSH key references, snippets, trusted hosts, terminal history, monitoring samples, aggregates, and Data Gaps.
-- Versioned V1/V2 schemas with a V1-to-V2 migration plan, plus retry, backup, and rebuild options when the database cannot be opened.
+- SwiftData persistence for servers, identities, SSH key references, connection routes, forwarding rules, snippets, trusted hosts, terminal history, monitoring samples, aggregates, and Data Gaps.
+- Versioned V1/V2/V3 schemas with V1-to-V2 and V2-to-V3 migration stages, plus retry, backup, and rebuild options when the database cannot be opened.
 - OSLog categories for App, Data, SSH, Monitoring, Terminal, and SFTP.
 - Per-server event logs and previewable, copyable, redacted SSH diagnostics.
 - IP hiding applies to the UI, Markdown exports, and diagnostics. The frozen 1.0 privacy contract makes remote location lookup opt-in; its current UI/default enforcement is tracked as pre-release work.
@@ -86,13 +88,13 @@ The project uses the local `Vendor/SwiftTerm` package and does not download Swif
 
 ## Development Status
 
-S07 local monitoring history and truthful Data Gap rendering are implemented on top of the existing central coordinator and per-server RuntimeState. The current internal build passes 98 automated tests plus Debug and Universal Release builds. Repeatable 1/10/50-server fixtures cover scale semantics; Instruments, real-server performance thresholds, sleep/network transitions, and long-running stability remain explicitly pending real-device validation.
+S11 professional SSH routes and tunnels are implemented on top of the S07 baseline. The current internal build passes 117 automated tests plus Debug and Universal Release builds. An isolated three-sshd fixture validates a real system-OpenSSH chain; production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability remain explicitly pending isolated or real-device validation.
 
-See [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining real-device checks.
+See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining isolated/real-device checks.
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
-Latest internal preview: [ServerDash 0.1.0 test.4](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.4) (build 3). Read the [release notes](Docs/RELEASE_NOTES_0.1.0-TEST.4.md) before installing; this build is ad-hoc signed, not notarized, and intended only for known testers.
+Latest internal preview: [ServerDash 0.1.0 test.5](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.5) (build 4). Read the [release notes](Docs/RELEASE_NOTES_0.1.0-TEST.5.md) before installing; this build is ad-hoc signed, not notarized, and intended only for known testers.
 
 ## Build and Run
 
@@ -167,4 +169,4 @@ project.yml                 XcodeGen project definition
 
 ## Distribution and Scope
 
-ServerDash launches OpenSSH/SFTP subprocesses, so App Sandbox is currently disabled. The 1.0 internal-test line uses local ad-hoc signing and manual sharing with a small number of known testers; it does not require Apple Developer Program membership, Developer ID, notarization, or the Mac App Store. CloudKit, paid tiers, guaranteed 24×7 alerts, Mosh, port forwarding, and a full Docker operations panel are outside the current scope. See the [accepted distribution and SSH decision](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md).
+ServerDash launches OpenSSH/SFTP subprocesses, so App Sandbox is currently disabled. The 1.0 internal-test line uses local ad-hoc signing and manual sharing with a small number of known testers; it does not require Apple Developer Program membership, Developer ID, notarization, or the Mac App Store. S11 port forwarding is an optional advanced local capability; CloudKit, paid tiers, guaranteed 24×7 alerts, Mosh, and a full Docker operations panel remain outside the current implemented scope. See the [accepted distribution and SSH decision](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md).

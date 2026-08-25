@@ -345,11 +345,17 @@ enum ConnectionConfigResolver {
     static func resolve(
         server: ServerRecord,
         identities: [IdentityRecord],
-        keys: [SSHKeyRecord]
+        keys: [SSHKeyRecord],
+        routes: [ConnectionRouteRecord] = []
     ) -> ServerConnectionConfig {
+        let route = routes.first(where: { $0.serverID == server.id })?.route ?? .direct
         guard let identityID = server.identityID,
               let identity = identities.first(where: { $0.id == identityID }) else {
-            guard server.identityID != nil else { return server.connectionConfig }
+            guard server.identityID != nil else {
+                var config = server.connectionConfig
+                config.route = route
+                return config
+            }
             return ServerConnectionConfig(
                 id: server.id,
                 credentialID: server.identityID ?? server.id,
@@ -359,6 +365,7 @@ enum ConnectionConfigResolver {
                 username: "",
                 authentication: server.authentication,
                 privateKeyPath: "",
+                route: route,
                 identityReferenceMissing: true
             )
         }
@@ -375,7 +382,8 @@ enum ConnectionConfigResolver {
             privateKeyPath: keyPath,
             sshKeyID: key?.id,
             usesImportedKey: key?.storageMode == .imported,
-            hasPassphrase: key?.hasPassphrase ?? false
+            hasPassphrase: key?.hasPassphrase ?? false,
+            route: route
         )
     }
 
@@ -406,6 +414,7 @@ struct ServerConnectionConfig: Hashable, Sendable {
     var usesImportedKey: Bool = false
     var hasPassphrase: Bool = false
     var connectTimeout: TimeInterval = PrivacySettings.connectTimeout
+    var route: ConnectionRoute = .direct
     var identityReferenceMissing: Bool = false
 }
 

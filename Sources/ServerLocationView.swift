@@ -108,20 +108,17 @@ actor ServerLocationService {
     }
 
     private func requestFromServer(_ config: ServerConnectionConfig) async throws -> Data {
-        let arguments = SSHSupport.arguments(
+        let plan = try SystemOpenSSHConnectionProvider().launchPlan(
             for: config,
-            strictHostChecking: "yes",
-            batchMode: config.authentication == .privateKey,
-            remoteCommand: Self.remoteCommand
+            purpose: .remoteCommand(Self.remoteCommand)
         )
-        let environment = SSHSupport.environment(for: config)
 
         do {
             let result = try await ConnectionProcessController.shared.run(
                 ProcessRunRequest(
-                    executable: "/usr/bin/ssh",
-                    arguments: arguments,
-                    environment: environment,
+                    executable: plan.executable,
+                    arguments: plan.arguments,
+                    environment: plan.environment,
                     connectTimeout: config.connectTimeout,
                     totalTimeout: max(16, config.connectTimeout + 8),
                     maxOutputBytes: 1_048_576,

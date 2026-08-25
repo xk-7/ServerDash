@@ -331,6 +331,8 @@ enum HostTrustSource: String, Sendable {
     case terminal
     case sftp
     case sshTest
+    case connectionRoute
+    case tunnel
 
     var title: String {
         switch self {
@@ -338,6 +340,8 @@ enum HostTrustSource: String, Sendable {
         case .terminal: "终端"
         case .sftp: "SFTP"
         case .sshTest: "SSH 测试"
+        case .connectionRoute: "连接路线"
+        case .tunnel: "SSH 隧道"
         }
     }
 }

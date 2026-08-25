@@ -377,19 +377,29 @@ final class TerminalHostView: NSView {
 
     private func startSSH() {
         terminalView.resetHostKeyFailureDetection()
-        let arguments = SSHSupport.arguments(
-            for: config,
-            strictHostChecking: "yes"
-        )
-        let environment = SSHSupport.environment(for: config)
-            .map { "\($0.key)=\($0.value)" }
-            .sorted()
-        terminalView.startProcess(
-            executable: "/usr/bin/ssh",
-            args: arguments,
-            environment: environment,
-            execName: "ssh"
-        )
+        do {
+            let plan = try SystemOpenSSHConnectionProvider().launchPlan(
+                for: config,
+                purpose: .interactiveShell
+            )
+            let environment = plan.environment
+                .map { "\($0.key)=\($0.value)" }
+                .sorted()
+            terminalView.startProcess(
+                executable: plan.executable,
+                args: plan.arguments,
+                environment: environment,
+                execName: "ssh"
+            )
+        } catch {
+            EventLogStore.shared.append(
+                serverID: config.id,
+                module: .terminal,
+                level: "error",
+                message: "终端连接路线准备失败"
+            )
+            onTerminated?(-1)
+        }
     }
 
     private static func swiftTermColor(_ color: TerminalColor) -> SwiftTerm.Color {

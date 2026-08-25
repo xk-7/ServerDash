@@ -12,6 +12,7 @@
 		128724D3D69B69FDB6A53EFC /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7B9A7128821971D27B4E3F /* Persistence.swift */; };
 		1DD6167D45D75A6CA479734F /* SFTPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943DE456AB8EBE7128B9AF0E /* SFTPService.swift */; };
 		212C7E2A794E9B4A130301E5 /* ServerDashApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */; };
+		255213F397E2ED879AC43A6D /* SSHConfigImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2842B41AFC38BF899197783 /* SSHConfigImport.swift */; };
 		2905A618664D7D33C2CC875E /* MonitorDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABAF8D2D559E4E9913860862 /* MonitorDetailViews.swift */; };
 		2B10618EA7A302B318BA5719 /* ResourceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DBF7489718D78F03CFD571B /* ResourceViews.swift */; };
 		2C5125E79643C8C644726583 /* ServerMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E69BF1FDC095C8CA263A7E /* ServerMonitorView.swift */; };
@@ -19,6 +20,7 @@
 		32BD194CEC38B2F0C10A5D3C /* DashboardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72AFCD45B23730D303190D42 /* DashboardViews.swift */; };
 		3F49CD8D3E26FEE90022B46F /* MonitoringHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */; };
 		4BB25D17D57E99D1400875D2 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
+		5B200D9D7285DE7BC76FAF62 /* ProfessionalConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */; };
 		5D1ECA6BAC4A15B7BCBA8603 /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BA641DDE28754C1E7F14AA /* Services.swift */; };
 		5FBE0D9DE5D2BE5BF4322280 /* MonitoringHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28CB56C032111EE4D021A5A5 /* MonitoringHistory.swift */; };
 		68253F969FDC84F4EE5B33DF /* TerminalAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 735EFA378239958E015D2E5F /* TerminalAppearanceTests.swift */; };
@@ -31,6 +33,7 @@
 		96D5243F43F41C3978C7BA37 /* TerminalAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5922649DA8CDEBB3C7A963F5 /* TerminalAppearance.swift */; };
 		98975C1A363FED85E59FA30A /* EditorAndSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */; };
 		9AB76B8335AFE9FE81BF7D78 /* SFTPListingParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */; };
+		A06758132146DBCFCFB84B54 /* ProfessionalConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */; };
 		A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */; };
 		B0A1873ABCFDB642FB08089B /* DesignGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */; };
 		B152A8EB774592B5A9FF269A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E316E9C6F6836AA6547B6942 /* Assets.xcassets */; };
@@ -38,6 +41,8 @@
 		C0E74D88BC523BE29BE48325 /* LICENSES.md in Resources */ = {isa = PBXBuildFile; fileRef = 52A7F90E5D1EBBC61944D38A /* LICENSES.md */; };
 		C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = B31B612E337EB371ED8FE01C /* SwiftTerm */; };
 		C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */; };
+		C7FE7E6F6410B4D6BC49E7C1 /* ProfessionalConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */; };
+		D99D7A6BA127C07D541E62E6 /* PortForwarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DFF908A3A8D318995EC034 /* PortForwarding.swift */; };
 		D9C13650C00BBACB6154146B /* TerminalAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */; };
 		DC537BF8A738012B96641B04 /* ServerLocationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */; };
 		E198FF02DF752866C68B7687 /* MonitoringResponseParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */; };
@@ -79,6 +84,8 @@
 		5DBF7489718D78F03CFD571B /* ResourceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceViews.swift; sourceTree = "<group>"; };
 		60BA641DDE28754C1E7F14AA /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
 		62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessions.swift; sourceTree = "<group>"; };
+		69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnectionsView.swift; sourceTree = "<group>"; };
+		69DFF908A3A8D318995EC034 /* PortForwarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwarding.swift; sourceTree = "<group>"; };
 		72AFCD45B23730D303190D42 /* DashboardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViews.swift; sourceTree = "<group>"; };
 		735EFA378239958E015D2E5F /* TerminalAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearanceTests.swift; sourceTree = "<group>"; };
 		749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignGallery.swift; sourceTree = "<group>"; };
@@ -88,14 +95,17 @@
 		8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEngine.swift; sourceTree = "<group>"; };
 		943DE456AB8EBE7128B9AF0E /* SFTPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPService.swift; sourceTree = "<group>"; };
 		9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerLocationView.swift; sourceTree = "<group>"; };
+		A2842B41AFC38BF899197783 /* SSHConfigImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfigImport.swift; sourceTree = "<group>"; };
 		AAE7A846E41C1811B95FF217 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		ABAF8D2D559E4E9913860862 /* MonitorDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorDetailViews.swift; sourceTree = "<group>"; };
 		ACBCD7321B546E993FC42494 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnectionTests.swift; sourceTree = "<group>"; };
 		B3FD877C201A30AA5ED80CBC /* themes.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = themes.json; sourceTree = "<group>"; };
 		BB4D01D3F221186769CB54C4 /* TrustedHostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedHostsView.swift; sourceTree = "<group>"; };
 		BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearanceViews.swift; sourceTree = "<group>"; };
 		CA3D23AC51B51EA56248DE7F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViews.swift; sourceTree = "<group>"; };
+		D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnections.swift; sourceTree = "<group>"; };
 		E0D26040F23F5DC88D6DF1C8 /* SwiftTerm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftTerm; path = Vendor/SwiftTerm; sourceTree = SOURCE_ROOT; };
 		E316E9C6F6836AA6547B6942 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E8977A7C4041AE3769BA6797 /* MonitoringHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringHistoryView.swift; sourceTree = "<group>"; };
@@ -141,6 +151,9 @@
 				E8977A7C4041AE3769BA6797 /* MonitoringHistoryView.swift */,
 				7A3251FDD3D3B5EF5C4D9C16 /* MonitorLayout.swift */,
 				5C7B9A7128821971D27B4E3F /* Persistence.swift */,
+				69DFF908A3A8D318995EC034 /* PortForwarding.swift */,
+				D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */,
+				69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */,
 				5DBF7489718D78F03CFD571B /* ResourceViews.swift */,
 				4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */,
 				9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */,
@@ -149,6 +162,7 @@
 				943DE456AB8EBE7128B9AF0E /* SFTPService.swift */,
 				416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */,
 				CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */,
+				A2842B41AFC38BF899197783 /* SSHConfigImport.swift */,
 				5922649DA8CDEBB3C7A963F5 /* TerminalAppearance.swift */,
 				BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */,
 				62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */,
@@ -193,6 +207,7 @@
 				393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */,
 				198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */,
 				429FD61E1936AAB5EC5860C9 /* MonitorLayoutStoreTests.swift */,
+				AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */,
 				7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */,
 				45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */,
 				735EFA378239958E015D2E5F /* TerminalAppearanceTests.swift */,
@@ -316,9 +331,13 @@
 				5FBE0D9DE5D2BE5BF4322280 /* MonitoringHistory.swift in Sources */,
 				917D5D1111BC58E0BDBE869D /* MonitoringHistoryView.swift in Sources */,
 				128724D3D69B69FDB6A53EFC /* Persistence.swift in Sources */,
+				D99D7A6BA127C07D541E62E6 /* PortForwarding.swift in Sources */,
+				C7FE7E6F6410B4D6BC49E7C1 /* ProfessionalConnections.swift in Sources */,
+				5B200D9D7285DE7BC76FAF62 /* ProfessionalConnectionsView.swift in Sources */,
 				2B10618EA7A302B318BA5719 /* ResourceViews.swift in Sources */,
 				1DD6167D45D75A6CA479734F /* SFTPService.swift in Sources */,
 				C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */,
+				255213F397E2ED879AC43A6D /* SSHConfigImport.swift in Sources */,
 				212C7E2A794E9B4A130301E5 /* ServerDashApp.swift in Sources */,
 				DC537BF8A738012B96641B04 /* ServerLocationView.swift in Sources */,
 				2C5125E79643C8C644726583 /* ServerMonitorView.swift in Sources */,
@@ -341,6 +360,7 @@
 				684CCF714F344DA86E6DDE0B /* MonitorLayoutStoreTests.swift in Sources */,
 				3F49CD8D3E26FEE90022B46F /* MonitoringHistoryTests.swift in Sources */,
 				E198FF02DF752866C68B7687 /* MonitoringResponseParserTests.swift in Sources */,
+				A06758132146DBCFCFB84B54 /* ProfessionalConnectionTests.swift in Sources */,
 				A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */,
 				9AB76B8335AFE9FE81BF7D78 /* SFTPListingParserTests.swift in Sources */,
 				68253F969FDC84F4EE5B33DF /* TerminalAppearanceTests.swift in Sources */,
@@ -445,7 +465,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -527,7 +547,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
