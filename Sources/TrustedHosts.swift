@@ -67,7 +67,10 @@ enum TrustedHostStore {
     }
 
     static func hostMarkers(_ host: String, port: Int) -> Set<String> {
-        [host, "[\(host)]:\(port)", "[\(host)]:22"]
+        if port == 22 {
+            return [host, "[\(host)]:22"]
+        }
+        return ["[\(host)]:\(port)"]
     }
 
     static func existingKeys(host: String, port: Int) -> [(algorithm: String, fingerprint: String, line: String)] {
@@ -179,10 +182,9 @@ enum TrustedHostStore {
                 stored.first?.algorithm
             )
             if stored.isEmpty {
-                if allKeys().contains(where: { $0.fingerprint == probe.fingerprint }) {
-                    return HostTrustDecision.trusted(probe)
-                }
-                return PrivacySettings.confirmHostFingerprint ? .unknown(probe) : .trusted(probe)
+                // A key is trusted for a normalized host and port, not globally by fingerprint.
+                // Reusing the same key on another endpoint still requires an explicit decision.
+                return .unknown(probe)
             }
             if let matching = stored.first(where: { $0.algorithm == rawAlgorithm(from: probe) })
                 ?? stored.first(where: { $0.fingerprint == probe.fingerprint }) {
@@ -255,9 +257,9 @@ enum TrustedHostStore {
     static func normalizedKeyLine(_ line: String, host: String, port: Int) -> String {
         let fields = line.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: \.isWhitespace)
         guard fields.count >= 3 else { return line }
-        var names = Set(String(fields[0]).split(separator: ",").map(String.init))
-        names.formUnion(hostMarkers(host, port: port))
-        let ordered = [host] + names.filter { $0 != host }.sorted()
+        let primary = port == 22 ? host : "[\(host)]:\(port)"
+        let markers = hostMarkers(host, port: port)
+        let ordered = [primary] + markers.filter { $0 != primary }.sorted()
         return "\(ordered.joined(separator: ",")) \(fields[1]) \(fields[2])"
     }
 
@@ -272,15 +274,9 @@ enum TrustedHostStore {
         guard !line.hasPrefix("#"), let names = line.split(separator: " ").first else { return false }
         let markers = hostMarkers(host, port: port)
         return String(names).split(separator: ",").contains { name in
-            if markers.contains(String(name)) {
-                return true
+            markers.contains { marker in
+                marker.caseInsensitiveCompare(String(name)) == .orderedSame
             }
-            let hostOnly = String(name)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-                .split(separator: ":")
-                .first
-                .map(String.init) ?? String(name)
-            return hostOnly.caseInsensitiveCompare(host) == .orderedSame
         }
     }
 

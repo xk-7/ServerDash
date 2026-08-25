@@ -18,6 +18,15 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 唯一中央监控调度器负责每服务器去重、优先级、封顶退避、低电量策略，以及 1–60 秒自动刷新或手动模式。
 - 每服务器独立运行时状态、增量舰队汇总、首次快照等待界面；采集失败后保留最后成功数据。
 
+### 本地监控历史与 Data Gap
+
+- 本地保存 CPU、内存、Load、Swap、磁盘和网络速率，并记录服务器 ID、采集时间、Collector/版本、数据质量和源数据年龄。
+- 提供 24 小时、7 天、30 天和自定义历史范围；根据显示宽度自动选择原始值、1 分钟或 15 分钟分辨率。
+- 采集缺口以明确阴影区显示，折线在缺口处断开，不用旧值连接出伪连续数据。
+- 区分超时、服务器不可达、认证失败、主机指纹变化、Mac 睡眠、本机断网、Collector 停止、不支持和未知失败。
+- 聚合保存 `min`/`max`/`avg`/`last`/`sampleCount`，并按可用像素数降采样，自动执行保留期和磁盘配额维护。
+- 默认保留 24 小时原始样本、30 天 1 分钟聚合和一年 15 分钟聚合；监控历史默认磁盘配额为 512 MiB。
+
 首要支持 Ubuntu LTS 和 Debian Stable。AlmaLinux、Rocky Linux 属于按能力开放的兼容目标；除非后续兼容矩阵另有说明，Alpine/BusyBox 环境不在支持范围内。
 
 ### SSH 连接与安全
@@ -58,8 +67,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 
 ### 数据与诊断
 
-- SwiftData 持久化服务器、身份、SSH 密钥引用、代码片段、可信主机和终端历史。
-- 版本化 Schema；数据库打开失败时提供重试、备份和重建。
+- SwiftData 持久化服务器、身份、SSH 密钥引用、代码片段、可信主机、终端历史、监控样本、聚合和 Data Gap。
+- VersionedSchema V1/V2 与 V1 → V2 迁移计划；数据库打开失败时提供重试、备份和重建。
 - OSLog 按 App、Data、SSH、Monitoring、Terminal、SFTP 分类。
 - 每台服务器独立事件日志及可复制、可预览的脱敏 SSH Diagnostics。
 - 隐藏 IP 会覆盖界面、Markdown 和诊断；冻结的 1.0 隐私约束要求远端位置查询显式选择加入，其当前界面与默认值接线仍属于内部测试前待完成工作。
@@ -77,13 +86,13 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 
 ## 开发与验证状态
 
-P0 性能加固按可独立验证的小批次实施。性能测量、子进程生命周期、可信主机协调、中央监控调度器和每服务器 RuntimeState 已通过 Universal Release 构建及完整的 77 项测试。依赖 Instruments 或真实服务器的性能阈值继续明确标记为待验证，不会当作已经达标。
+S07 本地监控历史和真实 Data Gap 展示已经接入既有中央调度器与每服务器 RuntimeState。当前内部构建通过 98 项自动化测试、Debug 构建和 Universal Release 构建；1/10/50 台服务器规模语义使用可重复 fixture 验证。Instruments、真实服务器性能阈值、睡眠/切网和长时间稳定性仍明确列为待实机验证。
 
 需求到代码的对应关系、各批次结果、验收覆盖和待实机项目见 [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md)。
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
-最新内部预览版：[ServerDash 0.1.0 test.3](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.3)（Build 2）。安装前请阅读[发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.3.md)；该构建使用 ad-hoc 签名、未经公证，仅供已知测试人员使用。
+最新内部预览版：[ServerDash 0.1.0 test.4](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.4)（Build 3）。安装前请阅读[发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.4.md)；该构建使用 ad-hoc 签名、未经公证，仅供已知测试人员使用。
 
 ## 运行
 
@@ -141,7 +150,7 @@ DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 
 ```text
 Sources/                    SwiftUI 应用、连接服务和数据模型
 Tests/                      单元与基础集成测试
-Docs/                       设计审查及 P0 实施/验证状态
+Docs/                       架构决策、实施状态与发布记录
 Resources/TerminalThemes/   本地终端主题与许可证说明
 Vendor/SwiftTerm/           固定并扩展的 SwiftTerm 1.11.2
 project.yml                 XcodeGen 工程定义

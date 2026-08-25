@@ -41,6 +41,9 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
     case keyboardInteractiveRequired
     case remoteCommandMissing
     case incompatibleMonitor(String)
+    case identityReferenceMissing
+    case privateKeyMissing
+    case credentialMissing
     case cancelled
     case outputLimitExceeded
     case commandFailed(String)
@@ -58,6 +61,9 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
         case .keyboardInteractiveRequired: "SSH_KBDINT"
         case .remoteCommandMissing: "SSH_CMD_MISSING"
         case .incompatibleMonitor: "MON_INCOMPATIBLE"
+        case .identityReferenceMissing: "CFG_IDENTITY_MISSING"
+        case .privateKeyMissing: "CFG_KEY_MISSING"
+        case .credentialMissing: "CRED_SECRET_MISSING"
         case .cancelled: "SSH_CANCELLED"
         case .outputLimitExceeded: "SSH_OUTPUT_LIMIT"
         case .commandFailed: "SSH_FAILED"
@@ -71,6 +77,7 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
         case .hostKeyChanged, .hostKeyUntrusted: .awaitingTrust
         case .authenticationFailed, .privateKeyOrPassphraseFailed, .keyboardInteractiveRequired:
             .authenticating
+        case .identityReferenceMissing, .privateKeyMissing, .credentialMissing: .failed
         case .cancelled: .cancelled
         default: .failed
         }
@@ -100,6 +107,12 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
             "远程命令不存在或不可执行。"
         case .incompatibleMonitor(let detail):
             detail.isEmpty ? "当前主机不支持监控采集。" : detail
+        case .identityReferenceMissing:
+            "连接引用的共享身份已不存在，请重新选择身份后再连接。"
+        case .privateKeyMissing:
+            "连接需要 SSH 私钥，但私钥引用或文件路径缺失。"
+        case .credentialMissing:
+            "连接需要的本地凭据缺失，请重新保存凭据。"
         case .cancelled:
             "连接已取消。"
         case .outputLimitExceeded:

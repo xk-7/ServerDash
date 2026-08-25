@@ -47,7 +47,9 @@ codesign --force --deep --sign - "${APP_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
 
 VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${APP_PATH}/Contents/Info.plist")"
-DMG_PATH="${DIST_DIR}/${APP_NAME}-${VERSION}-test.dmg"
+DMG_FILENAME="${APP_NAME}-${VERSION}-test.dmg"
+DMG_PATH="${DIST_DIR}/${DMG_FILENAME}"
+CHECKSUM_PATH="${DMG_PATH}.sha256"
 
 echo "Preparing DMG contents..."
 cp -R "${APP_PATH}" "${STAGING_DIR}/${APP_NAME}.app"
@@ -64,9 +66,14 @@ hdiutil create \
 
 hdiutil verify "${DMG_PATH}"
 
+CHECKSUM="$(shasum -a 256 "${DMG_PATH}" | awk '{print $1}')"
+printf '%s  %s\n' "${CHECKSUM}" "${DMG_FILENAME}" > "${CHECKSUM_PATH}"
+
 echo
 echo "Created test DMG:"
 echo "  ${DMG_PATH}"
+echo "  ${CHECKSUM_PATH}"
+echo "SHA-256: ${CHECKSUM}"
 echo
 echo "Architectures:"
 lipo -archs "${STAGING_DIR}/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"

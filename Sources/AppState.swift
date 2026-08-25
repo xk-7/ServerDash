@@ -60,6 +60,7 @@ actor MonitoringCoordinator {
     private let baseMaximumConcurrency: Int
     private let operation: Operation
     private let jitter: Jitter
+    private let clock: any MonitoringClock
     private var targets: [UUID: TargetState] = [:]
     private var queue: [UUID: QueueEntry] = [:]
     private var running: [UUID: Task<Void, Never>] = [:]
@@ -76,10 +77,12 @@ actor MonitoringCoordinator {
 
     init(
         maximumConcurrency: Int = 5,
+        clock: any MonitoringClock = SystemMonitoringClock(),
         jitter: @escaping Jitter = { range in Double.random(in: range) },
         operation: @escaping Operation
     ) {
         baseMaximumConcurrency = max(1, maximumConcurrency)
+        self.clock = clock
         self.jitter = jitter
         self.operation = operation
     }
@@ -228,7 +231,7 @@ actor MonitoringCoordinator {
                 enqueue(
                     serverID,
                     priority: priority,
-                    notBefore: .now,
+                    notBefore: clock.now(),
                     automatic: false
                 )
                 pump()
@@ -286,7 +289,7 @@ actor MonitoringCoordinator {
         enqueue(
             serverID,
             priority: priority,
-            notBefore: Date().addingTimeInterval(max(0, delay)),
+            notBefore: clock.now().addingTimeInterval(max(0, delay)),
             automatic: true
         )
     }
@@ -304,13 +307,13 @@ actor MonitoringCoordinator {
             return
         }
         while running.count < maximumConcurrency,
-              Date() >= nextDispatchDate,
-              let entry = nextReadyEntry() {
+              clock.now() >= nextDispatchDate,
+              let entry = nextReadyEntry(now: clock.now()) {
             queue[entry.serverID] = nil
             let serverID = entry.serverID
             let operation = self.operation
             PerformanceTrace.event(.monitorSchedulerDispatch)
-            nextDispatchDate = Date().addingTimeInterval(
+            nextDispatchDate = clock.now().addingTimeInterval(
                 1 / Self.maximumDispatchesPerSecond
             )
             running[serverID] = Task {
@@ -325,7 +328,7 @@ actor MonitoringCoordinator {
         scheduleWake()
     }
 
-    private func nextReadyEntry(now: Date = .now) -> QueueEntry? {
+    private func nextReadyEntry(now: Date) -> QueueEntry? {
         queue.values
             .filter { $0.notBefore <= now && running[$0.serverID] == nil }
             .sorted {
@@ -430,10 +433,11 @@ actor MonitoringCoordinator {
             return
         }
         let rateLimitedDate = max(nextDate, nextDispatchDate)
-        let delay = max(0, rateLimitedDate.timeIntervalSinceNow)
+        let delay = max(0, rateLimitedDate.timeIntervalSince(clock.now()))
+        let clock = self.clock
         wakeTask = Task {
             do {
-                try await Task.sleep(for: .seconds(delay))
+                try await clock.sleep(for: delay)
             } catch {
                 return
             }
@@ -560,6 +564,7 @@ final class AppState: ObservableObject {
     @Published private(set) var configs: [UUID: ServerConnectionConfig] = [:]
     @Published var selectedTerminalID: UUID?
     @Published private(set) var pendingTrust: HostTrustRequest?
+    @Published private(set) var monitoringHistoryError: String?
     @Published var refreshInterval: TimeInterval {
         didSet {
             UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
@@ -582,19 +587,31 @@ final class AppState: ObservableObject {
     private var selectedConfig: ServerConnectionConfig?
     private var serverRecords: [UUID: ServerRecord] = [:]
     private var runtimeStates: [UUID: ServerRuntimeState] = [:]
+    private var historyBootstrappedServerIDs: Set<UUID> = []
     private let trustCoordinator: HostTrustCoordinator
+    private let monitoringClock: any MonitoringClock
+    private var monitoringHistory: MonitoringHistoryRepository?
     private let connectivityMonitor = NWPathMonitor()
-    private lazy var monitoringCoordinator = MonitoringCoordinator { [weak self] serverID in
+    private lazy var monitoringCoordinator = MonitoringCoordinator(
+        clock: monitoringClock
+    ) { [weak self] serverID in
         guard let self else { return false }
         return await self.collectScheduled(serverID: serverID)
     }
 
     convenience init() {
-        self.init(trustCoordinator: HostTrustCoordinator())
+        self.init(
+            trustCoordinator: HostTrustCoordinator(),
+            monitoringClock: SystemMonitoringClock()
+        )
     }
 
-    init(trustCoordinator: HostTrustCoordinator) {
+    init(
+        trustCoordinator: HostTrustCoordinator,
+        monitoringClock: any MonitoringClock = SystemMonitoringClock()
+    ) {
         self.trustCoordinator = trustCoordinator
+        self.monitoringClock = monitoringClock
         let savedInterval = UserDefaults.standard.double(forKey: "refreshInterval")
         refreshInterval = savedInterval == 0 && !UserDefaults.standard.bool(forKey: "refreshIntervalConfigured")
             ? 5
@@ -604,7 +621,7 @@ final class AppState: ObservableObject {
         }
         connectivityMonitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor in
-                await self?.monitoringCoordinator.setNetworkAvailable(path.status == .satisfied)
+                self?.setMonitoringNetworkAvailable(path.status == .satisfied)
             }
         }
         connectivityMonitor.start(
@@ -622,12 +639,28 @@ final class AppState: ObservableObject {
     }
 
     func bootstrap(servers: [ServerRecord], context: ModelContext) {
-        _ = context
+        if monitoringHistory == nil {
+            monitoringHistory = MonitoringHistoryRepository(
+                context: context,
+                clock: monitoringClock
+            )
+        }
         for server in servers where runtimeStates[server.id] == nil {
             initializeRuntime(for: server, synchronizeMonitoring: false)
         }
         for server in servers {
             serverRecords[server.id] = server
+            guard historyBootstrappedServerIDs.insert(server.id).inserted else { continue }
+            do {
+                try monitoringHistory?.reconcileStartupGap(
+                    serverID: server.id,
+                    lastSuccessfulAt: server.lastSuccessfulMonitorAt,
+                    refreshInterval: refreshInterval,
+                    at: monitoringClock.now()
+                )
+            } catch {
+                reportHistoryFailure()
+            }
         }
         synchronizeMonitoringSchedule()
     }
@@ -709,6 +742,11 @@ final class AppState: ObservableObject {
     private func initialRenderState(for server: ServerRecord) -> ServerRenderState {
         var initial = ServerRenderState()
         initial.lastSuccessfulMonitorAt = server.lastSuccessfulMonitorAt
+        do {
+            initial.history = try monitoringHistory?.recentMetricPoints(serverID: server.id) ?? []
+        } catch {
+            reportHistoryFailure()
+        }
         if let data = server.capabilitiesJSON.data(using: .utf8) {
             initial.capabilities = try? JSONDecoder().decode(
                 ServerCapabilities.self,
@@ -750,6 +788,12 @@ final class AppState: ObservableObject {
         state.error = nil
         state.isRefreshing = false
         state.lastSuccessfulMonitorAt = snapshot.capturedAt
+        do {
+            try monitoringHistory?.recordSnapshot(snapshot, serverID: server.id)
+            monitoringHistoryError = nil
+        } catch {
+            reportHistoryFailure()
+        }
         publish(state, for: server.id)
         server.lastConnectedAt = snapshot.capturedAt
         server.lastSuccessfulMonitorAt = snapshot.capturedAt
@@ -908,6 +952,15 @@ final class AppState: ObservableObject {
         connectivityMonitor.cancel()
         terminalRegistry.terminateAll()
         KeyMaterialStore.cleanupAll()
+        do {
+            try monitoringHistory?.beginLifecycleGap(
+                .collectorStopped,
+                serverIDs: Array(serverRecords.keys),
+                at: monitoringClock.now()
+            )
+        } catch {
+            reportHistoryFailure()
+        }
         Task {
             await monitoringCoordinator.stop()
             await ConnectionProcessController.shared.terminateAll()
@@ -920,8 +973,48 @@ final class AppState: ObservableObject {
     }
 
     func setMonitoringSleeping(_ sleeping: Bool) {
+        do {
+            if sleeping {
+                try monitoringHistory?.beginLifecycleGap(
+                    .sleeping,
+                    serverIDs: Array(serverRecords.keys),
+                    at: monitoringClock.now()
+                )
+            } else {
+                try monitoringHistory?.endLifecycleGap(
+                    .sleeping,
+                    serverIDs: Array(serverRecords.keys),
+                    at: monitoringClock.now()
+                )
+            }
+        } catch {
+            reportHistoryFailure()
+        }
         Task {
             await monitoringCoordinator.setSleeping(sleeping)
+        }
+    }
+
+    func setMonitoringNetworkAvailable(_ available: Bool) {
+        do {
+            if available {
+                try monitoringHistory?.endLifecycleGap(
+                    .networkInterrupted,
+                    serverIDs: Array(serverRecords.keys),
+                    at: monitoringClock.now()
+                )
+            } else {
+                try monitoringHistory?.beginLifecycleGap(
+                    .networkInterrupted,
+                    serverIDs: Array(serverRecords.keys),
+                    at: monitoringClock.now()
+                )
+            }
+        } catch {
+            reportHistoryFailure()
+        }
+        Task {
+            await monitoringCoordinator.setNetworkAvailable(available)
         }
     }
 
@@ -1031,6 +1124,12 @@ final class AppState: ObservableObject {
             completedState.diagnostics = nil
             completedState.isRefreshing = false
             completedState.lastSuccessfulMonitorAt = snapshot.capturedAt
+            do {
+                try monitoringHistory?.recordSnapshot(snapshot, serverID: server.id)
+                monitoringHistoryError = nil
+            } catch {
+                reportHistoryFailure()
+            }
             publish(completedState, for: server.id)
             server.lastConnectedAt = .now
             server.lastSuccessfulMonitorAt = snapshot.capturedAt
@@ -1042,6 +1141,15 @@ final class AppState: ObservableObject {
             if Task.isCancelled || (error as? ConnectionError) == .cancelled {
                 setRefreshing(false, serverID: server.id)
                 return false
+            }
+            do {
+                try monitoringHistory?.recordFailure(
+                    error,
+                    serverID: server.id,
+                    at: monitoringClock.now()
+                )
+            } catch {
+                reportHistoryFailure()
             }
             applyFailure(
                 error,
@@ -1057,11 +1165,40 @@ final class AppState: ObservableObject {
         source: HostTrustSource,
         forceScan: Bool = false
     ) async throws {
+        try validateConnectionConfiguration(config)
         try await trustCoordinator.authorize(
             config,
             source: source,
             forceScan: forceScan
         )
+    }
+
+    private func validateConnectionConfiguration(_ config: ServerConnectionConfig) throws {
+        if config.identityReferenceMissing {
+            throw ConnectionError.identityReferenceMissing
+        }
+        let hasPassword = KeychainService.hasPassword(for: config.credentialID)
+        if config.authentication == .password, !hasPassword {
+            throw ConnectionError.credentialMissing
+        }
+        if config.authentication == .privateKey {
+            if config.usesImportedKey {
+                guard let keyID = config.sshKeyID,
+                      (try KeychainService.secret(
+                          account: KeychainService.importedKeyAccount(for: keyID)
+                      )) != nil else {
+                    throw ConnectionError.credentialMissing
+                }
+            } else if config.privateKeyPath.isEmpty {
+                throw ConnectionError.privateKeyMissing
+            }
+        }
+        if config.authentication == .keyThenPassword,
+           config.privateKeyPath.isEmpty,
+           !config.usesImportedKey,
+           !hasPassword {
+            throw ConnectionError.credentialMissing
+        }
     }
 
     func performTrustedConnection<T>(
@@ -1256,5 +1393,15 @@ final class AppState: ObservableObject {
                 (snapshot.networkSentBytes - previous.networkSentBytes) / elapsed
             )
         }
+    }
+
+    private func reportHistoryFailure() {
+        monitoringHistoryError = "监控历史写入失败；实时快照仍可用。"
+        eventLog.append(
+            serverID: nil,
+            module: .data,
+            level: "error",
+            message: "监控历史持久化失败（MON_HISTORY_STORE）"
+        )
     }
 }

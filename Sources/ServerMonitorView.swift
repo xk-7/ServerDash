@@ -12,6 +12,7 @@ struct ServerMonitorLayoutView: View {
     @ObservedObject var runtime: ServerRuntimeState
 
     @State private var showingLayoutEditor = false
+    @State private var showingHistory = false
     @State private var presentedDetail: MonitorCardKind?
     @State private var copiedMarkdown = false
 
@@ -100,6 +101,14 @@ struct ServerMonitorLayoutView: View {
             MonitorLayoutEditorView(serverID: server.id, snapshot: snapshot)
                 .environmentObject(layoutStore)
         }
+        .sheet(isPresented: $showingHistory) {
+            MonitoringHistoryView(
+                serverID: server.id,
+                serverName: server.displayName,
+                runtime: runtime
+            )
+            .environmentObject(appState)
+        }
         .overlay {
             if let card = presentedDetail {
                 AppleDismissibleOverlay(
@@ -145,6 +154,10 @@ struct ServerMonitorLayoutView: View {
             Button("编辑布局", systemImage: "rectangle.grid.2x2") {
                 showingLayoutEditor = true
             }
+            Button("历史", systemImage: "chart.xyaxis.line") {
+                showingHistory = true
+            }
+            .help("查看持久化监控历史和 Data Gap")
             Menu {
                 Button("复制 Markdown", systemImage: "doc.on.doc") {
                     copyMarkdown()

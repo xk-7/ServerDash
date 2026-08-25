@@ -349,7 +349,18 @@ enum ConnectionConfigResolver {
     ) -> ServerConnectionConfig {
         guard let identityID = server.identityID,
               let identity = identities.first(where: { $0.id == identityID }) else {
-            return server.connectionConfig
+            guard server.identityID != nil else { return server.connectionConfig }
+            return ServerConnectionConfig(
+                id: server.id,
+                credentialID: server.identityID ?? server.id,
+                name: server.displayName,
+                host: server.host,
+                port: server.port,
+                username: "",
+                authentication: server.authentication,
+                privateKeyPath: "",
+                identityReferenceMissing: true
+            )
         }
         let key = keys.first { $0.id == identity.sshKeyID }
         let keyPath = identity.authentication.usesPrivateKey ? (key?.filePath ?? "") : ""
@@ -395,6 +406,7 @@ struct ServerConnectionConfig: Hashable, Sendable {
     var usesImportedKey: Bool = false
     var hasPassphrase: Bool = false
     var connectTimeout: TimeInterval = PrivacySettings.connectTimeout
+    var identityReferenceMissing: Bool = false
 }
 
 struct ServerCapabilities: Hashable, Sendable, Codable {

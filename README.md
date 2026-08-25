@@ -18,6 +18,15 @@ ServerDash is a native macOS monitoring, SSH terminal, and SFTP client for Linux
 - A single bounded monitoring coordinator with per-server deduplication, priority scheduling, capped retry backoff, low-power behavior, and configurable 1â€“60 second refresh intervals or manual mode.
 - Independent per-server runtime state, incremental fleet summaries, explicit first-snapshot waiting UI, and preservation of the last successful data after a collection failure.
 
+### Local Monitoring History and Data Gaps
+
+- Persists CPU, memory, load, swap, disk, and network-rate samples locally with server ID, collection time, collector/version, quality, and source-data age.
+- Provides 24-hour, 7-day, 30-day, and custom history ranges with display-width-aware raw, 1-minute, and 15-minute resolution.
+- Shows collection gaps as explicit shaded intervals and splits chart lines at every gap instead of connecting stale values across missing data.
+- Distinguishes timeout, unreachable host, authentication failure, host-key change, Mac sleep, local network loss, collector stop, unsupported collector, and unknown failures.
+- Aggregates `min`/`max`/`avg`/`last`/`sampleCount`, downsamples to the available pixel width, and automatically maintains retention and storage limits.
+- Defaults to 24 hours of raw samples, 30 days of 1-minute aggregates, one year of 15-minute aggregates, and a 512 MiB monitoring-history quota.
+
 Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are capability-gated compatibility targets; Alpine and BusyBox-based environments are unsupported unless a later compatibility matrix says otherwise.
 
 ### SSH Connectivity and Security
@@ -58,8 +67,8 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 
 ### Data and Diagnostics
 
-- SwiftData persistence for servers, identities, SSH key references, snippets, trusted hosts, and terminal history.
-- Versioned schemas with retry, backup, and rebuild options when the database cannot be opened.
+- SwiftData persistence for servers, identities, SSH key references, snippets, trusted hosts, terminal history, monitoring samples, aggregates, and Data Gaps.
+- Versioned V1/V2 schemas with a V1-to-V2 migration plan, plus retry, backup, and rebuild options when the database cannot be opened.
 - OSLog categories for App, Data, SSH, Monitoring, Terminal, and SFTP.
 - Per-server event logs and previewable, copyable, redacted SSH diagnostics.
 - IP hiding applies to the UI, Markdown exports, and diagnostics. The frozen 1.0 privacy contract makes remote location lookup opt-in; its current UI/default enforcement is tracked as pre-release work.
@@ -77,13 +86,13 @@ The project uses the local `Vendor/SwiftTerm` package and does not download Swif
 
 ## Development Status
 
-P0 performance hardening is being delivered in independently verifiable batches. Measurement, subprocess lifecycle, trusted-host coordination, the central monitoring scheduler, and per-server RuntimeState have passed a Universal Release build and the complete 77-test suite. Instruments and real-server performance thresholds are intentionally tracked as pending rather than reported as complete.
+S07 local monitoring history and truthful Data Gap rendering are implemented on top of the existing central coordinator and per-server RuntimeState. The current internal build passes 98 automated tests plus Debug and Universal Release builds. Repeatable 1/10/50-server fixtures cover scale semantics; Instruments, real-server performance thresholds, sleep/network transitions, and long-running stability remain explicitly pending real-device validation.
 
 See [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining real-device checks.
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
-Latest internal preview: [ServerDash 0.1.0 test.3](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.3) (build 2). Read the [release notes](Docs/RELEASE_NOTES_0.1.0-TEST.3.md) before installing; this build is ad-hoc signed, not notarized, and intended only for known testers.
+Latest internal preview: [ServerDash 0.1.0 test.4](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.4) (build 3). Read the [release notes](Docs/RELEASE_NOTES_0.1.0-TEST.4.md) before installing; this build is ad-hoc signed, not notarized, and intended only for known testers.
 
 ## Build and Run
 
@@ -141,7 +150,7 @@ The DMG is written to `dist/`. On another Mac, open the app with Control-click â
 ```text
 Sources/                    SwiftUI app, connection services, and data models
 Tests/                      Unit and foundation integration tests
-Docs/                       Design reviews and P0 implementation/verification status
+Docs/                       Architecture decisions, implementation status, and release notes
 Resources/TerminalThemes/   Local terminal themes and licensing notes
 Vendor/SwiftTerm/           Pinned and extended SwiftTerm 1.11.2
 project.yml                 XcodeGen project definition

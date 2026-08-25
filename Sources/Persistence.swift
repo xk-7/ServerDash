@@ -2,74 +2,182 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+enum PersistenceSchemaV1: VersionedSchema {
+    static let versionIdentifier = Schema.Version(1, 0, 0)
+    static let models: [any PersistentModel.Type] = [
+        ServerRecord.self,
+        IdentityRecord.self,
+        SSHKeyRecord.self,
+        CommandSnippetRecord.self,
+        TrustedHostKey.self,
+        TerminalSessionHistory.self
+    ]
+}
+
+enum PersistenceSchemaV2: VersionedSchema {
+    static let versionIdentifier = Schema.Version(2, 0, 0)
+    static let models: [any PersistentModel.Type] = [
+        ServerRecord.self,
+        IdentityRecord.self,
+        SSHKeyRecord.self,
+        CommandSnippetRecord.self,
+        TrustedHostKey.self,
+        TerminalSessionHistory.self,
+        MonitoringSampleRecord.self,
+        MonitoringAggregateRecord.self,
+        MonitoringGapRecord.self
+    ]
+}
+
+enum ServerDashMigrationPlan: SchemaMigrationPlan {
+    static let schemas: [any VersionedSchema.Type] = [
+        PersistenceSchemaV1.self,
+        PersistenceSchemaV2.self
+    ]
+    static let stages: [MigrationStage] = [
+        .lightweight(fromVersion: PersistenceSchemaV1.self, toVersion: PersistenceSchemaV2.self)
+    ]
+}
+
 enum PersistenceController {
     static let schemaVersionKey = "serverDashSchemaVersion"
     static let currentSchemaVersion = 2
 
     static var schema: Schema {
-        Schema([
-            ServerRecord.self,
-            IdentityRecord.self,
-            SSHKeyRecord.self,
-            CommandSnippetRecord.self,
-            TrustedHostKey.self,
-            TerminalSessionHistory.self
-        ])
+        Schema(versionedSchema: PersistenceSchemaV2.self)
     }
 
-    static func makeContainer() throws -> ModelContainer {
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-        let container = try ModelContainer(for: schema, configurations: [configuration])
+    static func makeContainer(migrateLegacyStore: Bool = true) throws -> ModelContainer {
+        let root = applicationSupportDirectory()
+        let dataDirectory = dataDirectory(applicationSupportRoot: root)
+        try FileManager.default.createDirectory(
+            at: dataDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let storeURL = activeStoreURL(applicationSupportRoot: root)
+        if migrateLegacyStore {
+            try copyLegacyStoreIfNeeded(applicationSupportRoot: root, destination: storeURL)
+        }
+        let configuration = ModelConfiguration(
+            "ServerDash",
+            schema: schema,
+            url: storeURL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(
+            for: schema,
+            migrationPlan: ServerDashMigrationPlan.self,
+            configurations: [configuration]
+        )
         UserDefaults.standard.set(currentSchemaVersion, forKey: schemaVersionKey)
         return container
     }
 
     static func makeInMemoryContainer() throws -> ModelContainer {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        return try ModelContainer(for: schema, configurations: [configuration])
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: ServerDashMigrationPlan.self,
+            configurations: [configuration]
+        )
     }
 
     static func backupExistingStore() throws -> URL? {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let backup = support.appendingPathComponent(
-            "ServerDash-backup-\(Int(Date().timeIntervalSince1970)).store"
+        let root = applicationSupportDirectory()
+        guard let source = existingStoreURL(applicationSupportRoot: root) else { return nil }
+        let backup = root
+            .appendingPathComponent("ServerDash/Backups", isDirectory: true)
+            .appendingPathComponent(String(Int(Date().timeIntervalSince1970)), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: backup,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
         )
-        guard let source = existingStoreURL() else { return nil }
-        try FileManager.default.copyItem(at: source, to: backup)
+        try copyStoreFamily(
+            source: source,
+            destination: backup.appendingPathComponent("default.store")
+        )
         return backup
     }
 
     static func destroyStore() throws {
-        for url in storeFileURLs() where FileManager.default.fileExists(atPath: url.path) {
+        let store = activeStoreURL(applicationSupportRoot: applicationSupportDirectory())
+        for url in storeFamilyURLs(base: store) where FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
     }
 
-    private static func applicationSupportDirectory() -> URL {
+    static func applicationSupportDirectory() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 
-    private static func existingStoreURL() -> URL? {
-        storeFileURLs().first {
-            $0.pathExtension == "store" && FileManager.default.fileExists(atPath: $0.path)
+    static func dataDirectory(applicationSupportRoot: URL) -> URL {
+        applicationSupportRoot.appendingPathComponent("ServerDash/Data", isDirectory: true)
+    }
+
+    static func activeStoreURL(applicationSupportRoot: URL) -> URL {
+        dataDirectory(applicationSupportRoot: applicationSupportRoot)
+            .appendingPathComponent("default.store")
+    }
+
+    static func legacyStoreURLs(applicationSupportRoot: URL) -> [URL] {
+        [
+            applicationSupportRoot.appendingPathComponent("default.store"),
+            applicationSupportRoot.appendingPathComponent("ServerDash.store"),
+            applicationSupportRoot.appendingPathComponent("ServerDash/default.store")
+        ]
+    }
+
+    static func scopedStoreFileURLs(applicationSupportRoot: URL) -> [URL] {
+        storeFamilyURLs(base: activeStoreURL(applicationSupportRoot: applicationSupportRoot))
+    }
+
+    private static func existingStoreURL(applicationSupportRoot: URL) -> URL? {
+        let active = activeStoreURL(applicationSupportRoot: applicationSupportRoot)
+        if FileManager.default.fileExists(atPath: active.path) {
+            return active
+        }
+        return legacyStoreURLs(applicationSupportRoot: applicationSupportRoot).first {
+            FileManager.default.fileExists(atPath: $0.path)
         }
     }
 
-    private static func storeFileURLs() -> [URL] {
-        let support = applicationSupportDirectory()
-        let bases = [
-            support.appendingPathComponent("default.store"),
-            support.appendingPathComponent("ServerDash.store"),
-            support.appendingPathComponent("ServerDash/default.store")
-        ]
-        let discovered = (try? FileManager.default.contentsOfDirectory(
-            at: support,
-            includingPropertiesForKeys: nil
-        ))?
-            .filter { $0.pathExtension == "store" } ?? []
-        return (bases + discovered).flatMap { url in
-            [url, URL(fileURLWithPath: url.path + "-wal"), URL(fileURLWithPath: url.path + "-shm")]
+    private static func copyLegacyStoreIfNeeded(
+        applicationSupportRoot: URL,
+        destination: URL
+    ) throws {
+        guard !FileManager.default.fileExists(atPath: destination.path),
+              let source = legacyStoreURLs(applicationSupportRoot: applicationSupportRoot).first(where: {
+                  FileManager.default.fileExists(atPath: $0.path)
+              }) else { return }
+        do {
+            try copyStoreFamily(source: source, destination: destination)
+        } catch {
+            // Only the newly created destination family is removed. The legacy source is untouched.
+            for url in storeFamilyURLs(base: destination) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            throw error
         }
+    }
+
+    private static func copyStoreFamily(source: URL, destination: URL) throws {
+        let sources = storeFamilyURLs(base: source)
+        let destinations = storeFamilyURLs(base: destination)
+        for (sourceURL, destinationURL) in zip(sources, destinations)
+        where FileManager.default.fileExists(atPath: sourceURL.path) {
+            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+        }
+    }
+
+    private static func storeFamilyURLs(base: URL) -> [URL] {
+        [
+            base,
+            URL(fileURLWithPath: base.path + "-wal"),
+            URL(fileURLWithPath: base.path + "-shm")
+        ]
     }
 }
 
@@ -100,7 +208,7 @@ final class PersistenceSession: ObservableObject {
         do {
             lastBackupURL = try PersistenceController.backupExistingStore()
             try PersistenceController.destroyStore()
-            container = try PersistenceController.makeContainer()
+            container = try PersistenceController.makeContainer(migrateLegacyStore: false)
             openError = nil
         } catch {
             openError = error

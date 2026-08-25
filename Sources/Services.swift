@@ -224,6 +224,9 @@ enum SSHSupport {
         case .keyThenPassword:
             if !keyPath.isEmpty {
                 arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+            } else {
+                // Do not silently fall back to unrelated ssh-agent or default-file identities.
+                arguments += ["-o", "PubkeyAuthentication=no"]
             }
             arguments += ["-o", "PreferredAuthentications=publickey,password"]
         }

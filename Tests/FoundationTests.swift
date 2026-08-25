@@ -203,6 +203,25 @@ final class TrustedHostStoreTests: XCTestCase {
         XCTAssertTrue(contents.contains("10.0.0.8"))
     }
 
+    func testTrustIsScopedToPortForSameHost() throws {
+        let key = Data("port-scoped-host-key".utf8).base64EncodedString()
+        let probe = SSHHostKeyProbe(
+            host: "ports.example.test",
+            port: 2222,
+            algorithm: "ED25519",
+            fingerprint: "unused-by-store",
+            keyLine: "ports.example.test ssh-ed25519 \(key)"
+        )
+
+        try TrustedHostStore.trust(probe)
+
+        XCTAssertTrue(TrustedHostStore.hasUsableHostName(host: probe.host, port: 2222))
+        XCTAssertFalse(TrustedHostStore.hasUsableHostName(host: probe.host, port: 22))
+        let contents = try String(contentsOf: temporaryURL, encoding: .utf8)
+        XCTAssertTrue(contents.contains("[ports.example.test]:2222"))
+        XCTAssertFalse(contents.contains("[ports.example.test]:22,"))
+    }
+
     func testTrustedInspectOneHundredTimesNeverInvokesKeyscanProvider() async throws {
         let key = Data("steady-state-host-key".utf8).base64EncodedString()
         let probe = SSHHostKeyProbe(
@@ -262,6 +281,40 @@ final class TrustedHostStoreTests: XCTestCase {
         }
         XCTAssertNotEqual(oldFingerprint, scannedProbe.fingerprint)
         XCTAssertEqual(scannedProbe.fingerprint, newFingerprint)
+    }
+
+    func testSameFingerprintOnDifferentHostStillRequiresExplicitTrust() async throws {
+        let key = Data("shared-host-key".utf8).base64EncodedString()
+        try TrustedHostStore.trust(
+            SSHHostKeyProbe(
+                host: "first.example.test",
+                port: 22,
+                algorithm: "ED25519",
+                fingerprint: "unused-by-store",
+                keyLine: "first.example.test ssh-ed25519 \(key)"
+            )
+        )
+        let second = makeConfig(host: "second.example.test", port: 22)
+        let decision = try await TrustedHostStore.inspect(
+            second,
+            forceScan: true
+        ) { host, port, _ in
+            SSHHostKeyProbe(
+                host: host,
+                port: port,
+                algorithm: "ED25519",
+                fingerprint: TrustedHostStore.fingerprint(
+                    for: "\(host) ssh-ed25519 \(key)"
+                ) ?? "",
+                keyLine: "\(host) ssh-ed25519 \(key)"
+            )
+        }
+
+        guard case .unknown(let probe) = decision else {
+            return XCTFail("Trust must remain scoped to host and port")
+        }
+        XCTAssertEqual(probe.host, "second.example.test")
+        XCTAssertFalse(TrustedHostStore.hasUsableHostName(host: probe.host, port: probe.port))
     }
 
     private func makeConfig(host: String, port: Int) -> ServerConnectionConfig {
