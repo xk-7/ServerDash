@@ -2,7 +2,36 @@
 
 本项目的重要变更记录在此文件中。
 
-## Unreleased - P0 性能与流程加固（2026-08-24）
+## 0.1.0-test.3 - S00 决策基线（2026-08-25）
+
+### Added
+
+- 增加四份 Accepted ADR，冻结内部测试分发与系统 OpenSSH、单业务窗口与 app-scoped 长任务、监控运行承诺、远端平台与 Docker Provider 决策。
+- 增加 1.0 核心范围、兼容目标、隐私默认值和非目标清单，明确本产品不设计付费分层。
+- 增加架构决策索引，将 D-01、D-02、D-03、D-06、D-07 映射到后续实施阶段。
+- 增加 [0.1.0-test.3 发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.3.md)。
+
+### Changed
+
+- 中英文 README 改为与内部测试路线一致：本地 ad-hoc 签名、本人和少量已知测试人员手动分发，不依赖 Developer ID、公证或 Mac App Store。
+- 首要远端平台收敛为 Ubuntu LTS 和 Debian Stable；AlmaLinux、Rocky Linux 明确为 capability-gated 兼容目标。
+- 位置查询产品约束冻结为新用户默认关闭、首次请求前显式选择加入；当前代码接线仍作为发布前待办公开记录。
+- `CFBundleVersion` 从 1 单调递增到 2，便于区分本次内部测试包。
+
+### Security and Compatibility
+
+- 保持系统 OpenSSH、应用专属 `known_hosts` 和 `StrictHostKeyChecking=yes`；没有新增宽松回退。
+- 没有修改 SwiftData 数据、Keychain 凭据、真实 SSH 配置或 Sparkle 私钥。
+- Accepted ADR 只代表决策冻结，不代表 S01～S06 的代码和实机验收已经完成。
+
+### Verification
+
+- Debug 和 Universal Release 构建通过。
+- 完整自动化测试 77 项通过、0 失败。
+- Release App 的 ad-hoc 签名、双架构和 DMG 文件系统校验通过。
+- 真实 SSH/SFTP、其他测试 Mac 首次启动和长时间运行仍为待实机验证。
+
+## 0.1.0-test.2 - P0 性能与流程加固（2026-08-24）
 
 ### Added
 

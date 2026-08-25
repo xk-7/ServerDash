@@ -18,7 +18,7 @@ ServerDash is a native macOS monitoring, SSH terminal, and SFTP client for Linux
 - A single bounded monitoring coordinator with per-server deduplication, priority scheduling, capped retry backoff, low-power behavior, and configurable 1–60 second refresh intervals or manual mode.
 - Independent per-server runtime state, incremental fleet summaries, explicit first-snapshot waiting UI, and preservation of the last successful data after a collection failure.
 
-Primary targets are Ubuntu LTS, Debian Stable, AlmaLinux, and Rocky Linux. Alpine and BusyBox-based environments have limited support.
+Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are capability-gated compatibility targets; Alpine and BusyBox-based environments are unsupported unless a later compatibility matrix says otherwise.
 
 ### SSH Connectivity and Security
 
@@ -62,7 +62,7 @@ Primary targets are Ubuntu LTS, Debian Stable, AlmaLinux, and Rocky Linux. Alpin
 - Versioned schemas with retry, backup, and rebuild options when the database cannot be opened.
 - OSLog categories for App, Data, SSH, Monitoring, Terminal, and SFTP.
 - Per-server event logs and previewable, copyable, redacted SSH diagnostics.
-- IP hiding applies to the UI, Markdown exports, and diagnostics. Disabling location collection prevents remote requests to `ipinfo.io`.
+- IP hiding applies to the UI, Markdown exports, and diagnostics. The frozen 1.0 privacy contract makes remote location lookup opt-in; its current UI/default enforcement is tracked as pre-release work.
 - Performance markers and touched diagnostic paths do not record hosts, users, paths, commands, fingerprints, or credentials.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete update history.
@@ -80,6 +80,10 @@ The project uses the local `Vendor/SwiftTerm` package and does not download Swif
 P0 performance hardening is being delivered in independently verifiable batches. Measurement, subprocess lifecycle, trusted-host coordination, the central monitoring scheduler, and per-server RuntimeState have passed a Universal Release build and the complete 77-test suite. Instruments and real-server performance thresholds are intentionally tracked as pending rather than reported as complete.
 
 See [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining real-device checks.
+
+The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
+
+Latest internal preview: [ServerDash 0.1.0 test.3](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.3) (build 2). Read the [release notes](Docs/RELEASE_NOTES_0.1.0-TEST.3.md) before installing; this build is ad-hoc signed, not notarized, and intended only for known testers.
 
 ## Build and Run
 
@@ -154,4 +158,4 @@ project.yml                 XcodeGen project definition
 
 ## Distribution and Scope
 
-ServerDash launches OpenSSH/SFTP subprocesses, so App Sandbox is currently disabled. The current architecture targets direct Developer ID distribution and is not suitable for the Mac App Store without changes. Production signing/notarization, iCloud, alerts, Mosh, port forwarding, and a full Docker operations panel are outside the current scope.
+ServerDash launches OpenSSH/SFTP subprocesses, so App Sandbox is currently disabled. The 1.0 internal-test line uses local ad-hoc signing and manual sharing with a small number of known testers; it does not require Apple Developer Program membership, Developer ID, notarization, or the Mac App Store. CloudKit, paid tiers, guaranteed 24×7 alerts, Mosh, port forwarding, and a full Docker operations panel are outside the current scope. See the [accepted distribution and SSH decision](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md).

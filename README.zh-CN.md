@@ -18,7 +18,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 唯一中央监控调度器负责每服务器去重、优先级、封顶退避、低电量策略，以及 1–60 秒自动刷新或手动模式。
 - 每服务器独立运行时状态、增量舰队汇总、首次快照等待界面；采集失败后保留最后成功数据。
 
-当前主要支持 Ubuntu LTS、Debian Stable、AlmaLinux 和 Rocky Linux；Alpine/BusyBox 环境属于有限支持。
+首要支持 Ubuntu LTS 和 Debian Stable。AlmaLinux、Rocky Linux 属于按能力开放的兼容目标；除非后续兼容矩阵另有说明，Alpine/BusyBox 环境不在支持范围内。
 
 ### SSH 连接与安全
 
@@ -62,7 +62,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 版本化 Schema；数据库打开失败时提供重试、备份和重建。
 - OSLog 按 App、Data、SSH、Monitoring、Terminal、SFTP 分类。
 - 每台服务器独立事件日志及可复制、可预览的脱敏 SSH Diagnostics。
-- 隐藏 IP 会覆盖界面、Markdown 和诊断；停止位置采集后服务器不再请求 `ipinfo.io`。
+- 隐藏 IP 会覆盖界面、Markdown 和诊断；冻结的 1.0 隐私约束要求远端位置查询显式选择加入，其当前界面与默认值接线仍属于内部测试前待完成工作。
 - 性能标记及本轮涉及的诊断路径不记录主机、用户名、路径、命令、指纹或凭据。
 
 完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。
@@ -80,6 +80,10 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 P0 性能加固按可独立验证的小批次实施。性能测量、子进程生命周期、可信主机协调、中央监控调度器和每服务器 RuntimeState 已通过 Universal Release 构建及完整的 77 项测试。依赖 Instruments 或真实服务器的性能阈值继续明确标记为待验证，不会当作已经达标。
 
 需求到代码的对应关系、各批次结果、验收覆盖和待实机项目见 [Docs/P0_IMPLEMENTATION_STATUS.md](Docs/P0_IMPLEMENTATION_STATUS.md)。
+
+内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
+
+最新内部预览版：[ServerDash 0.1.0 test.3](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.3)（Build 2）。安装前请阅读[发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.3.md)；该构建使用 ad-hoc 签名、未经公证，仅供已知测试人员使用。
 
 ## 运行
 
@@ -154,4 +158,4 @@ project.yml                 XcodeGen 工程定义
 
 ## 分发与范围
 
-应用需要启动 OpenSSH/SFTP 子进程，因此当前关闭 App Sandbox，适合 Developer ID 直接分发，不适合原样提交 Mac App Store。正式签名、公证、iCloud、告警中心、Mosh、端口转发和完整 Docker 运维面板暂不在当前范围内。
+应用需要启动 OpenSSH/SFTP 子进程，因此当前关闭 App Sandbox。1.0 内部测试路线使用本地 ad-hoc 签名，只在本人和少量已知测试人员之间手动分发；不依赖 Apple Developer Program、Developer ID、公证或 Mac App Store。CloudKit、付费分层、7×24 告警承诺、Mosh、端口转发和完整 Docker 运维面板不在当前范围内。详见[已接受的分发与 SSH 决策](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md)。
