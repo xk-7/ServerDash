@@ -312,7 +312,7 @@ struct SFTPBrowserView: View {
                             .font(.callout)
                         if let progress {
                             Text(
-                                "\(DisplayFormat.speed(progress.speedBytesPerSecond)) · 剩余 \(Int(progress.remaining)) 秒"
+                                "\(DisplayFormat.speed(progress.speedBytesPerSecond)) · 剩余 \(DisplayFormat.integer(Int(progress.remaining))) 秒"
                             )
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -344,7 +344,7 @@ struct SFTPBrowserView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer()
-            Text("\(items.count) 个项目")
+            Text("\(DisplayFormat.integer(items.count)) 个项目")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
@@ -412,7 +412,9 @@ struct SFTPBrowserView: View {
     }
 
     private func upload(_ urls: [URL], policy: SFTPConflictPolicy) {
-        busyMessage = urls.count == 1 ? "正在上传 \(urls[0].lastPathComponent)" : "正在上传 \(urls.count) 个项目"
+        busyMessage = urls.count == 1
+            ? "正在上传 \(urls[0].lastPathComponent)"
+            : "正在上传 \(DisplayFormat.integer(urls.count)) 个项目"
         transferTask = Task {
             do {
                 let config = connectionConfig

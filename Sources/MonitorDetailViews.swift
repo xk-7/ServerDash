@@ -232,7 +232,7 @@ struct MemoryDashboardDetailView: View {
 
                 MonitorSectionPanel(
                     title: "内存与 Swap 趋势",
-                    subtitle: "最近 \(min(history.count, 120)) 个采样点"
+                    subtitle: "最近 \(DisplayFormat.integer(min(history.count, 120))) 个采样点"
                 ) {
                     if history.isEmpty {
                         MonitorDetailEmptyState(
@@ -490,7 +490,7 @@ struct NetworkDashboardDetailView: View {
 
                 MonitorSectionPanel(
                     title: "网络接口",
-                    subtitle: "\(snapshot.networkInterfaces.count) 个接口"
+                    subtitle: "\(DisplayFormat.integer(snapshot.networkInterfaces.count)) 个接口"
                 ) {
                     if snapshot.networkInterfaces.isEmpty {
                         MonitorDetailEmptyState(
@@ -722,7 +722,7 @@ struct StorageDashboardDetailView: View {
 
                 MonitorSectionPanel(
                     title: "文件系统",
-                    subtitle: "\(snapshot.filesystems.count) 个挂载点"
+                    subtitle: "\(DisplayFormat.integer(snapshot.filesystems.count)) 个挂载点"
                 ) {
                     HStack {
                         Spacer()
@@ -761,7 +761,7 @@ struct StorageDashboardDetailView: View {
 
                 MonitorSectionPanel(
                     title: "设备 I/O",
-                    subtitle: "\(snapshot.diskIO.count) 个块设备"
+                    subtitle: "\(DisplayFormat.integer(snapshot.diskIO.count)) 个块设备"
                 ) {
                     if snapshot.diskIO.isEmpty {
                         MonitorDetailEmptyState(
@@ -784,13 +784,15 @@ struct StorageDashboardDetailView: View {
                             }
                             TableColumn("读/写 IOPS") {
                                 Text(
-                                    "\($0.readIOPS.formatted(.number.precision(.fractionLength(1)))) / \($0.writeIOPS.formatted(.number.precision(.fractionLength(1))))"
+                                    "\(DisplayFormat.decimal($0.readIOPS, fractionLength: 1)) / " +
+                                    "\(DisplayFormat.decimal($0.writeIOPS, fractionLength: 1))"
                                 )
                                 .monospacedDigit()
                             }
                             TableColumn("读/写延迟") {
                                 Text(
-                                    "\($0.readLatencyMilliseconds.formatted(.number.precision(.fractionLength(1)))) / \($0.writeLatencyMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms"
+                                    "\(DisplayFormat.decimal($0.readLatencyMilliseconds, fractionLength: 1)) / " +
+                                    "\(DisplayFormat.decimal($0.writeLatencyMilliseconds, fractionLength: 1)) ms"
                                 )
                                 .monospacedDigit()
                             }
@@ -881,12 +883,12 @@ struct ProcessDashboardDetailView: View {
             ) {
                 MonitorStatTile(
                     title: "进程总数",
-                    value: "\(snapshot.processCount)",
+                    value: DisplayFormat.integer(snapshot.processCount),
                     symbol: "list.bullet.rectangle"
                 )
                 MonitorStatTile(
                     title: "登录用户",
-                    value: "\(snapshot.loggedInUsers)",
+                    value: DisplayFormat.integer(snapshot.loggedInUsers),
                     symbol: "person.2",
                     tint: .appLive
                 )
@@ -912,7 +914,7 @@ struct ProcessDashboardDetailView: View {
                 TextField("搜索 PID、进程名称、用户或参数", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 360)
-                Text("\(rows.count) 条")
+                Text("\(DisplayFormat.integer(rows.count)) 条")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -953,17 +955,17 @@ struct ProcessDashboardDetailView: View {
                     }
                     .width(min: 80, ideal: 110)
                     TableColumn("CPU%") {
-                        Text($0.cpu.formatted(.number.precision(.fractionLength(1))))
+                        Text(DisplayFormat.decimal($0.cpu, fractionLength: 1))
                             .monospacedDigit()
                     }
                     .width(65)
                     TableColumn("内存%") {
-                        Text($0.memory.formatted(.number.precision(.fractionLength(1))))
+                        Text(DisplayFormat.decimal($0.memory, fractionLength: 1))
                             .monospacedDigit()
                     }
                     .width(70)
                     TableColumn("线程") {
-                        Text("\($0.threadCount)").monospacedDigit()
+                        Text(DisplayFormat.integer($0.threadCount)).monospacedDigit()
                     }
                     .width(55)
                     TableColumn("参数") {
@@ -1102,14 +1104,14 @@ private struct GPUDetailStatusHeader: View {
             GPUStatusMetric(
                 title: "最高温度",
                 value: summary.peakTemperature.map {
-                    $0.formatted(.number.precision(.fractionLength(0))) + "°C"
+                    DisplayFormat.decimal($0, fractionLength: 0) + "°C"
                 } ?? "—",
                 symbol: "thermometer.medium",
                 tint: temperatureTint
             )
             GPUStatusMetric(
                 title: "GPU 进程",
-                value: "\(summary.processCount)",
+                value: DisplayFormat.integer(summary.processCount),
                 symbol: "list.bullet.rectangle",
                 tint: .appAccent
             )
@@ -1128,7 +1130,7 @@ private struct GPUCountBadge: View {
     let count: Int
 
     var body: some View {
-        Text("\(count) 台")
+        Text("\(DisplayFormat.integer(count)) 台")
             .font(.caption2.monospacedDigit().weight(.semibold))
             .foregroundStyle(Color.appAccent)
             .padding(.horizontal, AppleDesign.Spacing.xs)
@@ -1222,7 +1224,7 @@ private struct GPUDevicePanel: View {
                     MonitorStatTile(
                         title: "温度",
                         value: gpu.temperatureCelsius.map {
-                            $0.formatted(.number.precision(.fractionLength(0))) + "°C"
+                            DisplayFormat.decimal($0, fractionLength: 0) + "°C"
                         } ?? "—",
                         symbol: "thermometer.medium",
                         tint: (gpu.temperatureCelsius ?? 0) >= 85 ? .appError : .appWarning
@@ -1235,11 +1237,11 @@ private struct GPUDevicePanel: View {
                     MonitorStatTile(
                         title: "功耗",
                         value: gpu.powerWatts.map {
-                            $0.formatted(.number.precision(.fractionLength(1))) + " W"
+                            DisplayFormat.decimal($0, fractionLength: 1) + " W"
                         } ?? "—",
                         symbol: "bolt.fill",
                         detail: gpu.powerLimitWatts.map {
-                            "上限 \($0.formatted(.number.precision(.fractionLength(1)))) W"
+                            "上限 \(DisplayFormat.decimal($0, fractionLength: 1)) W"
                         }
                     )
                 }
@@ -1291,18 +1293,18 @@ struct DockerDashboardDetailView: View {
             ) {
                 MonitorStatTile(
                     title: "容器总数",
-                    value: "\(summary.total)",
+                    value: DisplayFormat.integer(summary.total),
                     symbol: "shippingbox"
                 )
                 MonitorStatTile(
                     title: "运行中",
-                    value: "\(summary.running)",
+                    value: DisplayFormat.integer(summary.running),
                     symbol: "play.circle.fill",
                     tint: .appLive
                 )
                 MonitorStatTile(
                     title: "已停止",
-                    value: "\(summary.stopped)",
+                    value: DisplayFormat.integer(summary.stopped),
                     symbol: "stop.circle",
                     tint: .secondary
                 )
@@ -1435,6 +1437,6 @@ enum NetworkFormat {
             scaled /= 1000
             index += 1
         }
-        return "\(scaled.formatted(.number.precision(.fractionLength(scaled < 10 ? 1 : 0)))) \(units[index])"
+        return "\(DisplayFormat.decimal(scaled, fractionLength: scaled < 10 ? 1 : 0)) \(units[index])"
     }
 }

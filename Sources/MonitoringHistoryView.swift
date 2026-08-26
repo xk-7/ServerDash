@@ -190,13 +190,19 @@ struct MonitoringHistoryView: View {
                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                         Text(series.metric.title)
                             .font(.headline)
-                        Text("\(series.resolution.title) · \(series.points.count) 个绘制点")
+                        Text(
+                            "\(series.resolution.title) · " +
+                            "\(DisplayFormat.integer(series.points.count)) 个绘制点"
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     if !series.gaps.isEmpty {
-                        Label("\(series.gaps.count) 个 Data Gap", systemImage: "rectangle.split.3x1")
+                        Label(
+                            "\(DisplayFormat.integer(series.gaps.count)) 个 Data Gap",
+                            systemImage: "rectangle.split.3x1"
+                        )
                             .font(.caption)
                             .foregroundStyle(Color.appWarning)
                     }
@@ -232,7 +238,8 @@ struct MonitoringHistoryView: View {
                 .frame(height: 300)
                 .accessibilityLabel("\(series.metric.title)历史图表")
                 .accessibilityValue(
-                    "\(series.points.count) 个点，\(series.gaps.count) 个数据缺口"
+                    "\(DisplayFormat.integer(series.points.count)) 个点，" +
+                    "\(DisplayFormat.integer(series.gaps.count)) 个数据缺口"
                 )
                 Text("阴影区域为真实 Data Gap；折线按缺口拆分，不连接缺口前后的旧值。")
                     .font(.caption)
@@ -263,7 +270,9 @@ struct MonitoringHistoryView: View {
                 ProgressView(value: storageSummary.quotaFraction)
                 Text(
                     "估算占用 \(Self.byteString(storageSummary.estimatedBytes)) / \(Self.byteString(storageSummary.quotaBytes)) · " +
-                    "原始帧 \(storageSummary.rawSampleCount) · 聚合帧 \(storageSummary.aggregateCount) · 缺口 \(storageSummary.gapCount)"
+                    "原始帧 \(DisplayFormat.integer(storageSummary.rawSampleCount)) · " +
+                    "聚合帧 \(DisplayFormat.integer(storageSummary.aggregateCount)) · " +
+                    "缺口 \(DisplayFormat.integer(storageSummary.gapCount))"
                 )
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -273,8 +282,9 @@ struct MonitoringHistoryView: View {
                     .controlSize(.small)
             } else if let maintenanceReport {
                 Text(
-                    "最近清理：原始帧 \(maintenanceReport.rawSamplesRemoved)，聚合帧 \(maintenanceReport.aggregatesRemoved)，" +
-                    "缺口 \(maintenanceReport.gapsRemoved)。"
+                    "最近清理：原始帧 \(DisplayFormat.integer(maintenanceReport.rawSamplesRemoved))，" +
+                    "聚合帧 \(DisplayFormat.integer(maintenanceReport.aggregatesRemoved))，" +
+                    "缺口 \(DisplayFormat.integer(maintenanceReport.gapsRemoved))。"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -305,7 +315,7 @@ struct MonitoringHistoryView: View {
                         .accessibilityElement(children: .combine)
                     }
                     if gaps.count > 20 {
-                        Text("另有 \(gaps.count - 20) 个缺口")
+                        Text("另有 \(DisplayFormat.integer(gaps.count - 20)) 个缺口")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

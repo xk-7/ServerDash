@@ -436,7 +436,7 @@ actor ConnectionProcessController {
         let runID = UUID()
         let started = Date()
         DiagnosticLog.logger(for: request.module).debug(
-            "启动子进程，参数 \(request.arguments.count, privacy: .public) 个"
+            "启动子进程，参数 \(DisplayFormat.integer(request.arguments.count), privacy: .public) 个"
         )
 
         do {

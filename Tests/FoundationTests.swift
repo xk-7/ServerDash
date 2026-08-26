@@ -3,6 +3,24 @@ import SwiftData
 import XCTest
 @testable import ServerDash
 
+final class DisplayFormatTests: XCTestCase {
+    private let locale = Locale(identifier: "en_US")
+
+    func testIntegerUsesThousandsGrouping() {
+        XCTAssertEqual(DisplayFormat.integer(999, locale: locale), "999")
+        XCTAssertEqual(DisplayFormat.integer(1_000, locale: locale), "1,000")
+        XCTAssertEqual(DisplayFormat.integer(1_234_567, locale: locale), "1,234,567")
+        XCTAssertEqual(DisplayFormat.integer(-1_000, locale: locale), "-1,000")
+    }
+
+    func testDecimalUsesThousandsGroupingAndRequestedPrecision() {
+        XCTAssertEqual(
+            DisplayFormat.decimal(12_345.67, fractionLength: 1, locale: locale),
+            "12,345.7"
+        )
+    }
+}
+
 final class ConnectionErrorClassificationTests: XCTestCase {
     func testClassifiesDNSTimeoutAuthAndHostKeyErrors() {
         XCTAssertEqual(

@@ -42,7 +42,7 @@ struct TerminalAppearanceSettingsView: View {
                 let theme = store.theme(dark: previewDark)
                 if theme.contrastRatio < 4.5 {
                     Label(
-                        "前景与背景对比度仅 \(theme.contrastRatio.formatted(.number.precision(.fractionLength(1)))):1，长时间阅读可能较困难。",
+                        "前景与背景对比度仅 \(DisplayFormat.decimal(theme.contrastRatio, fractionLength: 1)):1，长时间阅读可能较困难。",
                         systemImage: "exclamationmark.triangle"
                     )
                     .font(.caption)
@@ -220,25 +220,21 @@ private struct TerminalAppearanceEditor: View {
                     value: $profile.fontSize,
                     range: 8...48,
                     step: 1,
-                    formatted: "\(Int(profile.fontSize)) pt"
+                    formatted: "\(DisplayFormat.integer(Int(profile.fontSize))) pt"
                 )
                 valueSlider(
                     title: "行高",
                     value: $profile.lineHeight,
                     range: 1...2,
                     step: 0.05,
-                    formatted: profile.lineHeight.formatted(
-                        .number.precision(.fractionLength(2))
-                    )
+                    formatted: DisplayFormat.decimal(profile.lineHeight, fractionLength: 2)
                 )
                 valueSlider(
                     title: "字间距",
                     value: $profile.letterSpacing,
                     range: -1...3,
                     step: 0.1,
-                    formatted: profile.letterSpacing.formatted(
-                        .number.precision(.fractionLength(1))
-                    )
+                    formatted: DisplayFormat.decimal(profile.letterSpacing, fractionLength: 1)
                 )
                 Text("第三方字体请先通过“字体册”安装，重新打开设置后即可发现。")
                     .font(.caption)
@@ -282,9 +278,7 @@ private struct TerminalAppearanceEditor: View {
                 ForEach(themes) { theme in
                     HStack {
                         Text(theme.name)
-                        Text(theme.contrastRatio.formatted(
-                            .number.precision(.fractionLength(1))
-                        ))
+                        Text(DisplayFormat.decimal(theme.contrastRatio, fractionLength: 1))
                     }
                     .tag(theme.id)
                 }

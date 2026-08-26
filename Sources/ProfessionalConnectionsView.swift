@@ -185,7 +185,7 @@ struct ProfessionalConnectionsView: View {
             }
             let unsupported = result.reports.flatMap(\.unsupported)
             if !unsupported.isEmpty {
-                Text("不支持项（\(unsupported.count)）")
+                Text("不支持项（\(DisplayFormat.integer(unsupported.count))）")
                     .font(.headline)
                 ForEach(unsupported) { item in
                     Label(
@@ -599,7 +599,7 @@ struct ProfessionalConnectionsView: View {
 
     private func routeSummary(_ record: ConnectionRouteRecord) -> String {
         guard let route = record.route else { return "路线数据损坏，已阻止使用" }
-        var parts = ["\(route.hops.count) 跳"]
+        var parts = ["\(DisplayFormat.integer(route.hops.count)) 跳"]
         if let proxy = route.proxy { parts.append(proxy.kind.rawValue) }
         if route.importedProxyCommand != nil {
             parts.append(route.importedProxyCommandConfirmed ? "ProxyCommand 已确认" : "ProxyCommand 待确认")

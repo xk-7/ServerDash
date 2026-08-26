@@ -438,8 +438,32 @@ struct ApplePressButtonStyle: ButtonStyle {
 typealias CompactActionButtonStyle = ApplePressButtonStyle
 
 enum DisplayFormat {
+    static func integer(
+        _ value: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        value.formatted(
+            .number
+                .grouping(.automatic)
+                .locale(locale)
+        )
+    }
+
+    static func decimal(
+        _ value: Double,
+        fractionLength: Int,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        value.formatted(
+            .number
+                .grouping(.automatic)
+                .precision(.fractionLength(fractionLength))
+                .locale(locale)
+        )
+    }
+
     static func percent(_ value: Double) -> String {
-        "\(Int(value.rounded()))%"
+        "\(integer(Int(value.rounded())))%"
     }
 
     static func bytes(_ value: Double) -> String {
@@ -460,4 +484,3 @@ enum DisplayFormat {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
-

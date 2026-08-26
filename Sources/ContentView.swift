@@ -135,7 +135,7 @@ struct ContentView: View {
         }
         let routeCount = connectionRoutes.count { $0.serverID == server.id }
         let ruleCount = portForwardRules.count { $0.serverID == server.id }
-        return "服务器配置、专用凭据、\(routeCount) 条连接路线和 \(ruleCount) 条隧道规则都会被移除；活动隧道会先停止，共享身份会保留。此操作无法撤销。"
+        return "服务器配置、专用凭据、\(DisplayFormat.integer(routeCount)) 条连接路线和 \(DisplayFormat.integer(ruleCount)) 条隧道规则都会被移除；活动隧道会先停止，共享身份会保留。此操作无法撤销。"
     }
 
     var body: some View {

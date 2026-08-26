@@ -289,7 +289,7 @@ enum ConnectionRouteError: LocalizedError, Equatable, Sendable {
         case .routeLoop(let endpoint):
             "连接路线包含循环：\(endpoint)。"
         case .tooManyHops(let count):
-            "连接路线包含 \(count) 跳，超过 8 跳安全上限。"
+            "连接路线包含 \(DisplayFormat.integer(count)) 跳，超过 8 跳安全上限。"
         case .credentialUnavailable(_, let reason):
             "路线身份不可用：\(reason)。不会尝试其他身份。"
         case .multipleInteractiveCredentialsUnsupported:

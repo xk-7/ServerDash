@@ -114,7 +114,7 @@ struct IdentityManagementView: View {
     private func requestDelete(_ identity: IdentityRecord) {
         let count = ResourceDeletionPolicy.identityReferenceCount(identity.id, in: servers)
         guard count == 0 else {
-            errorMessage = "此身份正被 \(count) 台服务器使用，请先更改服务器身份。"
+            errorMessage = "此身份正被 \(DisplayFormat.integer(count)) 台服务器使用，请先更改服务器身份。"
             return
         }
         identityPendingDeletion = identity
@@ -143,7 +143,7 @@ private struct IdentityRow: View {
             Text(identity.authentication.title + (identity.authentication.usesPrivateKey ? " · \(key?.name ?? "未选择密钥")" : ""))
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("\(serverCount) 台机器")
+            Text("\(DisplayFormat.integer(serverCount)) 台机器")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(width: 70, alignment: .trailing)
@@ -411,7 +411,7 @@ struct SSHKeyManagementView: View {
     private func requestDelete(_ key: SSHKeyRecord) {
         let count = ResourceDeletionPolicy.keyReferenceCount(key.id, in: identities)
         guard count == 0 else {
-            errorMessage = "此密钥正被 \(count) 个身份使用，请先更改身份配置。"
+            errorMessage = "此密钥正被 \(DisplayFormat.integer(count)) 个身份使用，请先更改身份配置。"
             return
         }
         keyPendingDeletion = key
@@ -438,7 +438,7 @@ private struct SSHKeyRow: View {
             Spacer()
             Text(key.algorithm)
                 .font(.caption.weight(.semibold))
-            Text("\(identityCount) 个身份")
+            Text("\(DisplayFormat.integer(identityCount)) 个身份")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(width: 72, alignment: .trailing)

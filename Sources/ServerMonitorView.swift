@@ -189,7 +189,7 @@ struct ServerMonitorLayoutView: View {
             parts.append("上次成功 \(last.formatted(date: .omitted, time: .standard))")
         }
         if server.lastLatencyMS > 0 {
-            parts.append("延迟 \(Int(server.lastLatencyMS)) ms")
+            parts.append("延迟 \(DisplayFormat.integer(Int(server.lastLatencyMS))) ms")
         }
         if let capabilities = runtime.renderState.capabilities {
             parts.append(capabilities.summary)
@@ -372,7 +372,7 @@ private struct CPUMonitorCard: View {
                 Spacer()
                 if let temperature = snapshot.cpuTemperatureCelsius {
                     Label(
-                        temperature.formatted(.number.precision(.fractionLength(1))) + "°C",
+                        DisplayFormat.decimal(temperature, fractionLength: 1) + "°C",
                         systemImage: "thermometer.medium"
                     )
                     .font(.callout.monospacedDigit())
@@ -380,7 +380,7 @@ private struct CPUMonitorCard: View {
                 }
             }
             Text(
-                [snapshot.cpuModel, "\(snapshot.coreCount) 核"]
+                [snapshot.cpuModel, "\(DisplayFormat.integer(snapshot.coreCount)) 核"]
                     .filter { !$0.isEmpty }
                     .joined(separator: " · ")
             )
@@ -515,7 +515,7 @@ private struct LoadValue: View {
                 Circle().fill(color).frame(width: 6, height: 6)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
-            Text(value.formatted(.number.precision(.fractionLength(2))))
+            Text(DisplayFormat.decimal(value, fractionLength: 2))
                 .font(.title3.weight(.semibold).monospacedDigit())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -644,10 +644,13 @@ private struct ProcessesMonitorCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             HStack {
-                Label("\(snapshot.processCount) 个进程", systemImage: "list.bullet.rectangle")
+                Label(
+                    "\(DisplayFormat.integer(snapshot.processCount)) 个进程",
+                    systemImage: "list.bullet.rectangle"
+                )
                     .font(.callout.weight(.semibold))
                 Spacer()
-                Label("\(snapshot.loggedInUsers)", systemImage: "person.2")
+                Label(DisplayFormat.integer(snapshot.loggedInUsers), systemImage: "person.2")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -681,11 +684,11 @@ private struct ProcessUsageRow: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
-                Text("CPU \(process.cpu.formatted(.number.precision(.fractionLength(1))))%")
+                Text("CPU \(DisplayFormat.decimal(process.cpu, fractionLength: 1))%")
                     .foregroundStyle(
                         MonitorSeverity.percentage(process.cpu).color
                     )
-                Text("MEM \(process.memory.formatted(.number.precision(.fractionLength(1))))%")
+                Text("MEM \(DisplayFormat.decimal(process.memory, fractionLength: 1))%")
                     .foregroundStyle(.secondary)
             }
             .font(.caption.monospacedDigit())
@@ -892,7 +895,10 @@ private struct GPUMonitorCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             HStack {
-                Label("\(snapshot.gpus.count) 个 GPU", systemImage: "display")
+                Label(
+                    "\(DisplayFormat.integer(snapshot.gpus.count)) 个 GPU",
+                    systemImage: "display"
+                )
                     .font(.callout.weight(.semibold))
                 Spacer()
                 Text(
@@ -912,7 +918,7 @@ private struct GPUMonitorCard: View {
                             .lineLimit(1)
                         Spacer()
                         if let temperature = gpu.temperatureCelsius {
-                            Text("\(temperature.formatted(.number.precision(.fractionLength(0))))°C")
+                            Text("\(DisplayFormat.decimal(temperature, fractionLength: 0))°C")
                                 .monospacedDigit()
                                 .foregroundStyle(
                                     temperature >= 85 ? Color.appError : Color.secondary
@@ -934,7 +940,7 @@ private struct GPUMonitorCard: View {
                         Text("显存 \(DisplayFormat.percent(memoryUsage))")
                         Spacer()
                         if let power = gpu.powerWatts {
-                            Text("\(power.formatted(.number.precision(.fractionLength(1)))) W")
+                            Text("\(DisplayFormat.decimal(power, fractionLength: 1)) W")
                         } else {
                             Text(DisplayFormat.bytes(gpu.memoryTotalBytes))
                         }
@@ -977,7 +983,7 @@ private struct DockerMonitorCard: View {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("Docker \(snapshot.dockerVersion)")
                         .font(.headline)
-                    Text("\(summary.total) 个容器")
+                    Text("\(DisplayFormat.integer(summary.total)) 个容器")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1037,7 +1043,7 @@ private struct DockerCountBadge: View {
     var body: some View {
         HStack(spacing: AppleDesign.Spacing.xxs) {
             Circle().fill(color).frame(width: 7, height: 7)
-            Text("\(value)")
+            Text(DisplayFormat.integer(value))
                 .font(.caption.monospacedDigit().weight(.bold))
             Text(title)
                 .font(.caption2)
@@ -1270,20 +1276,18 @@ private struct CPUDetailView: View {
                 HStack(spacing: AppleDesign.Spacing.lg) {
                     CPUDetailFact(
                         title: "逻辑核心",
-                        value: "\(snapshot.coreCount)",
+                        value: DisplayFormat.integer(snapshot.coreCount),
                         symbol: "cpu"
                     )
                     CPUDetailFact(
                         title: "1 分钟负载",
-                        value: snapshot.load1.formatted(
-                            .number.precision(.fractionLength(2))
-                        ),
+                        value: DisplayFormat.decimal(snapshot.load1, fractionLength: 2),
                         symbol: "waveform.path.ecg"
                     )
                     CPUDetailFact(
                         title: "温度",
                         value: snapshot.cpuTemperatureCelsius.map {
-                            $0.formatted(.number.precision(.fractionLength(1))) + "°C"
+                            DisplayFormat.decimal($0, fractionLength: 1) + "°C"
                         } ?? "—",
                         symbol: "thermometer.medium"
                     )
@@ -1301,7 +1305,7 @@ private struct CPUDetailView: View {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("使用率趋势")
                         .font(.headline)
-                    Text("最近 \(min(history.count, 120)) 个采样点")
+                    Text("最近 \(DisplayFormat.integer(min(history.count, 120))) 个采样点")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1350,7 +1354,7 @@ private struct CPUDetailView: View {
                         AxisGridLine()
                         AxisValueLabel {
                             if let percentage = value.as(Int.self) {
-                                Text("\(percentage)%")
+                                Text("\(DisplayFormat.integer(percentage))%")
                             }
                         }
                     }
@@ -1442,7 +1446,7 @@ private struct CPUTrendValue: View {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(value.formatted(.number.precision(.fractionLength(2))))
+            Text(DisplayFormat.decimal(value, fractionLength: 2))
                 .font(.caption.monospacedDigit().weight(.semibold))
         }
     }
@@ -1617,12 +1621,15 @@ private struct ProcessDetailView: View {
                 TableColumn("名称") { Text($0.name).fontWeight(.medium) }.width(min: 100, ideal: 140)
                 TableColumn("用户") { Text($0.user) }.width(min: 80, ideal: 110)
                 TableColumn("CPU%") {
-                    Text($0.cpu.formatted(.number.precision(.fractionLength(1)))).monospacedDigit()
+                    Text(DisplayFormat.decimal($0.cpu, fractionLength: 1)).monospacedDigit()
                 }.width(65)
                 TableColumn("内存%") {
-                    Text($0.memory.formatted(.number.precision(.fractionLength(1)))).monospacedDigit()
+                    Text(DisplayFormat.decimal($0.memory, fractionLength: 1)).monospacedDigit()
                 }.width(70)
-                TableColumn("线程") { Text("\($0.threadCount)").monospacedDigit() }.width(55)
+                TableColumn("线程") {
+                    Text(DisplayFormat.integer($0.threadCount)).monospacedDigit()
+                }
+                .width(55)
                 TableColumn("参数") { Text($0.arguments).font(.caption.monospaced()).lineLimit(1) }
             }
         }
@@ -1845,10 +1852,20 @@ private struct StorageDetailView: View {
                 TableColumn("设备") { Text($0.device).font(.body.monospaced()) }
                 TableColumn("读取") { Text(DisplayFormat.speed($0.readBytesPerSecond)).monospacedDigit() }
                 TableColumn("写入") { Text(DisplayFormat.speed($0.writeBytesPerSecond)).monospacedDigit() }
-                TableColumn("读 IOPS") { Text($0.readIOPS.formatted(.number.precision(.fractionLength(1)))).monospacedDigit() }
-                TableColumn("写 IOPS") { Text($0.writeIOPS.formatted(.number.precision(.fractionLength(1)))).monospacedDigit() }
-                TableColumn("读延迟") { Text("\($0.readLatencyMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms").monospacedDigit() }
-                TableColumn("写延迟") { Text("\($0.writeLatencyMilliseconds.formatted(.number.precision(.fractionLength(1)))) ms").monospacedDigit() }
+                TableColumn("读 IOPS") {
+                    Text(DisplayFormat.decimal($0.readIOPS, fractionLength: 1)).monospacedDigit()
+                }
+                TableColumn("写 IOPS") {
+                    Text(DisplayFormat.decimal($0.writeIOPS, fractionLength: 1)).monospacedDigit()
+                }
+                TableColumn("读延迟") {
+                    Text("\(DisplayFormat.decimal($0.readLatencyMilliseconds, fractionLength: 1)) ms")
+                        .monospacedDigit()
+                }
+                TableColumn("写延迟") {
+                    Text("\(DisplayFormat.decimal($0.writeLatencyMilliseconds, fractionLength: 1)) ms")
+                        .monospacedDigit()
+                }
                 TableColumn("总读取") { Text(DisplayFormat.bytes($0.lifetimeReadBytes)).monospacedDigit() }
                 TableColumn("总写入") { Text(DisplayFormat.bytes($0.lifetimeWriteBytes)).monospacedDigit() }
             }
@@ -1875,7 +1892,7 @@ private struct GPUDetailView: View {
                                 .font(.headline)
                             Spacer()
                             if let temperature = gpu.temperatureCelsius {
-                                Text("\(temperature.formatted(.number.precision(.fractionLength(0))))°C")
+                                Text("\(DisplayFormat.decimal(temperature, fractionLength: 0))°C")
                                     .monospacedDigit()
                             }
                         }
@@ -1891,7 +1908,7 @@ private struct GPUDetailView: View {
                         if let power = gpu.powerWatts, let limit = gpu.powerLimitWatts {
                             LabeledContent(
                                 "功耗",
-                                value: "\(power.formatted(.number.precision(.fractionLength(1)))) / \(limit.formatted(.number.precision(.fractionLength(1)))) W"
+                                value: "\(DisplayFormat.decimal(power, fractionLength: 1)) / \(DisplayFormat.decimal(limit, fractionLength: 1)) W"
                             )
                         }
                         let processes = snapshot.gpuProcesses.filter { $0.gpuID == gpu.uuid }
@@ -1948,7 +1965,7 @@ enum SnapshotMarkdownExporter {
             "- Host: `\(server.username)@\(PrivacySettings.hideIPInformation ? "[IP]" : server.host):\(server.port)`",
             "- System: \(snapshot.distribution) · \(snapshot.kernel)",
             "- Uptime: \(snapshot.uptime)",
-            "- CPU: \(DisplayFormat.percent(snapshot.cpuUsage)) · \(snapshot.coreCount) cores",
+            "- CPU: \(DisplayFormat.percent(snapshot.cpuUsage)) · \(DisplayFormat.integer(snapshot.coreCount)) cores",
             "- Load: \(format(snapshot.load1)) / \(format(snapshot.load5)) / \(format(snapshot.load15))",
             "- Memory: \(DisplayFormat.bytes(snapshot.memoryUsedBytes)) / \(DisplayFormat.bytes(snapshot.memoryTotalBytes))",
             "- Network: ↓ \(DisplayFormat.speed(snapshot.downloadBytesPerSecond)) · ↑ \(DisplayFormat.speed(snapshot.uploadBytesPerSecond))"
@@ -1962,7 +1979,9 @@ enum SnapshotMarkdownExporter {
             lines.append("- GPU: \(snapshot.gpus.map(\.name).joined(separator: ", "))")
         }
         if snapshot.dockerAvailable {
-            lines.append("- Docker: \(snapshot.dockerContainers.count) containers")
+            lines.append(
+                "- Docker: \(DisplayFormat.integer(snapshot.dockerContainers.count)) containers"
+            )
         }
         if let location = snapshot.geoLocation,
            !PrivacySettings.hideIPInformation,
@@ -1973,6 +1992,6 @@ enum SnapshotMarkdownExporter {
     }
 
     private static func format(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(2)))
+        DisplayFormat.decimal(value, fractionLength: 2)
     }
 }

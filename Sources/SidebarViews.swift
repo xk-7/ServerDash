@@ -31,7 +31,7 @@ struct AppSidebar: View {
 
                 Section("终端") {
                     Label(
-                        terminalCount == 0 ? "无会话" : "\(terminalCount) 个会话",
+                        terminalCount == 0 ? "无会话" : "\(DisplayFormat.integer(terminalCount)) 个会话",
                         systemImage: "rectangle.dashed"
                     )
                     .tag(SidebarDestination.terminal)
@@ -46,7 +46,7 @@ struct AppSidebar: View {
                 }
                 .help("设置")
                 Spacer()
-                Text(appState.refreshInterval > 0 ? "\(Int(appState.refreshInterval))s" : "手动")
+                Text(appState.refreshInterval > 0 ? "\(DisplayFormat.integer(Int(appState.refreshInterval)))s" : "手动")
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
             }
@@ -85,7 +85,7 @@ struct MachineManagementView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("机器")
                         .font(.system(size: 22, weight: .bold))
-                    Text("\(servers.count) 台服务器")
+                    Text("\(DisplayFormat.integer(servers.count)) 台服务器")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -227,7 +227,7 @@ struct TerminalSessionsLandingView: View {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
                 AppleSectionHeader(
                     title: "终端会话",
-                    subtitle: "\(sessions.count) 个正在运行的 SSH 会话"
+                    subtitle: "\(DisplayFormat.integer(sessions.count)) 个正在运行的 SSH 会话"
                 )
                 AppleUnifiedPanel {
                     ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in

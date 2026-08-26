@@ -330,7 +330,7 @@ struct ServerEditorView: View {
             statusNote = "SSH 测试成功，配置已保存。"
             sshTestFeedback = SSHTestFeedback(
                 succeeded: true,
-                message: "已成功连接 \(draftConfig.username)@\(draftConfig.host):\(draftConfig.port)，延迟 \(Int(elapsed * 1_000)) ms。"
+                message: "已成功连接 \(draftConfig.username)@\(draftConfig.host):\(draftConfig.port)，延迟 \(DisplayFormat.integer(Int(elapsed * 1_000))) ms。"
             )
         }
         isValidating = false
@@ -529,7 +529,7 @@ struct SettingsView: View {
                 HStack {
                     Text("SSH 超时")
                     Slider(value: $sshConnectTimeout, in: 5...300, step: 5)
-                    Text("\(Int(sshConnectTimeout))s")
+                    Text("\(DisplayFormat.integer(Int(sshConnectTimeout)))s")
                         .monospacedDigit()
                         .frame(width: 44)
                 }

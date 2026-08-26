@@ -302,7 +302,7 @@ struct SSHConfigImporter {
             state.issues.append(
                 SSHConfigIssue(
                     kind: .resourceLimit,
-                    message: "Include 文件数量超过 \(maxIncludeFiles) 个。",
+                    message: "Include 文件数量超过 \(DisplayFormat.integer(maxIncludeFiles)) 个。",
                     sourceFile: path,
                     line: nil
                 )

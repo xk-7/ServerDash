@@ -145,7 +145,7 @@ struct EventLogView: View {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("事件记录")
                         .font(.title2.weight(.bold))
-                    Text("\(rows.count) 条事件")
+                    Text("\(DisplayFormat.integer(rows.count)) 条事件")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

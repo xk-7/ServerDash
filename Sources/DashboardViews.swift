@@ -87,7 +87,7 @@ private struct DashboardFleetSummary: View {
             HStack(spacing: 0) {
                 DashboardSummaryCard(
                     title: "服务器总数",
-                    value: "\(serverCount)",
+                    value: DisplayFormat.integer(serverCount),
                     subtitle: "平均 CPU \(DisplayFormat.percent(summary.averageCPU))",
                     icon: "server.rack",
                     tint: .appAccent
@@ -95,9 +95,9 @@ private struct DashboardFleetSummary: View {
                 Divider().frame(height: 64)
                 DashboardSummaryCard(
                     title: "在线",
-                    value: "\(summary.onlineCount)",
+                    value: DisplayFormat.integer(summary.onlineCount),
                     subtitle: summary.refreshingCount > 0
-                        ? "\(summary.refreshingCount) 台后台刷新"
+                        ? "\(DisplayFormat.integer(summary.refreshingCount)) 台后台刷新"
                         : "资源采集正常",
                     icon: "checkmark.circle.fill",
                     tint: .appLive
@@ -105,7 +105,7 @@ private struct DashboardFleetSummary: View {
                 Divider().frame(height: 64)
                 DashboardSummaryCard(
                     title: "离线 / 异常",
-                    value: "\(summary.issueCount)",
+                    value: DisplayFormat.integer(summary.issueCount),
                     subtitle: summary.issueCount == 0
                         ? "所有服务器状态正常"
                         : "请检查连接或认证",
@@ -184,7 +184,10 @@ private struct VPSSummaryCard: View {
 
             if runtime.renderState.hasSnapshot {
                 HStack(spacing: 12) {
-                    DashboardMetadata(icon: "cpu", value: "\(snapshot.coreCount) 核")
+                    DashboardMetadata(
+                        icon: "cpu",
+                        value: "\(DisplayFormat.integer(snapshot.coreCount)) 核"
+                    )
                     DashboardMetadata(icon: "memorychip", value: DisplayFormat.bytes(snapshot.memoryTotalBytes))
                     DashboardMetadata(icon: "internaldrive", value: DisplayFormat.bytes(snapshot.diskTotalBytes))
                     Spacer(minLength: 0)
@@ -207,8 +210,8 @@ private struct VPSSummaryCard: View {
                         )
                         DashboardResourceRow(
                             title: "负载",
-                            leading: snapshot.load1.formatted(.number.precision(.fractionLength(2))),
-                            trailing: "\(snapshot.processCount) 进程"
+                            leading: DisplayFormat.decimal(snapshot.load1, fractionLength: 2),
+                            trailing: "\(DisplayFormat.integer(snapshot.processCount)) 进程"
                         )
                     }
                     .frame(maxWidth: .infinity)
@@ -282,7 +285,9 @@ private struct VPSSummaryCard: View {
             return server.verificationStatus == .unverified ? "未验证 · 可先离线保存" : "等待首次资源采集"
         }
         let host = PrivacySettings.hideIPInformation ? "[IP]" : server.host
-        let latency = server.lastLatencyMS > 0 ? " · \(Int(server.lastLatencyMS)) ms" : ""
+        let latency = server.lastLatencyMS > 0
+            ? " · \(DisplayFormat.integer(Int(server.lastLatencyMS))) ms"
+            : ""
         return "\(snapshot.distribution) · \(host)\(latency) · \(server.verificationStatus.title)"
     }
 }
@@ -457,7 +462,7 @@ struct ServerDetailView: View {
                     MetricCard(
                         title: "CPU",
                         value: DisplayFormat.percent(snapshot.cpuUsage),
-                        subtitle: "负载 \(snapshot.load1.formatted(.number.precision(.fractionLength(1)))) / \(snapshot.load5.formatted(.number.precision(.fractionLength(1)))) / \(snapshot.load15.formatted(.number.precision(.fractionLength(1))))",
+                        subtitle: "负载 \(DisplayFormat.decimal(snapshot.load1, fractionLength: 1)) / \(DisplayFormat.decimal(snapshot.load5, fractionLength: 1)) / \(DisplayFormat.decimal(snapshot.load15, fractionLength: 1))",
                         progress: snapshot.cpuUsage / 100,
                         tint: .appAccent
                     )
@@ -520,7 +525,7 @@ private struct ServerDetailHeader: View {
         let host = PrivacySettings.hideIPInformation ? "[IP]" : server.host
         var parts = ["\(server.username)@\(host):\(server.port)", server.verificationStatus.title]
         if server.lastLatencyMS > 0 {
-            parts.append("\(Int(server.lastLatencyMS)) ms")
+            parts.append("\(DisplayFormat.integer(Int(server.lastLatencyMS))) ms")
         }
         if runtime.renderState.isStale(refreshInterval: appState.refreshInterval) {
             parts.append("数据已过期")
@@ -659,7 +664,10 @@ private struct SystemAndProcessesCard: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(snapshot.processCount) 个进程 · \(snapshot.loggedInUsers) 位登录用户")
+                Text(
+                    "\(DisplayFormat.integer(snapshot.processCount)) 个进程 · " +
+                    "\(DisplayFormat.integer(snapshot.loggedInUsers)) 位登录用户"
+                )
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -674,12 +682,12 @@ private struct SystemAndProcessesCard: View {
                 }
                 .width(70)
                 TableColumn("CPU") { process in
-                    Text(process.cpu.formatted(.number.precision(.fractionLength(1))) + "%")
+                    Text(DisplayFormat.decimal(process.cpu, fractionLength: 1) + "%")
                         .monospacedDigit()
                 }
                 .width(70)
                 TableColumn("内存") { process in
-                    Text(process.memory.formatted(.number.precision(.fractionLength(1))) + "%")
+                    Text(DisplayFormat.decimal(process.memory, fractionLength: 1) + "%")
                         .monospacedDigit()
                 }
                 .width(70)
