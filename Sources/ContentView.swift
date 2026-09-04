@@ -244,6 +244,11 @@ struct ContentView: View {
         .onChange(of: servers.map(\.id)) { _, serverIDs in
             handleServerListChange(serverIDs)
         }
+        .onChange(of: filteredServers.map(\.id), initial: true) { _, serverIDs in
+            if let machineScrollAnchor, !serverIDs.contains(machineScrollAnchor) {
+                self.machineScrollAnchor = serverIDs.first
+            }
+        }
         .modifier(
             HostTrustAlertModifier(
                 pendingTrust: appState.pendingTrust,

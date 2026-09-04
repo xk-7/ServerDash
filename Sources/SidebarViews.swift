@@ -68,8 +68,30 @@ struct AppSidebar: View {
     }
 }
 
+enum MachineViewMode: String, CaseIterable, Identifiable {
+    case list
+    case grid
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .list: "列表"
+        case .grid: "宫格"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .list: "list.bullet"
+        case .grid: "square.grid.3x3"
+        }
+    }
+}
+
 struct MachineManagementView: View {
     @EnvironmentObject private var appState: AppState
+    @AppStorage("machineViewMode") private var viewModeRawValue = MachineViewMode.grid.rawValue
 
     let servers: [ServerRecord]
     @Binding var searchText: String
@@ -79,25 +101,66 @@ struct MachineManagementView: View {
     let onEdit: (ServerRecord) -> Void
     let onDelete: (ServerRecord) -> Void
 
+    private var viewMode: MachineViewMode {
+        MachineViewMode(rawValue: viewModeRawValue) ?? .grid
+    }
+
+    private var viewModeBinding: Binding<MachineViewMode> {
+        Binding(
+            get: { viewMode },
+            set: { viewModeRawValue = $0.rawValue }
+        )
+    }
+
+    private var columns: [GridItem] {
+        switch viewMode {
+        case .list:
+            [GridItem(.flexible(), spacing: 0)]
+        case .grid:
+            [GridItem(.adaptive(minimum: 280), spacing: AppleDesign.Spacing.md)]
+        }
+    }
+
+    private var scrollPosition: Binding<UUID?> {
+        Binding(
+            get: { scrollAnchor },
+            set: { id in
+                // Disappearing content must not clear the return position saved by navigation.
+                if let id { scrollAnchor = id }
+            }
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("机器")
-                        .font(.system(size: 22, weight: .bold))
-                    Text("\(DisplayFormat.integer(servers.count)) 台服务器")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            HStack(spacing: AppleDesign.Spacing.sm) {
+                AppleSectionHeader(
+                    title: "机器",
+                    subtitle: "\(DisplayFormat.integer(servers.count)) 台服务器"
+                )
                 Spacer()
+                Picker("显示方式", selection: viewModeBinding) {
+                    ForEach(MachineViewMode.allCases) { mode in
+                        Label(mode.title, systemImage: mode.symbol)
+                            .tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .help("切换机器的列表或宫格视图")
+                .accessibilityLabel("机器显示方式")
             }
-            .padding(20)
+            .padding(AppleDesign.Spacing.lg)
 
             Divider().opacity(0.5)
 
             if servers.isEmpty {
                 ContentUnavailableView {
-                    Label("没有匹配的机器", systemImage: "externaldrive")
+                    Label(
+                        searchText.isEmpty ? "还没有机器" : "没有匹配的机器",
+                        systemImage: "externaldrive"
+                    )
                 } description: {
                     Text(searchText.isEmpty ? "添加服务器后可在这里统一管理。" : "请尝试其他搜索关键词。")
                 } actions: {
@@ -106,32 +169,122 @@ struct MachineManagementView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(servers) { server in
-                    Button {
-                        onSelect(server)
-                    } label: {
-                        MachineListRow(
-                            server: server,
-                            runtime: appState.runtime(for: server)
-                        )
-                    }
-                    .id(server.id)
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button("编辑服务器", systemImage: "pencil") {
-                            onEdit(server)
-                        }
-                        Divider()
-                        Button("删除服务器", systemImage: "trash", role: .destructive) {
-                            onDelete(server)
+                ScrollView {
+                    // A shared scroll container and stable targets preserve the visible machine
+                    // when the grid reflows, including its single-column list presentation.
+                    LazyVGrid(
+                        columns: columns,
+                        spacing: viewMode == .grid ? AppleDesign.Spacing.md : 0
+                    ) {
+                        ForEach(servers) { server in
+                            VStack(spacing: 0) {
+                                machineButton(server)
+                                if viewMode == .list, server.id != servers.last?.id {
+                                    Divider()
+                                        .padding(.horizontal, AppleDesign.Spacing.md)
+                                }
+                            }
+                            .id(server.id)
                         }
                     }
+                    .scrollTargetLayout()
+                    .background {
+                        if viewMode == .list {
+                            RoundedRectangle(cornerRadius: AppleDesign.Radius.panel, style: .continuous)
+                                .fill(Color.appSurface)
+                        }
+                    }
+                    .padding(AppleDesign.Spacing.lg)
                 }
-                .listStyle(.inset)
-                .scrollPosition(id: $scrollAnchor, anchor: .center)
+                .scrollPosition(id: scrollPosition, anchor: .top)
             }
         }
+    }
+
+    private func machineButton(_ server: ServerRecord) -> some View {
+        Button {
+            onSelect(server)
+        } label: {
+            if viewMode == .grid {
+                MachineGridCard(server: server, runtime: appState.runtime(for: server))
+            } else {
+                MachineListRow(server: server, runtime: appState.runtime(for: server))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("打开机器监控详情")
+        .contextMenu {
+            Button("编辑服务器", systemImage: "pencil") {
+                onEdit(server)
+            }
+            Divider()
+            Button("删除服务器", systemImage: "trash", role: .destructive) {
+                onDelete(server)
+            }
+        }
+    }
+}
+
+private struct MachineGridCard: View {
+    let server: ServerRecord
+    @ObservedObject var runtime: ServerRuntimeState
+
+    private var status: ServerConnectionStatus { runtime.renderState.status }
+    private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
+    private var connectionAddress: String { "\(server.username)@\(server.host):\(server.port)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+            HStack(spacing: AppleDesign.Spacing.xs) {
+                Text(server.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .help(server.displayName)
+                Spacer(minLength: AppleDesign.Spacing.xs)
+                HStack(spacing: AppleDesign.Spacing.xxs) {
+                    StatusDot(status: status)
+                    Text(status.title)
+                        .font(.caption.weight(.medium))
+                }
+                .fixedSize()
+            }
+
+            Text(connectionAddress)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(connectionAddress)
+
+            Label(server.groupName, systemImage: "folder")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(server.groupName)
+
+            Divider()
+
+            HStack(spacing: AppleDesign.Spacing.sm) {
+                metric("CPU", value: snapshot.cpuUsage)
+                metric("内存", value: snapshot.memoryUsage)
+                metric("磁盘", value: snapshot.diskUsage)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .applePanel(radius: AppleDesign.Radius.card)
+        .contentShape(RoundedRectangle(cornerRadius: AppleDesign.Radius.card, style: .continuous))
+    }
+
+    private func metric(_ title: String, value: Double) -> some View {
+        MachineMetric(
+            title: title,
+            value: runtime.renderState.hasSnapshot ? DisplayFormat.percent(value) : "—",
+            alignment: .leading,
+            expands: true
+        )
     }
 }
 
@@ -143,23 +296,31 @@ private struct MachineListRow: View {
     private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppleDesign.Spacing.sm) {
             StatusDot(status: status, size: 9)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(server.name)
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                Text(server.displayName)
                     .font(.headline)
+                    .lineLimit(1)
+                    .help(server.displayName)
                 Text("\(server.username)@\(server.host):\(server.port)")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help("\(server.username)@\(server.host):\(server.port)")
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
             Text(server.groupName)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Color.primary.opacity(0.05))
+                .lineLimit(1)
+                .help(server.groupName)
+                .padding(.horizontal, AppleDesign.Spacing.xs)
+                .padding(.vertical, AppleDesign.Spacing.xxs)
+                .background(Color.appTrack)
                 .clipShape(Capsule())
+                .frame(width: 100)
             MachineMetric(
                 title: "CPU",
                 value: runtime.renderState.hasSnapshot
@@ -180,13 +341,14 @@ private struct MachineListRow: View {
             )
             Text(status.title)
                 .font(.caption2.weight(.semibold))
-                .frame(width: 55, alignment: .trailing)
+                .fixedSize()
+                .frame(minWidth: 55, alignment: .trailing)
             Image(systemName: "chevron.right")
                 .font(.caption2.bold())
                 .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(.horizontal, AppleDesign.Spacing.md)
+        .padding(.vertical, AppleDesign.Spacing.sm)
         .contentShape(Rectangle())
     }
 }
@@ -194,17 +356,21 @@ private struct MachineListRow: View {
 private struct MachineMetric: View {
     let title: String
     let value: String
+    var alignment: HorizontalAlignment = .trailing
+    var expands = false
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
+        VStack(alignment: alignment, spacing: AppleDesign.Spacing.xxs) {
             Text(title)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(.caption.weight(.semibold))
                 .monospacedDigit()
         }
-        .frame(width: 46, alignment: .trailing)
+        .frame(width: expands ? nil : 46, alignment: Alignment(horizontal: alignment, vertical: .center))
+        .frame(maxWidth: expands ? .infinity : nil, alignment: Alignment(horizontal: alignment, vertical: .center))
+        .accessibilityElement(children: .combine)
     }
 }
 
