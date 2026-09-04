@@ -31,6 +31,30 @@ enum ColorToken {
     case live, warning, error, secondary
 }
 
+enum TerminalFontShortcut: Equatable {
+    case increase
+    case decrease
+    case reset
+
+    static func resolve(_ event: NSEvent) -> Self? {
+        guard event.type == .keyDown else { return nil }
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+        let key = event.charactersIgnoringModifiers ?? ""
+        if modifiers == .command {
+            switch key {
+            case "=", "+": return .increase
+            case "-": return .decrease
+            case "0": return .reset
+            default: return nil
+            }
+        }
+        if modifiers == [.command, .shift], event.characters == "+" || key == "+" || key == "=" {
+            return .increase
+        }
+        return nil
+    }
+}
+
 @MainActor
 final class TerminalSessionController: ObservableObject, Identifiable {
     let id: UUID
@@ -94,6 +118,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
             guard let self else { return }
             self.onHostKeyFailure?(self.id)
         }
+        hostView.onFontShortcut = { [weak self] shortcut in
+            self?.performFontShortcut(shortcut)
+        }
     }
 
     func start() {
@@ -125,8 +152,10 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     }
 
     func applyAppearance(_ profile: TerminalAppearanceProfile, dark: Bool) {
-        let validated = profile.validated()
-        appearanceProfile = validated
+        let validated = profile == appearanceProfile ? appearanceProfile : profile.validated()
+        if appearanceProfile != validated {
+            appearanceProfile = validated
+        }
         hostView.applyAppearance(validated, dark: dark)
     }
 
@@ -148,6 +177,15 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         var updated = appearanceProfile
         updated.fontSize = initialAppearanceProfile.fontSize
         applyAppearance(updated, dark: dark)
+    }
+
+    func performFontShortcut(_ shortcut: TerminalFontShortcut) {
+        let dark = hostView.usesDarkAppearance
+        switch shortcut {
+        case .increase: changeFontSize(by: 1, dark: dark)
+        case .decrease: changeFontSize(by: -1, dark: dark)
+        case .reset: resetFontSize(dark: dark)
+        }
     }
 }
 
@@ -208,7 +246,19 @@ final class TerminalSessionRegistry: ObservableObject {
 final class ServerDashTerminalView: LocalProcessTerminalView {
     var onTerminated: ((Int32?) -> Void)?
     var onHostKeyFailure: (() -> Void)?
+    var onFontShortcut: ((TerminalFontShortcut) -> Void)?
     private var hostKeyFailureDetector = TerminalHostKeyFailureDetector()
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let window, window.isKeyWindow, window.attachedSheet == nil,
+           window.firstResponder === self,
+           let shortcut = TerminalFontShortcut.resolve(event),
+           let onFontShortcut {
+            onFontShortcut(shortcut)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
         super.processTerminated(source, exitCode: exitCode)
@@ -228,30 +278,84 @@ final class ServerDashTerminalView: LocalProcessTerminalView {
 }
 
 struct TerminalHostKeyFailureDetector {
-    private static let maximumTailBytes = 4_096
-    private var tail = Data()
+    private struct Matcher {
+        let transitions: [UInt8]
+        let matches: [Bool]
+    }
+
+    private static let alphabetSize = 128
+    private static let matcher: Matcher = {
+        let warnings = [
+            "remote host identification has changed",
+            "offending ed25519 key",
+            "offending ecdsa key",
+            "offending rsa key"
+        ]
+        var transitions = [Array(repeating: UInt8(0), count: alphabetSize)]
+        var matches = [false]
+
+        // Share warning prefixes, then fill missing edges with suffix fallbacks.
+        // UInt8 states keep this immutable, process-wide ASCII table small.
+        for warning in warnings {
+            var state = 0
+            for byte in warning.utf8 {
+                let symbol = Int(byte)
+                if transitions[state][symbol] == 0 {
+                    precondition(transitions.count < 256)
+                    transitions[state][symbol] = UInt8(transitions.count)
+                    transitions.append(Array(repeating: 0, count: alphabetSize))
+                    matches.append(false)
+                }
+                state = Int(transitions[state][symbol])
+            }
+            matches[state] = true
+        }
+
+        var fallback = Array(repeating: UInt8(0), count: transitions.count)
+        var pending = transitions[0].filter { $0 != 0 }
+        var next = 0
+        while next < pending.count {
+            let state = Int(pending[next])
+            next += 1
+            for symbol in 0..<alphabetSize {
+                let child = transitions[state][symbol]
+                if child == 0 {
+                    transitions[state][symbol] = transitions[Int(fallback[state])][symbol]
+                } else {
+                    let suffix = transitions[Int(fallback[state])][symbol]
+                    fallback[Int(child)] = suffix
+                    matches[Int(child)] = matches[Int(child)] || matches[Int(suffix)]
+                    pending.append(child)
+                }
+            }
+        }
+        return Matcher(transitions: transitions.flatMap { $0 }, matches: matches)
+    }()
+
+    private var state: UInt8 = 0
     private var reported = false
 
     mutating func ingest(_ bytes: ArraySlice<UInt8>) -> Bool {
         guard !reported else { return false }
-        tail.append(contentsOf: bytes)
-        if tail.count > Self.maximumTailBytes {
-            tail.removeFirst(tail.count - Self.maximumTailBytes)
+        let matcher = Self.matcher
+        for byte in bytes {
+            // OpenSSH warnings are ASCII; unrelated UTF-8 bytes break a match.
+            let symbol = (65...90).contains(byte) ? byte + 32 : byte
+            guard symbol < 128 else {
+                state = 0
+                continue
+            }
+            state = matcher.transitions[Int(state) * Self.alphabetSize + Int(symbol)]
+            if matcher.matches[Int(state)] {
+                reported = true
+                return true
+            }
         }
-        let text = String(decoding: tail, as: UTF8.self).lowercased()
-        guard text.contains("remote host identification has changed") ||
-                text.contains("offending ed25519 key") ||
-                text.contains("offending ecdsa key") ||
-                text.contains("offending rsa key") else {
-            return false
-        }
-        reported = true
-        tail.removeAll(keepingCapacity: false)
-        return true
+        return false
     }
 
     mutating func reset() {
-        tail.removeAll(keepingCapacity: false)
+        state = 0
         reported = false
     }
 }
@@ -267,6 +371,11 @@ final class TerminalHostView: NSView {
     private var appliedReduceMotion: Bool?
     var onTerminated: ((Int32?) -> Void)?
     var onHostKeyFailure: (() -> Void)?
+    var onFontShortcut: ((TerminalFontShortcut) -> Void)?
+
+    var usesDarkAppearance: Bool {
+        appliedDarkAppearance ?? (effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+    }
 
     init(
         sessionID: UUID,
@@ -278,12 +387,14 @@ final class TerminalHostView: NSView {
         self.appearanceProfile = appearanceProfile
         super.init(frame: .zero)
         wantsLayer = true
-        terminalView.autoresizingMask = [.width, .height]
         terminalView.onTerminated = { [weak self] code in
             self?.onTerminated?(code)
         }
         terminalView.onHostKeyFailure = { [weak self] in
             self?.onHostKeyFailure?()
+        }
+        terminalView.onFontShortcut = { [weak self] shortcut in
+            self?.onFontShortcut?(shortcut)
         }
         addSubview(terminalView)
         applyAppearance(
@@ -318,12 +429,15 @@ final class TerminalHostView: NSView {
 
     override func layout() {
         super.layout()
-        terminalView.frame = NSRect(
+        let terminalFrame = NSRect(
             x: AppleDesign.Spacing.sm,
             y: AppleDesign.Spacing.xs,
             width: max(0, bounds.width - AppleDesign.Spacing.sm * 2),
             height: max(0, bounds.height - AppleDesign.Spacing.xs * 2)
         )
+        if terminalView.frame != terminalFrame {
+            terminalView.frame = terminalFrame
+        }
     }
 
     override func viewDidMoveToWindow() {
@@ -341,46 +455,65 @@ final class TerminalHostView: NSView {
         window.makeFirstResponder(terminalView)
     }
 
+    func showFindPanel() {
+        focusTerminal()
+        let action = NSMenuItem()
+        action.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+        terminalView.performFindPanelAction(action)
+    }
+
     func applyAppearance(_ profile: TerminalAppearanceProfile, dark: Bool) {
-        let profile = profile.validated()
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard profile != appearanceProfile ||
                 appliedDarkAppearance != dark ||
                 appliedReduceMotion != reduceMotion else { return }
+        let profile = profile.validated()
+        let previous = appearanceProfile
+        let initial = appliedDarkAppearance == nil
+        let previousThemeID = appliedDarkAppearance == true ? previous.darkThemeID : previous.lightThemeID
+        let themeID = dark ? profile.darkThemeID : profile.lightThemeID
+        let reduceMotionChanged = appliedReduceMotion != reduceMotion
         appearanceProfile = profile
         appliedDarkAppearance = dark
         appliedReduceMotion = reduceMotion
-        let theme = TerminalThemeCatalog.shared.theme(
-            id: dark ? profile.darkThemeID : profile.lightThemeID,
-            dark: dark
-        )
-        terminalView.font = TerminalFontCatalog.font(
-            name: profile.fontPostScriptName,
-            size: profile.fontSize
-        )
-        terminalView.lineHeightMultiplier = profile.lineHeight
-        terminalView.characterSpacing = profile.letterSpacing
-        terminalView.nativeForegroundColor = theme.foreground.nsColor
-        terminalView.nativeBackgroundColor = theme.background.nsColor
-        terminalView.caretColor = theme.cursor.nsColor
-        terminalView.caretTextColor = theme.background.nsColor
-        terminalView.selectedTextBackgroundColor = theme.selectionBackground.nsColor
-        terminalView.selectedTextForegroundColor = theme.selectionForeground.nsColor
-        terminalView.installColors(theme.ansiColors.map(Self.swiftTermColor))
-        terminalView.applyCursorStyle(
-            Self.cursorStyle(
+
+        // SwiftTerm's text-metric setters each rebuild fonts and resize the terminal.
+        if initial || profile.fontPostScriptName != previous.fontPostScriptName || profile.fontSize != previous.fontSize {
+            terminalView.font = TerminalFontCatalog.font(name: profile.fontPostScriptName, size: profile.fontSize)
+        }
+        if initial || profile.lineHeight != previous.lineHeight {
+            terminalView.lineHeightMultiplier = profile.lineHeight
+        }
+        if initial || profile.letterSpacing != previous.letterSpacing {
+            terminalView.characterSpacing = profile.letterSpacing
+        }
+        if initial || profile.scrollbarMode != previous.scrollbarMode {
+            terminalView.scrollbarVisibility = Self.scrollbarVisibility(profile.scrollbarMode)
+        }
+        if initial || themeID != previousThemeID {
+            let theme = TerminalThemeCatalog.shared.theme(id: themeID, dark: dark)
+            terminalView.nativeForegroundColor = theme.foreground.nsColor
+            terminalView.nativeBackgroundColor = theme.background.nsColor
+            terminalView.caretColor = theme.cursor.nsColor
+            terminalView.caretTextColor = theme.background.nsColor
+            terminalView.selectedTextBackgroundColor = theme.selectionBackground.nsColor
+            terminalView.selectedTextForegroundColor = theme.selectionForeground.nsColor
+            terminalView.installColors(theme.ansiColors.map(Self.swiftTermColor))
+            layer?.backgroundColor = theme.background.nsColor.cgColor
+        }
+        if initial || profile.activeCursorStyle != previous.activeCursorStyle ||
+            profile.cursorBlinkEnabled != previous.cursorBlinkEnabled || reduceMotionChanged {
+            terminalView.applyCursorStyle(Self.cursorStyle(
                 shape: profile.activeCursorStyle,
                 blinking: profile.cursorBlinkEnabled && !reduceMotion
-            )
-        )
-        terminalView.inactiveCursorStyle = Self.inactiveCursorStyle(
-            profile.inactiveCursorStyle
-        )
-        terminalView.scrollbarVisibility = Self.scrollbarVisibility(
-            profile.scrollbarMode
-        )
-        terminalView.bellEnabled = profile.terminalBellEnabled
-        layer?.backgroundColor = theme.background.nsColor.cgColor
+            ))
+        }
+        if initial || profile.inactiveCursorStyle != previous.inactiveCursorStyle {
+            terminalView.inactiveCursorStyle = Self.inactiveCursorStyle(profile.inactiveCursorStyle)
+        }
+        if initial || profile.terminalBellEnabled != previous.terminalBellEnabled {
+            terminalView.bellEnabled = profile.terminalBellEnabled
+        }
         terminalView.needsDisplay = true
     }
 

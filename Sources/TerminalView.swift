@@ -2,6 +2,70 @@ import AppKit
 import SwiftData
 import SwiftUI
 
+struct TerminalShortcutActions {
+    let hasSession: Bool
+    let canSwitchTabs: Bool
+    let newTab: () -> Void
+    let font: (TerminalFontShortcut) -> Void
+    let find: () -> Void
+    let appearance: () -> Void
+    let switchTab: (Int) -> Void
+}
+
+private struct TerminalShortcutActionsKey: FocusedValueKey {
+    typealias Value = TerminalShortcutActions
+}
+
+extension FocusedValues {
+    var terminalShortcuts: TerminalShortcutActions? {
+        get { self[TerminalShortcutActionsKey.self] }
+        set { self[TerminalShortcutActionsKey.self] = newValue }
+    }
+}
+
+struct TerminalCommands: Commands {
+    @FocusedValue(\.terminalShortcuts) private var actions
+
+    private func perform(_ action: (TerminalShortcutActions) -> Void) {
+        guard let actions, let window = NSApp.keyWindow,
+              window.attachedSheet == nil, window.sheetParent == nil,
+              NSApp.modalWindow == nil else { return }
+        action(actions)
+    }
+
+    var body: some Commands {
+        CommandMenu("终端") {
+            Button("新建 SSH 标签页") { perform { $0.newTab() } }
+                .keyboardShortcut("t", modifiers: .command)
+                .disabled(actions == nil)
+            Divider()
+            Button("增大字号") { perform { $0.font(.increase) } }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(actions?.hasSession != true)
+            Button("减小字号") { perform { $0.font(.decrease) } }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(actions?.hasSession != true)
+            Button("恢复初始字号") { perform { $0.font(.reset) } }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(actions?.hasSession != true)
+            Divider()
+            Button("查找终端内容…") { perform { $0.find() } }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(actions?.hasSession != true)
+            Button("终端外观…") { perform { $0.appearance() } }
+                .keyboardShortcut(",", modifiers: [.command, .shift])
+                .disabled(actions?.hasSession != true)
+            Divider()
+            Button("下一个标签页") { perform { $0.switchTab(1) } }
+                .keyboardShortcut(.tab, modifiers: .control)
+                .disabled(actions?.canSwitchTabs != true)
+            Button("上一个标签页") { perform { $0.switchTab(-1) } }
+                .keyboardShortcut(.tab, modifiers: [.control, .shift])
+                .disabled(actions?.canSwitchTabs != true)
+        }
+    }
+}
+
 struct TerminalWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
     let server: ServerRecord
@@ -30,6 +94,27 @@ private struct TerminalWorkspaceContent: View {
     private var selectedController: TerminalSessionController? {
         guard let id = appState.selectedTerminalID else { return nil }
         return registry.controller(for: id)
+    }
+
+    private var shortcutActions: TerminalShortcutActions? {
+        guard !showingAppearance, snippetPendingExecution == nil else { return nil }
+        return TerminalShortcutActions(
+            hasSession: selectedController != nil,
+            canSwitchTabs: selectedController != nil && registry.controllers.count > 1,
+            newTab: { appState.newTerminal(for: server) },
+            font: { selectedController?.performFontShortcut($0) },
+            find: { selectedController?.hostView.showFindPanel() },
+            appearance: { showingAppearance = true },
+            switchTab: switchTab
+        )
+    }
+
+    private func switchTab(by offset: Int) {
+        let sessions = registry.sessions
+        guard sessions.count > 1,
+              let index = sessions.firstIndex(where: { $0.id == appState.selectedTerminalID }) else { return }
+        let next = (index + offset + sessions.count) % sessions.count
+        appState.selectTerminal(sessions[next])
     }
 
     var body: some View {
@@ -75,7 +160,6 @@ private struct TerminalWorkspaceContent: View {
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 32, height: 32)
-                .keyboardShortcut("t", modifiers: .command)
                 .help("为 \(server.displayName) 新建 SSH 标签页（⌘T）")
                 .accessibilityLabel("新建 SSH 标签页")
                 if let selectedController {
@@ -85,25 +169,16 @@ private struct TerminalWorkspaceContent: View {
                         }
                         Divider()
                         Button("增大字号") {
-                            selectedController.changeFontSize(
-                                by: 1,
-                                dark: colorScheme == .dark
-                            )
+                            selectedController.performFontShortcut(.increase)
                         }
-                        .keyboardShortcut("+", modifiers: .command)
                         Button("减小字号") {
-                            selectedController.changeFontSize(
-                                by: -1,
-                                dark: colorScheme == .dark
-                            )
+                            selectedController.performFontShortcut(.decrease)
                         }
-                        .keyboardShortcut("-", modifiers: .command)
                         Button("恢复初始字号") {
-                            selectedController.resetFontSize(
-                                dark: colorScheme == .dark
-                            )
+                            selectedController.performFontShortcut(.reset)
                         }
-                        .keyboardShortcut("0", modifiers: .command)
+                        Divider()
+                        Text("放大 ⌘+ / ⌘=　缩小 ⌘−　恢复 ⌘0")
                     } label: {
                         Image(systemName: "paintpalette")
                     }
@@ -111,6 +186,15 @@ private struct TerminalWorkspaceContent: View {
                     .frame(width: 32, height: 32)
                     .help("终端外观")
                     .accessibilityLabel("终端外观与字号")
+                    Button {
+                        selectedController.hostView.showFindPanel()
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .frame(width: 32, height: 32)
+                    .help("查找终端内容（⌘F）")
+                    .accessibilityLabel("查找终端内容")
                 }
                 if let selectedSession, !snippets.isEmpty {
                     Menu {
@@ -168,6 +252,7 @@ private struct TerminalWorkspaceContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .focusedSceneValue(\.terminalShortcuts, shortcutActions)
         .confirmationDialog(
             "执行“\(snippetPendingExecution?.title ?? "代码片段")”？",
             isPresented: Binding(
@@ -306,7 +391,7 @@ private struct TerminalSessionPane: View {
                 Spacer(minLength: AppleDesign.Spacing.xs)
                 Text("\(DisplayFormat.integer(Int(controller.appearanceProfile.fontSize))) pt")
                     .monospacedDigit()
-                    .help("使用 ⌘+ / ⌘− 调整字号，⌘0 恢复")
+                    .help("⌘+ / ⌘= 放大，⌘− 缩小，⌘0 恢复；更多快捷键见菜单栏“终端”")
                     .accessibilityLabel("终端字号 \(Int(controller.appearanceProfile.fontSize)) 点")
             }
             .font(.caption)

@@ -479,6 +479,76 @@ final class HostTrustCoordinatorTests: XCTestCase {
 }
 
 final class TerminalHostKeyFailureDetectorTests: XCTestCase {
+    private let warnings = [
+        "REMOTE HOST IDENTIFICATION HAS CHANGED",
+        "Offending ED25519 key",
+        "Offending ECDSA key",
+        "Offending RSA key"
+    ]
+
+    func testDetectsWarningsAtBeginningMiddleAndEndOfLargeOutputChunks() {
+        let padding = Array(repeating: UInt8(ascii: "x"), count: 65_536)
+        for warning in warnings {
+            let bytes = Array(warning.utf8)
+            for output in [bytes + padding, padding + bytes + padding, padding + bytes] {
+                var detector = TerminalHostKeyFailureDetector()
+                XCTAssertTrue(detector.ingest(output[...]), warning)
+                XCTAssertFalse(detector.ingest(bytes[...]), "Report only once per connection")
+            }
+        }
+    }
+
+    func testDetectsEveryWarningAcrossEveryChunkBoundaryAndByteByByte() {
+        for warning in warnings {
+            let bytes = Array(warning.utf8)
+            for boundary in 1..<bytes.count {
+                var detector = TerminalHostKeyFailureDetector()
+                XCTAssertFalse(detector.ingest(bytes[..<boundary]), warning)
+                XCTAssertTrue(detector.ingest(bytes[boundary...]), warning)
+            }
+
+            var detector = TerminalHostKeyFailureDetector()
+            for index in bytes.indices {
+                XCTAssertEqual(detector.ingest(bytes[index...index]), index == bytes.count - 1, warning)
+            }
+        }
+    }
+
+    func testMatchesMixedCaseAndRecoversFromOverlappingPrefixes() {
+        for warning in warnings {
+            let mixedCase = warning.enumerated().map { index, character in
+                index.isMultiple(of: 2) ? character.uppercased() : character.lowercased()
+            }.joined()
+            var detector = TerminalHostKeyFailureDetector()
+            let output = Array(("remote host identificatiremote offending offend" + mixedCase).utf8)
+            XCTAssertTrue(detector.ingest(output[...]), mixedCase)
+        }
+    }
+
+    func testUnrelatedOutputAndInterruptedWarningsDoNotMatch() {
+        var detector = TerminalHostKeyFailureDetector()
+        let output = Array((
+            "服务器日志 🖥️\n" +
+            "remote host identification has not changed\n" +
+            "offending rsa public keys are not present\n" +
+            "offending ed25519\u{0} key\n" +
+            "offending ecdsa 🔑key\n"
+        ).utf8)
+        XCTAssertFalse(detector.ingest(output[...]))
+        XCTAssertFalse(detector.ingest([]))
+        XCTAssertTrue(detector.ingest(Array("Offending RSA key".utf8)[...]))
+    }
+
+    func testResetDiscardsPartialMatchAndAllowsNewConnectionWarning() {
+        var detector = TerminalHostKeyFailureDetector()
+        XCTAssertFalse(detector.ingest(Array("remote host identification has ".utf8)[...]))
+        detector.reset()
+        XCTAssertFalse(detector.ingest(Array("changed".utf8)[...]))
+        XCTAssertTrue(detector.ingest(Array("offending ecdsa key".utf8)[...]))
+        detector.reset()
+        XCTAssertTrue(detector.ingest(Array("offending rsa key".utf8)[...]))
+    }
+
     func testDetectsFragmentedChangedKeyWarningOncePerConnection() {
         var detector = TerminalHostKeyFailureDetector()
         let first = Array("WARNING: REMOTE HOST IDENTIFI".utf8)
@@ -860,6 +930,57 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
         XCTAssertNotEqual(selected.status, .disconnected)
     }
 
+    func testReselectingCurrentTerminalDoesNotBroadcastUnchangedNavigation() {
+        let appState = AppState()
+        let controller = TerminalSessionController(
+            server: ServerRecord(name: "Demo", host: "192.0.2.1", username: "root"),
+            attachProcess: false
+        )
+        appState.selectTerminal(controller.session)
+        var publications = 0
+        let observation = appState.objectWillChange.sink { publications += 1 }
+
+        appState.selectTerminal(controller.session)
+
+        XCTAssertEqual(publications, 0)
+        XCTAssertEqual(appState.selectedTerminalID, controller.id)
+        XCTAssertEqual(appState.selectedServerID, controller.serverID)
+        XCTAssertEqual(appState.detailMode, .terminal)
+        withExtendedLifetime(observation) {}
+    }
+
+    func testSwitchingTabsOnSameServerPublishesOnlySessionSelection() {
+        let appState = AppState()
+        let server = ServerRecord(name: "Demo", host: "192.0.2.1", username: "root")
+        let first = TerminalSessionController(server: server, attachProcess: false)
+        let second = TerminalSessionController(server: server, attachProcess: false)
+        appState.selectTerminal(first.session)
+        var sessionChanges: [UUID?] = []
+        var serverChanges: [UUID?] = []
+        var modeChanges: [DetailMode] = []
+        let observations = [
+            appState.$selectedTerminalID.dropFirst().sink { sessionChanges.append($0) },
+            appState.$selectedServerID.dropFirst().sink { serverChanges.append($0) },
+            appState.$detailMode.dropFirst().sink { modeChanges.append($0) }
+        ]
+
+        appState.selectTerminal(second.session)
+
+        XCTAssertEqual(sessionChanges, [second.id])
+        XCTAssertTrue(serverChanges.isEmpty)
+        XCTAssertTrue(modeChanges.isEmpty)
+        XCTAssertEqual(appState.selectedServerID, server.id)
+        XCTAssertEqual(appState.detailMode, .terminal)
+
+        appState.detailMode = .monitor
+        appState.selectTerminal(second.session)
+
+        XCTAssertEqual(sessionChanges, [second.id])
+        XCTAssertTrue(serverChanges.isEmpty)
+        XCTAssertEqual(modeChanges, [.monitor, .terminal])
+        withExtendedLifetime(observations) {}
+    }
+
     func testSwitchingSelectionDoesNotTerminateExistingSession() {
         let server = ServerRecord(
             name: "Demo",
@@ -933,6 +1054,60 @@ final class MainContentRouteTests: XCTestCase {
 
 @MainActor
 final class ServerRuntimeStateTests: XCTestCase {
+    func testSuccessfulSamplesDoNotBroadcastAppStateButHistoryErrorTransitionsDo() throws {
+        let container = try PersistenceController.makeInMemoryContainer()
+        let context = ModelContext(container)
+        let server = ServerRecord(name: "Publication Test", host: "192.0.2.1", username: "root")
+        server.enableDashboardMonitor = false
+        context.insert(server)
+        let appState = AppState()
+        appState.bootstrap(servers: [server], context: context)
+        let runtime = appState.runtime(for: server)
+        var publications = 0
+        var errors: [String?] = []
+        let observations = [
+            appState.objectWillChange.sink { publications += 1 },
+            appState.$monitoringHistoryError.dropFirst().sink { errors.append($0) }
+        ]
+        var snapshot = ServerSnapshot.empty
+        snapshot.capturedAt = .now
+        snapshot.cpuUsage = 42
+
+        appState.applyValidatedSnapshot(snapshot, to: server)
+        snapshot.capturedAt.addTimeInterval(1)
+        appState.applyValidatedSnapshot(snapshot, to: server)
+
+        XCTAssertEqual(publications, 0)
+        XCTAssertTrue(errors.isEmpty)
+        XCTAssertEqual(runtime.publicationCount, 2)
+
+        // JSON history encoding rejects non-finite metrics before inserting a record.
+        snapshot.load1 = .infinity
+        snapshot.capturedAt.addTimeInterval(1)
+        appState.applyValidatedSnapshot(snapshot, to: server)
+        let historyError = appState.monitoringHistoryError
+        XCTAssertNotNil(historyError)
+        XCTAssertEqual(publications, 1)
+
+        snapshot.capturedAt.addTimeInterval(1)
+        appState.applyValidatedSnapshot(snapshot, to: server)
+        XCTAssertEqual(publications, 1)
+
+        snapshot.load1 = 0.5
+        snapshot.capturedAt.addTimeInterval(1)
+        appState.applyValidatedSnapshot(snapshot, to: server)
+        snapshot.capturedAt.addTimeInterval(1)
+        appState.applyValidatedSnapshot(snapshot, to: server)
+
+        XCTAssertNil(appState.monitoringHistoryError)
+        XCTAssertEqual(publications, 2)
+        XCTAssertEqual(errors, [historyError, nil])
+        XCTAssertEqual(runtime.publicationCount, 6)
+        XCTAssertEqual(runtime.renderState.snapshot.load1, 0.5)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<MonitoringSampleRecord>()).count, 4)
+        withExtendedLifetime(observations) {}
+    }
+
     func testResultPublicationIsAtomic() {
         let runtime = ServerRuntimeState(serverID: UUID())
         var emissions: [ServerRenderState] = []

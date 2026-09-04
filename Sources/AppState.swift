@@ -795,7 +795,9 @@ final class AppState: ObservableObject {
         state.lastSuccessfulMonitorAt = snapshot.capturedAt
         do {
             try monitoringHistory?.recordSnapshot(snapshot, serverID: server.id)
-            monitoringHistoryError = nil
+            if monitoringHistoryError != nil {
+                monitoringHistoryError = nil
+            }
         } catch {
             reportHistoryFailure()
         }
@@ -903,10 +905,16 @@ final class AppState: ObservableObject {
     func selectTerminal(_ session: TerminalSession) {
         let interval = PerformanceTrace.begin(.terminalTabSwitch)
         defer { PerformanceTrace.end(interval) }
-        selectedTerminalID = session.id
-        selectedServerID = session.serverID
+        if selectedTerminalID != session.id {
+            selectedTerminalID = session.id
+        }
+        if selectedServerID != session.serverID {
+            selectedServerID = session.serverID
+        }
         selectedConfig = session.config
-        detailMode = .terminal
+        if detailMode != .terminal {
+            detailMode = .terminal
+        }
     }
 
     func closeTerminal(_ session: TerminalSession, context: ModelContext? = nil) {
@@ -1143,7 +1151,9 @@ final class AppState: ObservableObject {
             completedState.lastSuccessfulMonitorAt = snapshot.capturedAt
             do {
                 try monitoringHistory?.recordSnapshot(snapshot, serverID: server.id)
-                monitoringHistoryError = nil
+                if monitoringHistoryError != nil {
+                    monitoringHistoryError = nil
+                }
             } catch {
                 reportHistoryFailure()
             }
@@ -1508,7 +1518,10 @@ final class AppState: ObservableObject {
     }
 
     private func reportHistoryFailure() {
-        monitoringHistoryError = "监控历史写入失败；实时快照仍可用。"
+        let message = "监控历史写入失败；实时快照仍可用。"
+        if monitoringHistoryError != message {
+            monitoringHistoryError = message
+        }
         eventLog.append(
             serverID: nil,
             module: .data,

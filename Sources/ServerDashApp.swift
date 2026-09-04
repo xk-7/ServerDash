@@ -66,6 +66,7 @@ struct ServerDashApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             SidebarCommands()
+            TerminalCommands()
             CommandMenu("服务器") {
                 Button("切换到监控") {
                     appState.detailMode = .monitor

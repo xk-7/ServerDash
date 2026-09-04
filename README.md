@@ -49,7 +49,8 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 - Includes 20 local light/dark themes and discovers installed macOS monospaced fonts.
 - Configurable font size, line height, character spacing, active/inactive cursors, blinking, scrollbar, and Terminal Bell.
 - Global appearance settings affect new sessions only; active sessions can be customized independently.
-- `⌘T` opens a terminal, `⌘+` / `⌘-` adjust the current session font size, and `⌘0` resets it.
+- `⌘T` opens a terminal; `⌘+` / `⌘=` and `⌘-` adjust the current session font size; `⌘0` restores its initial size.
+- `⌘F` searches terminal output, `⌃Tab` / `⌃⇧Tab` switch tabs, and `⌘⇧,` opens terminal appearance settings. These shortcuts are listed in the Terminal menu.
 
 ### SFTP
 
