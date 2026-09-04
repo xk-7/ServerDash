@@ -817,6 +817,49 @@ final class PersistenceSchemaTests: XCTestCase {
 
 @MainActor
 final class TerminalRegistryLifecycleTests: XCTestCase {
+    func testClosingSelectedTabSelectsAdjacentSessionAndItsServer() {
+        let appState = AppState()
+        let controllers = (1...3).map { index in
+            let server = ServerRecord(name: "Server \(index)", host: "192.0.2.\(index)", username: "root")
+            let controller = TerminalSessionController(server: server, attachProcess: false)
+            controller.status = .connected
+            appState.terminalRegistry.registerForTesting(controller)
+            return controller
+        }
+        appState.selectTerminal(controllers[0].session)
+
+        appState.closeTerminal(controllers[0].session)
+
+        XCTAssertEqual(appState.selectedTerminalID, controllers[1].id)
+        XCTAssertEqual(appState.selectedServerID, controllers[1].serverID)
+        XCTAssertEqual(appState.detailMode, .terminal)
+        XCTAssertTrue(appState.terminalRegistry.controller(for: controllers[1].id) === controllers[1])
+        XCTAssertEqual(controllers[1].status, .connected)
+        XCTAssertEqual(controllers[2].status, .connected)
+
+        appState.closeTerminal(controllers[1].session)
+        appState.closeTerminal(controllers[2].session)
+        XCTAssertNil(appState.selectedTerminalID)
+        XCTAssertEqual(appState.detailMode, .monitor)
+    }
+
+    func testClosingBackgroundTabPreservesSelectedSession() {
+        let appState = AppState()
+        let server = ServerRecord(name: "Demo", host: "192.0.2.1", username: "root")
+        let selected = TerminalSessionController(server: server, attachProcess: false)
+        let background = TerminalSessionController(server: server, attachProcess: false)
+        appState.terminalRegistry.registerForTesting(selected)
+        appState.terminalRegistry.registerForTesting(background)
+        appState.selectTerminal(selected.session)
+
+        appState.closeTerminal(background.session)
+
+        XCTAssertEqual(appState.selectedTerminalID, selected.id)
+        XCTAssertEqual(appState.selectedServerID, selected.serverID)
+        XCTAssertEqual(appState.terminalSessions.map(\.id), [selected.id])
+        XCTAssertNotEqual(selected.status, .disconnected)
+    }
+
     func testSwitchingSelectionDoesNotTerminateExistingSession() {
         let server = ServerRecord(
             name: "Demo",

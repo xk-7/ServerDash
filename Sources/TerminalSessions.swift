@@ -263,6 +263,8 @@ final class TerminalHostView: NSView {
     private var didStart = false
     private var commandObserver: NSObjectProtocol?
     private var appearanceProfile: TerminalAppearanceProfile
+    private var appliedDarkAppearance: Bool?
+    private var appliedReduceMotion: Bool?
     var onTerminated: ((Int32?) -> Void)?
     var onHostKeyFailure: (() -> Void)?
 
@@ -299,6 +301,7 @@ final class TerminalHostView: NSView {
                 return
             }
             self.terminalView.send(txt: command)
+            self.focusTerminal()
         }
     }
 
@@ -315,12 +318,38 @@ final class TerminalHostView: NSView {
 
     override func layout() {
         super.layout()
-        terminalView.frame = bounds
+        terminalView.frame = NSRect(
+            x: AppleDesign.Spacing.sm,
+            y: AppleDesign.Spacing.xs,
+            width: max(0, bounds.width - AppleDesign.Spacing.sm * 2),
+            height: max(0, bounds.height - AppleDesign.Spacing.xs * 2)
+        )
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        needsLayout = true
+        terminalView.needsDisplay = true
+        DispatchQueue.main.async { [weak self] in
+            self?.focusTerminal()
+        }
+    }
+
+    func focusTerminal() {
+        guard let window, window.isKeyWindow, window.attachedSheet == nil else { return }
+        window.makeFirstResponder(terminalView)
     }
 
     func applyAppearance(_ profile: TerminalAppearanceProfile, dark: Bool) {
         let profile = profile.validated()
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard profile != appearanceProfile ||
+                appliedDarkAppearance != dark ||
+                appliedReduceMotion != reduceMotion else { return }
         appearanceProfile = profile
+        appliedDarkAppearance = dark
+        appliedReduceMotion = reduceMotion
         let theme = TerminalThemeCatalog.shared.theme(
             id: dark ? profile.darkThemeID : profile.lightThemeID,
             dark: dark
@@ -341,8 +370,7 @@ final class TerminalHostView: NSView {
         terminalView.applyCursorStyle(
             Self.cursorStyle(
                 shape: profile.activeCursorStyle,
-                blinking: profile.cursorBlinkEnabled &&
-                    !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                blinking: profile.cursorBlinkEnabled && !reduceMotion
             )
         )
         terminalView.inactiveCursorStyle = Self.inactiveCursorStyle(

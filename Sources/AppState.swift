@@ -910,6 +910,7 @@ final class AppState: ObservableObject {
     }
 
     func closeTerminal(_ session: TerminalSession, context: ModelContext? = nil) {
+        let closedIndex = terminalSessions.firstIndex { $0.id == session.id } ?? 0
         terminalRegistry.close(session.id)
         if let context {
             context.insert(
@@ -924,9 +925,12 @@ final class AppState: ObservableObject {
             try? context.save()
         }
         if selectedTerminalID == session.id {
-            selectedTerminalID = terminalSessions.last?.id
-            if terminalSessions.isEmpty {
+            let remaining = terminalSessions
+            if remaining.isEmpty {
+                selectedTerminalID = nil
                 detailMode = .monitor
+            } else {
+                selectTerminal(remaining[min(closedIndex, remaining.count - 1)])
             }
         }
     }

@@ -533,7 +533,63 @@ private struct ServerDetailHeader: View {
         return parts.joined(separator: " · ")
     }
 
+    @ViewBuilder
     var body: some View {
+        if mode == .terminal {
+            terminalHeader
+        } else {
+            standardHeader
+        }
+    }
+
+    private var terminalHeader: some View {
+        HStack(spacing: AppleDesign.Spacing.sm) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.backward")
+            }
+            .help("返回\(backTitle)")
+            .accessibilityLabel("返回\(backTitle)")
+            .keyboardShortcut("[", modifiers: .command)
+
+            Text(server.displayName)
+                .font(.headline)
+                .lineLimit(1)
+                .help(server.displayName)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Picker("视图", selection: $mode) {
+                ForEach(DetailMode.allCases) { item in
+                    Text(item.title).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 190)
+
+            Menu {
+                Button("事件日志", systemImage: "list.bullet.rectangle", action: onEventLog)
+                if runtime.renderState.diagnostics != nil {
+                    Button("诊断", systemImage: "stethoscope", action: onDiagnostics)
+                }
+                Divider()
+                Button("编辑服务器", systemImage: "pencil", action: onEdit)
+                Button("删除服务器", systemImage: "trash", role: .destructive, action: onDelete)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("服务器操作")
+            .accessibilityLabel("服务器操作")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .padding(.horizontal, AppleDesign.Spacing.md)
+        .padding(.vertical, AppleDesign.Spacing.xs)
+        .background(Color.appGround)
+    }
+
+    private var standardHeader: some View {
         HStack(spacing: 12) {
             Button(action: onBack) {
                 Label("返回\(backTitle)", systemImage: "chevron.backward")
