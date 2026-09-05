@@ -128,7 +128,7 @@ See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for r
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
-Latest internal preview: [ServerDash 0.1.0 test.5](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.5) (build 4). Read the [release notes](Docs/RELEASE_NOTES_0.1.0-TEST.5.md) before installing; this build is ad-hoc signed, not notarized, and intended only for known testers.
+Latest stable release: [ServerDash 1.0.0](https://github.com/xk-7/ServerDash/releases/tag/v1.0.0) (build 5). See the [release announcement](Docs/RELEASE_NOTES_1.0.0.md) for installation and artifact details. The macOS artifact is ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run
 
@@ -192,6 +192,14 @@ Create an ad-hoc signed test DMG (no Apple Developer account required):
 ```
 
 The DMG is written to `dist/`. On another Mac, open the app with Control-click → **Open**, or allow it under **System Settings → Privacy & Security** when Gatekeeper reports that the developer cannot be verified.
+
+Build the macOS, iPhone Simulator, and iPad Simulator GitHub Release artifacts, plus an unsigned iOS Device Release compile check:
+
+```bash
+./Scripts/build-release-artifacts.sh 1.0.0
+```
+
+Artifacts and SHA-256 checksums are written to `dist/v1.0.0/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files.
 
 ## Project Layout
 

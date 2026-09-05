@@ -128,7 +128,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
-最新内部预览版：[ServerDash 0.1.0 test.5](https://github.com/xk-7/ServerDash/releases/tag/v0.1.0-test.5)（Build 4）。安装前请阅读[发布记录](Docs/RELEASE_NOTES_0.1.0-TEST.5.md)；该构建使用 ad-hoc 签名、未经公证，仅供已知测试人员使用。
+最新正式版本：[ServerDash 1.0.0](https://github.com/xk-7/ServerDash/releases/tag/v1.0.0)（Build 5）。安装与平台附件说明见[正式发布通知](Docs/RELEASE_NOTES_1.0.0.md)。macOS 附件使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
 
 ## 运行
 
@@ -192,6 +192,14 @@ xcodebuild \
 ```
 
 DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 点击 App 并选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。
+
+构建正式 GitHub Release 的 macOS、iPhone Simulator、iPad Simulator 产物，并验证无签名 iOS Device Release 编译：
+
+```bash
+./Scripts/build-release-artifacts.sh 1.0.0
+```
+
+产物和 SHA-256 校验文件输出到 `dist/v1.0.0/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)。
 
 ## 项目结构
 

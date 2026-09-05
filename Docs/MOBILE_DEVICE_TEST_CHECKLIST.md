@@ -30,7 +30,7 @@
 ## Terminal
 
 - [ ] iPhone full-screen terminal with software-keyboard accessory actions.
-- [ ] iPad terminal plus inspector in landscape and portrait.
+- [ ] iPad terminal plus inspector in both supported landscape directions.
 - [ ] Hardware keyboard input, Command-key navigation, and pointer interaction.
 - [ ] Chinese IME composition and wide-character rendering.
 - [ ] Rotation and Split View resize update the remote PTY dimensions.
@@ -57,7 +57,7 @@
   stale results never restore deleted state or replace a new request.
 - [ ] iPhone portrait and landscape, including the smallest supported compact
   width used by the test fleet.
-- [ ] iPad portrait/landscape, one-third and half Split View, and Stage Manager.
+- [ ] iPad landscape left/right, one-third and half Split View, and Stage Manager.
 - [ ] Light and dark appearance plus Increase Contrast and Reduce Motion.
 - [ ] Largest accessibility Dynamic Type sizes without clipped primary actions.
 - [ ] VoiceOver can complete machine selection, trust confirmation, terminal

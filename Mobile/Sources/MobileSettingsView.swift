@@ -74,7 +74,7 @@ struct MobileSettingsView: View {
 
             Section("关于") {
                 LabeledContent("应用", value: "ServerDash")
-                LabeledContent("版本", value: "0.1.0 (4)")
+                LabeledContent("版本", value: versionDisplay)
                 Link("SwiftServer 设计参考", destination: URL(string: "https://swiftserver.app/docs")!)
                 Link(
                     "NIOSSH 安全公告",
@@ -83,6 +83,12 @@ struct MobileSettingsView: View {
             }
         }
         .navigationTitle("设置")
+    }
+
+    private var versionDisplay: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return build.map { "\(version) (\($0))" } ?? version
     }
 
     private func capability(_ title: String, available: Bool) -> some View {

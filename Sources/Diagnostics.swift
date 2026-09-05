@@ -262,12 +262,18 @@ enum SSHDiagnostics {
         let connectionError = error as? ConnectionError
         _ = config
         return """
-        App: ServerDash 0.1.0
+        App: ServerDash \(versionDisplay)
         Platform: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Remote OS: \(remoteOS ?? "未知")
         Phase: \(connectionError?.phase.title ?? ConnectionPhase.failed.title)
         Code: \(connectionError?.code ?? "UNKNOWN")
         """
+    }
+
+    private static var versionDisplay: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        return build.map { "\(version) (\($0))" } ?? version
     }
 }
 
