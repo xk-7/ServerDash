@@ -263,7 +263,7 @@ enum SSHDiagnostics {
         _ = config
         return """
         App: ServerDash 0.1.0
-        macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Platform: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Remote OS: \(remoteOS ?? "未知")
         Phase: \(connectionError?.phase.title ?? ConnectionPhase.failed.title)
         Code: \(connectionError?.code ?? "UNKNOWN")

@@ -4,12 +4,17 @@ options:
   bundleIdPrefix: com.serverdash
   deploymentTarget:
     macOS: "14.0"
+    iOS: "18.0"
   xcodeVersion: "26.0"
   groupSortPosition: top
 
 packages:
   SwiftTerm:
     path: Vendor/SwiftTerm
+  Citadel:
+    path: Vendor/Citadel
+  NIOSSH:
+    path: Vendor/swift-nio-ssh
 
 targets:
   ServerDash:
@@ -51,6 +56,63 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: "5.9"
 
+  ServerDashMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Mobile/Sources
+      - path: Sources/Models.swift
+      - path: Sources/Persistence.swift
+      - path: Sources/ProfessionalConnections.swift
+      - path: Sources/Diagnostics.swift
+      - path: Sources/ConnectionEngine.swift
+      - path: Sources/TrustedHosts.swift
+      - path: Sources/Services.swift
+      - path: Sources/SFTPService.swift
+      - path: Sources/DesignSystem.swift
+      - path: Sources/DisplayFormat.swift
+      - path: Sources/MonitoringHistory.swift
+      - path: Sources/MonitorLayout.swift
+      - path: Sources/RemoteConnection.swift
+      - path: Resources
+        buildPhase: resources
+    dependencies:
+      - package: SwiftTerm
+      - package: Citadel
+      - package: NIOSSH
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.ios
+        PRODUCT_NAME: ServerDashMobile
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 4
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ServerDash
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+
+  ServerDashMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Mobile/Tests
+    dependencies:
+      - target: ServerDashMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+
 schemes:
   ServerDash:
     build:
@@ -60,3 +122,11 @@ schemes:
     test:
       targets:
         - ServerDashTests
+  ServerDashMobile:
+    build:
+      targets:
+        ServerDashMobile: all
+        ServerDashMobileTests: [test]
+    test:
+      targets:
+        - ServerDashMobileTests

@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP 客户端。应用基于 SwiftUI 构建，最低支持 macOS 14，不需要在服务器安装 Agent。
+ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、SSH 终端和 SFTP 客户端。应用基于 SwiftUI 构建，最低支持 macOS 14 或 iOS/iPadOS 18，不需要在服务器安装 Agent。
 
 ## 核心能力
 
@@ -32,7 +32,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 
 ### SSH 连接与安全
 
-- 基于 macOS `/usr/bin/ssh`，统一管理超时、取消、并发和子进程退出。
+- Mac 使用系统 `/usr/bin/ssh`；iPhone/iPad 使用仓库内固定的 Citadel 0.12.1 原生 SSH 引擎。
+- 两套引擎共同实现 `RemoteConnectionEngine` / `RemoteSession` 协议，统一命令、PTY Shell、SFTP、取消与关闭语义，同时保持已有 macOS 进程行为不变。
 - 导入 SSH Config 并展示最终值、来源和不支持项；支持逐跳独立身份、信任和超时的 ProxyJump 多跳路线。
 - 支持结构化 SOCKS5/HTTP CONNECT 代理及 Local、Remote、Dynamic 转发；默认回环监听，远端或广域监听必须确认。
 - 密码、SSH 私钥、加密私钥口令及“私钥优先，密码回退”。
@@ -41,10 +42,13 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 应用专属 `known_hosts`，支持首次指纹确认、密钥变化对比和可信主机管理。
 - 已信任主机走 `known_hosts` 稳态快路径；只有首次使用、显式复核或主机密钥错误恢复时才执行 `ssh-keyscan`。
 - 服务器可离线保存；SSH 测试结果使用独立弹窗反馈。
+- iPhone/iPad 对未知或变化的主机密钥一律暂停并要求明确确认，不提供“接受所有主机”模式。
+- 移动端仅开放密码与导入的 OpenSSH Ed25519/RSA 私钥；凭据使用“仅本设备可访问”的 Keychain 等级。外部密钥路径、SSH Agent、SSH Config、代理、跳板机与端口转发均隐藏。
+- 本地 NIOSSH 0.3.6 已回移 Apple `31cdc3c` 修复，并为 [GHSA-998x-vgvp-xwpc](https://github.com/apple/swift-nio-ssh/security/advisories/GHSA-998x-vgvp-xwpc) 增加回归测试；安全门失败时移动端真实 SSH 不具备交付条件。
 
 ### 多会话终端
 
-- 基于仓库内固定的 SwiftTerm 1.11.2 与 OpenSSH PTY。
+- 基于仓库内固定的 SwiftTerm 1.11.2；macOS 使用 OpenSSH PTY，iPhone 与 iPad 使用 Citadel PTY。
 - 终端会话独立于 SwiftUI 页面生命周期，切换标签、服务器或功能页不会断开。
 - 支持 ANSI、宽字符、`vim`、`top`、`htop`、`tmux` 等交互程序。
 - 20 套本地浅色/深色主题及 macOS 已安装的等宽字体。
@@ -53,6 +57,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - `⌘T` 新建终端；`⌘+` / `⌘=` 放大、`⌘-` 缩小当前会话字号，`⌘0` 恢复初始字号。
 - `⌘F` 查找终端内容，`⌃Tab` / `⌃⇧Tab` 切换标签页，`⌘⇧,` 打开终端外观设置；菜单栏“终端”中可查看这些快捷键。
 - `⌘⌥I` 显示状态 / 代码片段检查器：查看资源快照与过期提示，搜索、复制、插入或执行命令。执行和多行插入前确认，并锁定目标会话。
+- iPhone 使用 SwiftTerm UIKit 全屏终端，状态与代码片段通过 Sheet 展示；iPad 可并排显示终端和检查器，并支持指针与硬件键盘输入。
 
 ### SFTP
 
@@ -61,6 +66,21 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 - 字节进度、速度、剩余时间、取消和失败重试。
 - 同名目标支持覆盖、跳过或自动重命名。
 - 支持中文、空格和特殊字符路径，以及服务器默认进入目录。
+- iPhone 使用紧凑列表，iPad 使用自适应网格；本地文件通过系统文件导入器/导出器访问，不保存外部安全作用域路径。
+
+## 平台功能矩阵
+
+| 能力 | macOS 14+ | iPhone / iPadOS 18+ |
+| --- | --- | --- |
+| 仪表盘与 Linux 监控 | 支持 | 支持；前台刷新 |
+| 多远程终端 | 支持 | 支持；进入后台后中断 |
+| SFTP 浏览/上传/下载/重命名/移动/删除 | 支持 | 支持；通过“文件”导入导出 |
+| 密码与导入私钥认证 | 支持 | 支持 |
+| 外部私钥路径 / SSH Agent / SSH Config | 支持 | 不支持 |
+| 跳板机与 SOCKS5 / HTTP CONNECT 代理 | 支持 | 不支持 |
+| Local / Remote / Dynamic 转发 | 支持 | 不支持 |
+| 本地终端 | 支持 | 不支持 |
+| CloudKit 或跨设备数据同步 | 不支持 | 不支持 |
 
 ### 性能与进程生命周期
 
@@ -83,19 +103,22 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS 监控、SSH 终端与 SFTP
 
 ## 产品体验参考
 
-以 [SwiftServer 产品页](https://swiftserver.app/)和[官方文档](https://swiftserver.app/docs)作为主要体验参考，优先对齐服务器组织、监控卡片、终端检查器、SFTP 与连接诊断流程。保留 ServerDash 自有品牌、原生 macOS 结构及现有安全约束；参考不代表完整功能兼容，也不自动引入付费限制、iCloud 或替换 SSH 引擎。
+以 [SwiftServer 产品页](https://swiftserver.app/)和[官方文档](https://swiftserver.app/docs)作为主要体验参考，优先对齐服务器组织、监控卡片、自适应多设备导航、终端检查器、SFTP 与连接诊断流程。ServerDash 保留自有品牌、实现、文案、资产和安全约束；参考不代表完整功能兼容，也不自动引入付费限制或 iCloud。
 
 ## 构建要求
 
 - macOS 14 或更高版本
+- `ServerDashMobile` 需要 iOS 或 iPadOS 18 及以上
 - Xcode 26
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-项目使用仓库内的 `Vendor/SwiftTerm` 本地 package，不需要单独下载 SwiftTerm。
+项目使用仓库内的 `Vendor/SwiftTerm`、`Vendor/Citadel` 与 `Vendor/swift-nio-ssh` 本地 package；其传递依赖由 `Package.resolved` 固定。
 
 ## 开发与验证状态
 
-S11 专业 SSH 路线与隧道已经接入 S07 基线。当前测试套件包含 144 项自动化测试，Debug 构建通过；三个临时 sshd 的隔离 fixture 已验证真实系统 OpenSSH 三跳链路。最近一次完整测试中 143 项直接通过，既有的进程取消时序测试因并发负载超过 1 秒阈值，单独复跑通过。生产多跳、认证代理、Remote Forward、硬件密钥和长时间稳定性仍明确列为待隔离环境或实机验证。
+通用 `ServerDashMobile` Target 已通过 iPhone 与 iPad Simulator 构建。移动端专项套件现有 14 项测试，覆盖连接协议、本地 Citadel 密码/密钥/PTY 集成、主机信任、生命周期中断、平台能力门控和凭据脱敏；Vendored NIOSSH 另有两项畸形 ECDSA 签名安全回归测试。实体设备 SSH/SFTP 与辅助功能检查尚未执行，详见[移动端实机检查清单](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md)。
+
+已有 macOS S11 专业 SSH 路线与隧道保持可用，并继续使用系统 OpenSSH。生产多跳、认证代理、Remote Forward、硬件密钥和长时间稳定性仍需隔离环境或实机验证。
 
 需求到代码的对应关系、各批次结果、验收覆盖和待实机项目见 [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md)。
 
@@ -120,6 +143,18 @@ xcodebuild \
   -skipPackagePluginValidation \
   build
 ```
+
+构建通用 iPhone/iPad Simulator App：
+
+```bash
+xcodebuild \
+  -project ServerDash.xcodeproj \
+  -scheme ServerDashMobile \
+  -destination 'generic/platform=iOS Simulator' \
+  build
+```
+
+安装到 iPhone 或 iPad：在 Xcode 中选择 `ServerDashMobile`，设置开发团队，连接运行 iOS/iPadOS 18 及以上的设备后运行。可使用免费 Apple ID 进行本地开发签名，但受 Apple 常规 Provisioning 限制；本项目当前不提供 TestFlight 或 App Store 包。
 
 运行全部测试：
 
@@ -158,10 +193,14 @@ DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 
 
 ```text
 Sources/                    SwiftUI 应用、连接服务和数据模型
+Mobile/Sources/             原生 iPhone/iPad App、自适应 UI 与 Citadel 适配器
+Mobile/Tests/               移动端连接、安全、信任与生命周期测试
 Tests/                      单元与基础集成测试
 Docs/                       架构决策、实施状态与发布记录
 Resources/TerminalThemes/   本地终端主题与许可证说明
 Vendor/SwiftTerm/           固定并扩展的 SwiftTerm 1.11.2
+Vendor/Citadel/             本地固定 Citadel 0.12.1
+Vendor/swift-nio-ssh/       本地固定 NIOSSH 0.3.6 与安全补丁
 project.yml                 XcodeGen 工程定义
 ```
 
@@ -170,10 +209,10 @@ project.yml                 XcodeGen 工程定义
 - UI：SwiftUI、Swift Charts、MapKit
 - 数据：SwiftData
 - 凭据：Security / Keychain Services、LocalAuthentication
-- SSH/SFTP：macOS 系统 OpenSSH
+- SSH/SFTP：macOS 系统 OpenSSH；iOS/iPadOS 使用 Citadel 0.12.1 + NIOSSH 0.3.6
 - 终端：本地 SwiftTerm 1.11.2 package
 - 日志：OSLog
 
 ## 分发与范围
 
-应用需要启动 OpenSSH/SFTP 子进程，因此当前关闭 App Sandbox。1.0 内部测试路线使用本地 ad-hoc 签名，只在本人和少量已知测试人员之间手动分发；不依赖 Apple Developer Program、Developer ID、公证或 Mac App Store。S11 端口转发属于可选高级本地能力；CloudKit、付费分层、7×24 告警承诺、Mosh 和完整 Docker 运维面板仍不在当前已实现范围内。详见[已接受的分发与 SSH 决策](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md)。
+macOS App 需要启动 OpenSSH/SFTP 子进程，因此继续关闭 App Sandbox。iOS/iPadOS App 使用自己的沙箱容器和独立 SwiftData V3 数据库，不迁移或同步 Mac 数据。移动端连接仅面向前台：回到前台后监控会重连；终端与中断传输必须由用户明确重启，不承诺恢复远程进程或断点续传。CloudKit、TestFlight、StoreKit、Widget、Live Activity、付费分层、7×24 告警和 Mosh 仍不在当前范围内。详见 [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md)。

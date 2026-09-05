@@ -269,6 +269,6 @@ struct DatabaseRecoveryView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(AppleDesign.Spacing.xl)
-        .frame(minWidth: 560, minHeight: 360)
+        .frame(maxWidth: 560, minHeight: 360)
     }
 }

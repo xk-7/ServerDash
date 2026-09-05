@@ -20,6 +20,14 @@ enum KeychainError: LocalizedError {
 enum KeychainService {
     static let serviceName = "com.serverdash.credentials"
 
+    private static var accessibility: CFString {
+#if os(iOS)
+        kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+#else
+        kSecAttrAccessibleWhenUnlocked
+#endif
+    }
+
     static func savePassword(_ password: String, for credentialID: UUID) throws {
         let account = credentialID.uuidString
         let data = Data(password.utf8)
@@ -31,7 +39,7 @@ enum KeychainService {
 
         let attributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+            kSecAttrAccessible as String: accessibility
         ]
 
         let status: OSStatus
@@ -91,7 +99,7 @@ enum KeychainService {
         ]
         let attributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+            kSecAttrAccessible as String: accessibility
         ]
         let status: OSStatus
         if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
@@ -167,9 +175,11 @@ enum KeyMaterialStore {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             return file.path
         }
+        #if os(macOS)
         if !config.privateKeyPath.isEmpty {
             return NSString(string: config.privateKeyPath).expandingTildeInPath
         }
+        #endif
         return nil
     }
 
@@ -480,6 +490,7 @@ enum SSHKeyInspectionError: LocalizedError {
     }
 }
 
+#if os(macOS)
 enum SSHKeyInspector {
     static func inspect(filePath: String) async throws -> SSHKeyInspection {
         let expandedPath = NSString(string: filePath).expandingTildeInPath
@@ -551,6 +562,7 @@ enum SSHKeyInspector {
         }.value
     }
 }
+#endif
 
 enum LocalAuth {
     static func authenticate(reason: String) async -> Bool {
@@ -780,6 +792,7 @@ enum SSHMonitoringService {
         _ config: ServerConnectionConfig,
         command: String
     ) async throws -> String {
+#if os(macOS)
         let interval = PerformanceTrace.begin(.sshRemoteCommand)
         defer { PerformanceTrace.end(interval) }
         let plan = try SystemOpenSSHConnectionProvider().launchPlan(
@@ -801,6 +814,11 @@ enum SSHMonitoringService {
             )
         )
         return result.output
+#else
+        _ = config
+        _ = command
+        throw ConnectionError.commandFailed("移动端远程命令必须通过原生 SSH 引擎执行。")
+#endif
     }
 }
 

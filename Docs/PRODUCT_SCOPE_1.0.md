@@ -1,7 +1,7 @@
 # ServerDash 1.0 internal-test scope and non-goals
 
-- Status: Frozen for S00
-- Date: 2026-08-25
+- Status: Frozen for S00; mobile amendment accepted by ADR-0005
+- Date: 2026-09-05
 - Distribution: the owner and a small number of known testers
 
 This document is the product boundary for the 1.0 internal-test line. Inclusion
@@ -10,8 +10,10 @@ that the current repository has already met that stage's acceptance criteria.
 
 ## Core release scope
 
-- One native macOS business workspace for managing Linux server profiles.
-- macOS system OpenSSH connectivity with strict, app-owned host-key verification.
+- One native macOS business workspace plus one universal native iPhone/iPad app
+  for managing Linux server profiles; Mac Catalyst is excluded.
+- macOS system OpenSSH and iOS/iPadOS Citadel connectivity behind shared session
+  contracts, both with strict app-owned host-key verification.
 - Ubuntu LTS and Debian Stable as the primary supported remote platforms.
 - Resource monitoring with capability-gated presentation and truthful stale/error
   states while ServerDash is running.
@@ -26,6 +28,10 @@ that the current repository has already met that stage's acceptance criteria.
 - Ad-hoc signed manual test builds. S06 may add Sparkle 2 HTTPS/EdDSA updates with
   a manual-update fallback after its local and real-Mac gates pass.
 - Local redacted diagnostics sufficient for known testers to report problems.
+- Mobile machine management, foreground dashboard monitoring, remote terminals,
+  SFTP, identities, imported keys, snippets, and trusted-host management.
+- Independent per-app SwiftData V3 stores with CloudKit disabled; mobile data is
+  not copied from, synchronized with, or merged into the Mac store.
 
 ## Privacy decision: location is opt-in
 
@@ -48,6 +54,11 @@ that the current repository has already met that stage's acceptance criteria.
   remains an isolated experiment.
 - Menu bar presence and a login item may be evaluated for convenience, but do not
   create an always-on monitoring commitment.
+- Mobile supports only direct routes using password or imported OpenSSH
+  Ed25519/RSA private-key authentication.
+- Mobile background entry interrupts terminals and transfers. Monitoring may
+  reconnect after foregrounding; remote-process recovery and resumable transfer
+  are not product commitments.
 
 ## Explicit non-goals
 
@@ -63,8 +74,12 @@ that the current repository has already met that stage's acceptance criteria.
   certificates, hardware-key management, or mandatory Touch ID.
 - Full Docker operations, backup automation, AI operations, batch administration,
   approval workflows, or advanced maintenance scheduling.
-- Mosh, port forwarding/tunnel management, bidirectional sync, server-to-server
-  transfer, rsync acceleration, remote file editing, or Quick Look.
+- Mosh, bidirectional sync, server-to-server transfer, rsync acceleration,
+  remote file editing, or Quick Look.
+- On iPhone/iPad: port forwarding, jump hosts, proxies, SSH Agent, SSH Config,
+  external private-key paths, local terminals, and background-resident SSH.
+- iOS 17 and earlier, Mac Catalyst, CloudKit/iCloud sync, TestFlight, App Store
+  release, StoreKit, widgets, and Live Activities.
 
 ## Scope-change rule
 

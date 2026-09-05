@@ -1,5 +1,10 @@
-import AppKit
 import SwiftUI
+
+#if canImport(AppKit)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 enum AppAppearance: String, CaseIterable, Identifiable {
     case system
@@ -83,6 +88,7 @@ enum MonitorSeverity: String, Equatable {
 }
 
 extension Color {
+#if canImport(AppKit)
     static let appGround = Color(
         light: NSColor(srgbRed: 245 / 255, green: 245 / 255, blue: 247 / 255, alpha: 1),
         dark: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 1)
@@ -110,6 +116,17 @@ extension Color {
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
         })
     }
+#else
+    static let appGround = Color(uiColor: .systemGroupedBackground)
+    static let appSurface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let appHover = Color(uiColor: .tertiarySystemGroupedBackground)
+    static let appHairline = Color(uiColor: .separator)
+    static let appTrack = Color(uiColor: .quaternarySystemFill)
+    static let appAccent = Color.accentColor
+    static let appLive = Color(uiColor: .systemGreen)
+    static let appWarning = Color(uiColor: .systemOrange)
+    static let appError = Color(uiColor: .systemRed)
+#endif
 }
 
 struct ApplePanelModifier: ViewModifier {
@@ -370,12 +387,23 @@ struct AppleDismissibleOverlay<Content: View>: View {
                 )
                 .padding(AppleDesign.Spacing.xl)
         }
-        .onExitCommand(perform: onDismiss)
+        .appleExitCommand(perform: onDismiss)
         .transition(
             reduceMotion
                 ? .opacity
                 : .opacity.combined(with: .scale(scale: 0.98))
         )
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func appleExitCommand(perform action: @escaping () -> Void) -> some View {
+#if os(macOS)
+        onExitCommand(perform: action)
+#else
+        self
+#endif
     }
 }
 
@@ -563,51 +591,3 @@ struct ApplePressButtonStyle: ButtonStyle {
 }
 
 typealias CompactActionButtonStyle = ApplePressButtonStyle
-
-enum DisplayFormat {
-    static func integer(
-        _ value: Int,
-        locale: Locale = .autoupdatingCurrent
-    ) -> String {
-        value.formatted(
-            .number
-                .grouping(.automatic)
-                .locale(locale)
-        )
-    }
-
-    static func decimal(
-        _ value: Double,
-        fractionLength: Int,
-        locale: Locale = .autoupdatingCurrent
-    ) -> String {
-        value.formatted(
-            .number
-                .grouping(.automatic)
-                .precision(.fractionLength(fractionLength))
-                .locale(locale)
-        )
-    }
-
-    static func percent(_ value: Double) -> String {
-        "\(integer(Int(value.rounded())))%"
-    }
-
-    static func bytes(_ value: Double) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useMB, .useGB, .useTB]
-        formatter.countStyle = .binary
-        formatter.includesUnit = true
-        formatter.isAdaptive = true
-        return formatter.string(fromByteCount: Int64(max(0, value)))
-    }
-
-    static func speed(_ value: Double) -> String {
-        "\(bytes(value))/s"
-    }
-
-    static func shortDate(_ date: Date?) -> String {
-        guard let date else { return "尚未连接" }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-}

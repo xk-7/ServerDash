@@ -57,6 +57,14 @@ enum TrustedHostStore {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    static func fingerprint(algorithm: String, keyBlob: Data) -> String {
+        _ = algorithm
+        let digest = SHA256.hash(data: keyBlob)
+        return "SHA256:" + Data(digest)
+            .base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+    }
+
     static func algorithmDisplayName(_ algorithm: String) -> String {
         switch algorithm {
         case "ssh-ed25519": "ED25519"
@@ -114,6 +122,7 @@ enum TrustedHostStore {
     }
 
     static func scan(host: String, port: Int, preferredAlgorithm: String? = nil) throws -> SSHHostKeyProbe {
+#if os(macOS)
         let interval = PerformanceTrace.begin(.hostKeyScan)
         defer { PerformanceTrace.end(interval) }
         let scan = run(
@@ -148,6 +157,12 @@ enum TrustedHostStore {
             keyLine: preferred,
             additionalKeyLines: validLines.filter { $0 != preferred }
         )
+#else
+        _ = preferredAlgorithm
+        throw SSHValidationError.hostKeyUnavailable(
+            "移动端会在 SSH 握手中直接获取并验证主机密钥。"
+        )
+#endif
     }
 
     static func inspect(
@@ -281,6 +296,7 @@ enum TrustedHostStore {
     }
 
     private static func keysFromKeygen(host: String, port: Int) -> [(algorithm: String, fingerprint: String, line: String)] {
+#if os(macOS)
         hostMarkers(host, port: port).flatMap { lookup -> [(algorithm: String, fingerprint: String, line: String)] in
             let result = run(
                 "/usr/bin/ssh-keygen",
@@ -292,8 +308,14 @@ enum TrustedHostStore {
                 .map(String.init)
                 .compactMap(parsedKey(from:))
         }
+#else
+        _ = host
+        _ = port
+        return []
+#endif
     }
 
+#if os(macOS)
     private static func run(_ executable: String, _ arguments: [String]) -> (
         status: Int32,
         output: String,
@@ -318,6 +340,7 @@ enum TrustedHostStore {
             String(decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         )
     }
+#endif
 }
 
 enum HostTrustDecision: Sendable {

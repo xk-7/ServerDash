@@ -213,6 +213,7 @@ enum LocalTransferMeasure {
     }
 }
 
+#if os(macOS)
 enum SFTPService {
     static func list(
         config: ServerConnectionConfig,
@@ -539,3 +540,4 @@ enum SFTPService {
             }
     }
 }
+#endif

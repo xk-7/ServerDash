@@ -11,6 +11,7 @@ has passed.
 | [ADR-0002: Single workspace window and task ownership](ADR-0002-single-window-and-task-ownership.md) | Accepted | S04, S05 |
 | [ADR-0003: Monitoring runtime commitment](ADR-0003-monitoring-runtime-commitment.md) | Accepted | S04, later alert work |
 | [ADR-0004: Remote platform and Docker provider scope](ADR-0004-remote-platform-and-docker-provider-scope.md) | Accepted | capability work after the foundation stages |
+| [ADR-0005: Native iOS/iPadOS app and dual SSH engines](ADR-0005-native-ios-and-dual-ssh-engine.md) | Accepted | mobile target, connection abstraction, lifecycle, security |
 | [ServerDash 1.0 scope and non-goals](../PRODUCT_SCOPE_1.0.md) | Frozen | S01-S06 and later product planning |
 
 ## Decision identifiers covered by S00
@@ -20,6 +21,7 @@ has passed.
 - `D-03`: ADR-0003
 - `D-06`: ADR-0004
 - `D-07`: ADR-0004
+- `D-12`: ADR-0005
 - Location collection default and consent: `PRODUCT_SCOPE_1.0.md`
 - Core/experimental boundary and absence of paid tiers: `PRODUCT_SCOPE_1.0.md`
 

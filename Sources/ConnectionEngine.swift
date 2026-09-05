@@ -210,6 +210,7 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
     }
 }
 
+#if os(macOS)
 struct ProcessRunRequest: Sendable {
     let executable: String
     let arguments: [String]
@@ -758,3 +759,4 @@ enum SSHConnectionTester {
         return Date().timeIntervalSince(started)
     }
 }
+#endif

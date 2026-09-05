@@ -36,11 +36,13 @@ protocol FileTransferSession: Sendable {
     func cancel() async
 }
 
+#if os(macOS)
 protocol PortForwardSession: Sendable {
     var id: UUID { get }
     func snapshot() async -> PortForwardSnapshot
     func stop() async throws
 }
+#endif
 
 protocol HostKeyVerifier: Sendable {
     func verify(

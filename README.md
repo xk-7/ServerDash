@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-ServerDash is a native macOS monitoring, SSH terminal, and SFTP client for Linux VPS hosts. It is built with SwiftUI, requires macOS 14 or later, and does not require a server-side agent.
+ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFTP client for Linux VPS hosts. It is built with SwiftUI, requires macOS 14 or iOS/iPadOS 18, and does not require a server-side agent.
 
 ## Features
 
@@ -32,7 +32,8 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 
 ### SSH Connectivity and Security
 
-- Uses macOS `/usr/bin/ssh` with unified timeout, cancellation, concurrency, and process lifecycle management.
+- Uses macOS `/usr/bin/ssh` on Mac and the repository-pinned Citadel 0.12.1 native SSH engine on iPhone/iPad.
+- Both engines implement the shared `RemoteConnectionEngine` / `RemoteSession` contracts for commands, PTY shells, SFTP, cancellation, and closure while preserving the existing macOS process behavior.
 - Imports SSH Config with final-value/source/unsupported reports and supports multi-hop ProxyJump routes with per-hop identity, trust, and timeout.
 - Supports structured SOCKS5/HTTP CONNECT proxies plus Local, Remote, and Dynamic forwarding; loopback is the default and remote/wildcard listeners require confirmation.
 - Supports passwords, SSH private keys, encrypted-key passphrases, and key-first password fallback.
@@ -41,10 +42,13 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 - App-specific `known_hosts` with first-use fingerprint confirmation, changed-key comparison, and trusted-host management.
 - Trusted hosts use a steady-state `known_hosts` fast path; `ssh-keyscan` is limited to first use, explicit revalidation, and recovery from a host-key error.
 - Server profiles can be saved offline, while SSH tests report results independently.
+- iPhone/iPad fail closed on every unknown or changed host key and never expose an “accept all hosts” mode.
+- Mobile authentication is limited to passwords and imported OpenSSH Ed25519/RSA private keys. Secrets use this-device-only Keychain accessibility; external key paths, SSH Agent, SSH Config, proxies, jump hosts, and forwarding are hidden.
+- The local NIOSSH 0.3.6 source includes Apple's `31cdc3c` fix and regression tests for [GHSA-998x-vgvp-xwpc](https://github.com/apple/swift-nio-ssh/security/advisories/GHSA-998x-vgvp-xwpc); mobile SSH is not release-ready if that security gate fails.
 
 ### Persistent Multi-Session Terminal
 
-- Built on the repository-pinned SwiftTerm 1.11.2 package and OpenSSH PTY.
+- Built on the repository-pinned SwiftTerm 1.11.2 package, with OpenSSH PTY on macOS and Citadel PTY on iPhone and iPad.
 - Sessions are independent from the SwiftUI view lifecycle, so switching tabs, servers, or features does not disconnect SSH.
 - Supports ANSI output, wide characters, and interactive programs such as `vim`, `top`, `htop`, and `tmux`.
 - Includes 20 local light/dark themes and discovers installed macOS monospaced fonts.
@@ -53,6 +57,7 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 - `⌘T` opens a terminal; `⌘+` / `⌘=` and `⌘-` adjust the current session font size; `⌘0` restores its initial size.
 - `⌘F` searches terminal output, `⌃Tab` / `⌃⇧Tab` switch tabs, and `⌘⇧,` opens terminal appearance settings. These shortcuts are listed in the Terminal menu.
 - `⌘⌥I` toggles a Status / Snippets inspector with resource snapshots, stale-data notices, and searchable commands. Execution and multiline insertion require confirmation and stay bound to the original session.
+- iPhone uses the SwiftTerm UIKit terminal full-screen with snippets/status in sheets; iPad can keep the terminal and inspector side by side and supports pointer and hardware-keyboard input.
 
 ### SFTP
 
@@ -61,6 +66,21 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 - Byte progress, speed, remaining time, cancellation, and retry support.
 - Conflict handling for overwrite, skip, or automatic rename.
 - Supports Chinese characters, spaces, special-character paths, and per-server default directories.
+- iPhone uses a compact list and iPad an adaptive grid. System file import/export provides local-file access without persisting external security-scoped paths.
+
+## Platform Matrix
+
+| Capability | macOS 14+ | iPhone / iPadOS 18+ |
+| --- | --- | --- |
+| Dashboard and Linux monitoring | Yes | Yes; foreground refresh |
+| Multiple remote terminals | Yes | Yes; interrupted in background |
+| SFTP browse/upload/download/rename/move/delete | Yes | Yes; Files import/export |
+| Password and imported private-key authentication | Yes | Yes |
+| External private-key path / SSH Agent / SSH Config | Yes | No |
+| Jump hosts and SOCKS5 / HTTP CONNECT proxies | Yes | No |
+| Local, remote, and dynamic forwarding | Yes | No |
+| Local terminal | Yes | No |
+| CloudKit or cross-device data sync | No | No |
 
 ### Performance and Process Lifecycle
 
@@ -83,19 +103,22 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete update history.
 
 ## Product Experience Reference
 
-The [SwiftServer product page](https://swiftserver.app/) and [official documentation](https://swiftserver.app/docs) are the primary experience references for server organization, monitoring cards, the terminal inspector, SFTP, and connection diagnostics. ServerDash retains its own identity, native macOS structure, and security constraints. This does not claim feature parity or implicitly add paid limits, iCloud, or an SSH-engine replacement.
+The [SwiftServer product page](https://swiftserver.app/) and [official documentation](https://swiftserver.app/docs) are the primary experience references for server organization, monitoring cards, adaptive multi-device navigation, the terminal inspector, SFTP, and connection diagnostics. ServerDash retains its own identity, implementation, copy, assets, and security constraints. This does not claim feature parity or implicitly add paid limits or iCloud.
 
 ## Requirements
 
 - macOS 14 or later
+- iOS or iPadOS 18 or later for `ServerDashMobile`
 - Xcode 26
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-The project uses the local `Vendor/SwiftTerm` package and does not download SwiftTerm separately.
+The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, and `Vendor/swift-nio-ssh` packages. SwiftPM still resolves their pinned transitive dependencies from `Package.resolved`.
 
 ## Development Status
 
-S11 professional SSH routes and tunnels are implemented on top of the S07 baseline. The current suite contains 144 automated tests and the Debug build passes. In the latest full run, 143 tests passed directly; the existing process-cancellation timing test exceeded its one-second threshold under concurrent load and passed when rerun in isolation. An isolated three-sshd fixture validates a real system-OpenSSH chain; production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability remain explicitly pending isolated or real-device validation.
+The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 14 tests covering connection contracts, local Citadel password/key/PTY integration, host trust, lifecycle interruption, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
+
+The existing macOS S11 professional SSH routes and tunnels remain available and continue to use system OpenSSH. Production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability still require isolated or real-device validation.
 
 See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining isolated/real-device checks.
 
@@ -120,6 +143,18 @@ xcodebuild \
   -skipPackagePluginValidation \
   build
 ```
+
+Build the universal iPhone/iPad app for Simulator:
+
+```bash
+xcodebuild \
+  -project ServerDash.xcodeproj \
+  -scheme ServerDashMobile \
+  -destination 'generic/platform=iOS Simulator' \
+  build
+```
+
+To install on an iPhone or iPad, open the project, select `ServerDashMobile`, choose your development team, connect a device running iOS/iPadOS 18 or later, and Run. A free Apple ID can be used for local development signing subject to Apple's normal provisioning limits. No TestFlight or App Store package is provided.
 
 Run the complete test suite:
 
@@ -158,10 +193,14 @@ The DMG is written to `dist/`. On another Mac, open the app with Control-click �
 
 ```text
 Sources/                    SwiftUI app, connection services, and data models
+Mobile/Sources/             Native iPhone/iPad app, adaptive UI, and Citadel adapter
+Mobile/Tests/               Mobile contracts, security, trust, and lifecycle tests
 Tests/                      Unit and foundation integration tests
 Docs/                       Architecture decisions, implementation status, and release notes
 Resources/TerminalThemes/   Local terminal themes and licensing notes
 Vendor/SwiftTerm/           Pinned and extended SwiftTerm 1.11.2
+Vendor/Citadel/             Locally pinned Citadel 0.12.1
+Vendor/swift-nio-ssh/       Locally pinned NIOSSH 0.3.6 plus security backport
 project.yml                 XcodeGen project definition
 ```
 
@@ -170,10 +209,10 @@ project.yml                 XcodeGen project definition
 - UI: SwiftUI, Swift Charts, MapKit
 - Data: SwiftData
 - Credentials: Security / Keychain Services, LocalAuthentication
-- SSH/SFTP: macOS system OpenSSH
+- SSH/SFTP: macOS system OpenSSH; Citadel 0.12.1 + NIOSSH 0.3.6 on iOS/iPadOS
 - Terminal: local SwiftTerm 1.11.2 package
 - Logging: OSLog
 
 ## Distribution and Scope
 
-ServerDash launches OpenSSH/SFTP subprocesses, so App Sandbox is currently disabled. The 1.0 internal-test line uses local ad-hoc signing and manual sharing with a small number of known testers; it does not require Apple Developer Program membership, Developer ID, notarization, or the Mac App Store. S11 port forwarding is an optional advanced local capability; CloudKit, paid tiers, guaranteed 24×7 alerts, Mosh, and a full Docker operations panel remain outside the current implemented scope. See the [accepted distribution and SSH decision](Docs/ArchitectureDecisions/ADR-0001-internal-distribution-and-ssh-engine.md).
+The macOS app launches OpenSSH/SFTP subprocesses, so App Sandbox remains disabled. The iOS/iPadOS app uses its own sandbox container and an independent SwiftData V3 database; it does not migrate or synchronize Mac data. Mobile connections are foreground-scoped: monitoring reconnects after foregrounding, while terminals and interrupted transfers require explicit user restart and do not promise process recovery or transfer resume. CloudKit, TestFlight, StoreKit, widgets, Live Activities, paid tiers, guaranteed 24×7 alerts, and Mosh remain outside the current scope. See [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md).
