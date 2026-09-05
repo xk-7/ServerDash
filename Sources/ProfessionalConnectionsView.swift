@@ -40,15 +40,16 @@ struct ProfessionalConnectionsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
                 header
                 importCard
                 proxyCard
                 routeCard
                 tunnelRuleCard
             }
-            .padding(24)
-            .frame(maxWidth: 1_000, alignment: .leading)
+            .padding(AppleDesign.Spacing.lg)
+            .frame(maxWidth: AppleDesign.Layout.readingWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .task {
             if configURL == nil,
@@ -90,16 +91,14 @@ struct ProfessionalConnectionsView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("连接路线与隧道")
-                .font(.system(size: 24, weight: .bold))
-            Text("监控、终端、SFTP 与端口转发共享同一条路线、逐跳身份和主机信任。")
-                .foregroundStyle(.secondary)
-        }
+        AppleWorkspaceHeader(
+            title: "连接与隧道", subtitle: "配置跳板、网络代理和端口转发。",
+            symbol: "point.3.connected.trianglepath.dotted"
+        ) { EmptyView() }
     }
 
     private var importCard: some View {
-        GroupBox("SSH Config 导入") {
+        MonitorSectionPanel(title: "SSH Config 导入") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text(configURL?.path ?? "尚未选择文件")
@@ -206,7 +205,7 @@ struct ProfessionalConnectionsView: View {
     }
 
     private var routeCard: some View {
-        GroupBox("已保存路线") {
+        MonitorSectionPanel(title: "已保存路线") {
             VStack(alignment: .leading, spacing: 10) {
                 if routeRecords.isEmpty {
                     Text("尚未保存专业连接路线。未绑定路线的服务器继续使用严格校验的直接连接。")
@@ -241,28 +240,43 @@ struct ProfessionalConnectionsView: View {
     }
 
     private var proxyCard: some View {
-        GroupBox("SOCKS5 / HTTP CONNECT 代理") {
+        MonitorSectionPanel(title: "SOCKS5 / HTTP CONNECT 代理") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Picker("代理类型", selection: $proxyKind) {
                         Text("SOCKS5").tag(NetworkProxyKind.socks5)
                         Text("HTTP CONNECT").tag(NetworkProxyKind.httpConnect)
                     }
-                    .frame(width: 190)
-                    TextField("代理主机", text: $proxyHost)
-                    TextField("端口", value: $proxyPort, format: .number)
-                        .frame(width: 100)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     Picker("绑定服务器", selection: $selectedServerID) {
                         Text("选择服务器").tag(Optional<UUID>.none)
                         ForEach(servers) { server in
                             Text(server.displayName).tag(Optional(server.id))
                         }
                     }
-                    .frame(width: 200)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                        Text("代理主机").font(.caption).foregroundStyle(.secondary)
+                        TextField("proxy.example.com", text: $proxyHost)
+                            .accessibilityLabel("代理主机")
+                    }
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                        Text("端口").font(.caption).foregroundStyle(.secondary)
+                        TextField("端口", value: $proxyPort, format: .number.grouping(.never))
+                    }
+                    .frame(width: 100)
                 }
                 HStack {
                     TextField("代理用户名（可选）", text: $proxyUsername)
-                    SecureField("代理 Secret（可选，仅存 Keychain）", text: $proxySecret)
+                    SecureField("代理密码（可选）", text: $proxySecret)
+                }
+                HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
+                    Text("需要认证时，请同时填写用户名和密码。密码安全保存在 macOS 钥匙串中。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                     Button("保存代理路线") { saveProxyRoute() }
                         .buttonStyle(.borderedProminent)
                         .disabled(
@@ -270,9 +284,6 @@ struct ProfessionalConnectionsView: View {
                                 proxyHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         )
                 }
-                Text("Secret 不写入 SwiftData、诊断或 OpenSSH 参数；本机代理桥只在握手时从 Keychain 读取。用户名与 Secret 必须同时填写或同时留空。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 if let proxyError {
                     Label(proxyError, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
@@ -285,7 +296,7 @@ struct ProfessionalConnectionsView: View {
     }
 
     private var tunnelRuleCard: some View {
-        GroupBox("端口转发") {
+        MonitorSectionPanel(title: "端口转发") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     TextField("规则名称", text: $ruleName)
@@ -302,20 +313,37 @@ struct ProfessionalConnectionsView: View {
                     }
                     .frame(width: 155)
                 }
-                HStack {
-                    TextField("监听地址", text: $bindAddress)
-                        .frame(width: 180)
-                    TextField("监听端口", value: $listenPort, format: .number)
-                        .frame(width: 110)
-                    if direction != .dynamic {
-                        TextField("目标主机", text: $targetHost)
-                        TextField("目标端口", value: $targetPort, format: .number)
-                            .frame(width: 110)
+                HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                        Text("监听地址").font(.caption).foregroundStyle(.secondary)
+                        TextField("监听地址", text: $bindAddress)
                     }
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                        Text("监听端口").font(.caption).foregroundStyle(.secondary)
+                        TextField("监听端口", value: $listenPort, format: .number.grouping(.never))
+                    }
+                    .frame(width: 100)
+                }
+                if direction != .dynamic {
+                    HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
+                        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                            Text("目标主机").font(.caption).foregroundStyle(.secondary)
+                            TextField("目标主机", text: $targetHost)
+                        }
+                        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                            Text("目标端口").font(.caption).foregroundStyle(.secondary)
+                            TextField("目标端口", value: $targetPort, format: .number.grouping(.never))
+                        }
+                        .frame(width: 100)
+                    }
+                }
+                HStack {
+                    Spacer()
                     Button("添加规则") { addRule() }
+                        .buttonStyle(.borderedProminent)
                         .disabled(selectedServerID == nil)
                 }
-                Text("新规则默认监听 127.0.0.1。Remote Forward、0.0.0.0 或 :: 必须在每次启动前确认风险。")
+                Text("默认仅允许本机访问。远端或广域监听需要在启动前确认。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

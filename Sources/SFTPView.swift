@@ -7,6 +7,7 @@ struct SFTPBrowserView: View {
     let server: ServerRecord
 
     @State private var items: [RemoteFileItem] = []
+    @State private var hasLoadedDirectory = false
     @State private var currentPath = "."
     @State private var pathText = "."
     @State private var selection: Set<String> = []
@@ -42,14 +43,26 @@ struct SFTPBrowserView: View {
 
             if items.isEmpty, busyMessage == nil {
                 ContentUnavailableView {
-                    Label("此目录为空", systemImage: "folder")
+                    Label(
+                        hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录",
+                        systemImage: hasLoadedDirectory ? "folder" : "folder.badge.questionmark"
+                    )
                 } description: {
-                    Text("上传文件、文件夹或创建新项目以开始使用 SFTP。")
+                    Text(hasLoadedDirectory
+                         ? "上传文件、文件夹或创建新项目以开始使用 SFTP。"
+                         : "检查服务器连接后重试，即可浏览和传输文件。")
                 } actions: {
-                    Button("上传文件", systemImage: "square.and.arrow.up") {
-                        chooseItemsToUpload(directories: false)
+                    if hasLoadedDirectory {
+                        Button("上传文件", systemImage: "square.and.arrow.up") {
+                            chooseItemsToUpload(directories: false)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("重新连接", systemImage: "arrow.clockwise") {
+                            Task { await loadDirectory(currentPath) }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -146,93 +159,106 @@ struct SFTPBrowserView: View {
     }
 
     private var browserToolbar: some View {
-        HStack(spacing: AppleDesign.Spacing.xs) {
-            Button {
-                Task { await loadDirectory(".") }
-            } label: {
-                Image(systemName: "house")
-            }
-            .help("主目录")
-
-            Button {
-                Task { await loadDirectory(RemotePath.parent(of: currentPath)) }
-            } label: {
-                Image(systemName: "arrow.up")
-            }
-            .help("上级目录")
-            .disabled(currentPath == "/" || busyMessage != nil)
-
-            TextField("远程路径", text: $pathText)
-                .textFieldStyle(.roundedBorder)
-                .font(.body.monospaced())
-                .onSubmit {
-                    Task { await loadDirectory(pathText) }
+        VStack(spacing: AppleDesign.Spacing.sm) {
+            HStack(spacing: AppleDesign.Spacing.xs) {
+                Button {
+                    Task { await loadDirectory(".") }
+                } label: {
+                    Image(systemName: "house")
                 }
+                .help("主目录")
+                .accessibilityLabel("前往主目录")
 
-            Button {
-                Task { await loadDirectory(currentPath) }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("刷新")
-
-            Divider().frame(height: 20)
-
-            Menu {
-                Button("上传文件", systemImage: "doc.badge.plus") {
-                    chooseItemsToUpload(directories: false)
+                Button {
+                    Task { await loadDirectory(RemotePath.parent(of: currentPath)) }
+                } label: {
+                    Image(systemName: "arrow.up")
                 }
-                Button("上传文件夹", systemImage: "folder.badge.plus") {
-                    chooseItemsToUpload(directories: true)
-                }
-            } label: {
-                Label("上传", systemImage: "square.and.arrow.up")
-            }
-            Button("下载", systemImage: "square.and.arrow.down") {
-                downloadSelectedItem()
-            }
-            .disabled(selectedItem == nil)
+                .help("上级目录")
+                .accessibilityLabel("前往上级目录")
+                .disabled(currentPath == "/" || busyMessage != nil)
 
-            if busyMessage != nil {
-                Button("取消", role: .destructive) {
-                    transferTask?.cancel()
+                TextField("远程路径", text: $pathText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.body.monospaced())
+                    .onSubmit {
+                        Task { await loadDirectory(pathText) }
+                    }
+
+                Button {
+                    Task { await loadDirectory(currentPath) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
                 }
+                .help("刷新")
+                .accessibilityLabel("刷新远程目录")
             }
 
-            Menu {
-                Button("新建文件夹", systemImage: "folder.badge.plus") {
-                    promptText = ""
-                    showingNewFolderPrompt = true
+            HStack(spacing: AppleDesign.Spacing.xs) {
+                Menu {
+                    Button("上传文件", systemImage: "doc.badge.plus") {
+                        chooseItemsToUpload(directories: false)
+                    }
+                    Button("上传文件夹", systemImage: "folder.badge.plus") {
+                        chooseItemsToUpload(directories: true)
+                    }
+                } label: {
+                    Label("上传", systemImage: "square.and.arrow.up")
                 }
-                Button("新建文件", systemImage: "doc.badge.plus") {
-                    promptText = ""
-                    showingNewFilePrompt = true
-                }
-                Button("重命名", systemImage: "pencil") {
-                    beginRename()
+                Button("下载", systemImage: "square.and.arrow.down") {
+                    downloadSelectedItem()
                 }
                 .disabled(selectedItem == nil)
-                Button("移动…", systemImage: "arrow.right") {
-                    promptText = RemotePath.parent(of: selectedItem?.path ?? currentPath)
-                    showingMovePrompt = true
+
+                Spacer(minLength: AppleDesign.Spacing.xs)
+                Text(selectedItem.map { "已选择 \($0.name)" } ?? "远程文件")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                if busyMessage != nil {
+                    Button("取消", role: .destructive) {
+                        transferTask?.cancel()
+                    }
                 }
-                .disabled(selectedItem == nil)
-                Divider()
-                Button("删除", systemImage: "trash", role: .destructive) {
-                    itemPendingDeletion = selectedItem
+
+                Menu {
+                    Button("新建文件夹", systemImage: "folder.badge.plus") {
+                        promptText = ""
+                        showingNewFolderPrompt = true
+                    }
+                    Button("新建文件", systemImage: "doc.badge.plus") {
+                        promptText = ""
+                        showingNewFilePrompt = true
+                    }
+                    Button("重命名", systemImage: "pencil") {
+                        beginRename()
+                    }
+                    .disabled(selectedItem == nil)
+                    Button("移动…", systemImage: "arrow.right") {
+                        promptText = RemotePath.parent(of: selectedItem?.path ?? currentPath)
+                        showingMovePrompt = true
+                    }
+                    .disabled(selectedItem == nil)
+                    Divider()
+                    Button("删除", systemImage: "trash", role: .destructive) {
+                        itemPendingDeletion = selectedItem
+                    }
+                    .disabled(selectedItem == nil)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                .disabled(selectedItem == nil)
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                .help("更多操作")
+                .accessibilityLabel("文件操作")
             }
-            .help("更多操作")
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
         .disabled(busyMessage != nil && transferTask == nil)
         .padding(.horizontal, AppleDesign.Spacing.md)
         .padding(.vertical, AppleDesign.Spacing.sm)
-        .background(AppleChromeBackground())
+        .background(Color.appGround)
     }
 
     private var fileTable: some View {
@@ -242,6 +268,7 @@ struct SFTPBrowserView: View {
                     .symbolRenderingMode(.monochrome)
                     .lineLimit(1)
             }
+            .width(min: 140, ideal: 260)
             TableColumn("大小") { item in
                 Text(item.isDirectory ? "—" : DisplayFormat.bytes(Double(item.size)))
                     .monospacedDigit()
@@ -378,6 +405,7 @@ struct SFTPBrowserView: View {
             currentPath = listing.path
             pathText = listing.path
             items = listing.items
+            hasLoadedDirectory = true
             selection.removeAll()
             statusMessage = "已连接 \(server.username)@\(server.host)"
         } catch {

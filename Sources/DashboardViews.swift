@@ -1,9 +1,12 @@
 import AppKit
-import Charts
 import SwiftUI
 
 struct DashboardOverviewView: View {
     @EnvironmentObject private var appState: AppState
+    @SceneStorage("dashboard.filter.search") private var searchText = ""
+    @SceneStorage("dashboard.filter.group") private var selectedGroup = ""
+    @SceneStorage("dashboard.filter.tag") private var selectedTag = ""
+    @SceneStorage("dashboard.sort") private var sortRawValue = ServerBrowserSort.name.rawValue
 
     let servers: [ServerRecord]
     @Binding var scrollAnchor: UUID?
@@ -11,48 +14,69 @@ struct DashboardOverviewView: View {
     let onOpenTerminal: (ServerRecord) -> Void
     let onAdd: () -> Void
 
+    private var query: ServerBrowserQuery {
+        ServerBrowserQuery(search: searchText, group: selectedGroup, tag: selectedTag,
+                           sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name)
+    }
+
+    private var visibleServers: [ServerRecord] { query.apply(to: servers) }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("仪表盘")
-                            .font(.system(size: 22, weight: .bold))
-                        Text("集中查看全部 VPS 的实时资源状态")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
+                AppleWorkspaceHeader(
+                    title: "仪表盘",
+                    subtitle: "服务器运行状况，一目了然。",
+                    symbol: "gauge.with.dots.needle.50percent"
+                ) {
+                    Button("添加服务器", systemImage: "plus", action: onAdd)
+                        .buttonStyle(.borderedProminent)
                 }
 
                 if servers.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "server.rack")
-                            .font(.system(size: 40, weight: .light))
-                            .foregroundStyle(.secondary)
-                        Text("还没有服务器")
-                            .font(.title3.bold())
-                        Text("添加第一台 VPS 后，即可查看资源监控并建立 SSH 连接。")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                    ContentUnavailableView {
+                        Label("连接你的第一台服务器", systemImage: "server.rack")
+                    } description: {
+                        Text("集中查看资源状态，打开 SSH 终端，或管理远程文件。")
+                    } actions: {
                         Button("添加服务器", systemImage: "plus", action: onAdd)
                             .buttonStyle(.borderedProminent)
-                            .tint(.appAccent)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 340)
+                    .frame(maxWidth: .infinity, minHeight: 360)
                     .applePanel()
                 } else {
-                    DashboardFleetSummary(
-                        serverCount: servers.count,
-                        state: appState.fleetSummaryState
+                    DashboardFleetSummary(serverCount: servers.count, state: appState.fleetSummaryState)
+
+                    ServerBrowserControls(
+                        servers: servers, search: $searchText, group: $selectedGroup,
+                        tag: $selectedTag, sortRawValue: $sortRawValue
                     )
 
+                    HStack {
+                        Text("服务器概览")
+                            .font(.headline)
+                            .accessibilityAddTraits(.isHeader)
+                        if query.hasFilters {
+                            Text("\(DisplayFormat.integer(visibleServers.count)) / \(DisplayFormat.integer(servers.count)) 台")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Label(
+                            appState.refreshInterval > 0
+                                ? "每 \(DisplayFormat.integer(Int(appState.refreshInterval))) 秒刷新"
+                                : "手动刷新",
+                            systemImage: appState.refreshInterval > 0 ? "arrow.clockwise" : "pause.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 310), spacing: 14)],
+                        columns: [GridItem(.adaptive(minimum: 280), spacing: AppleDesign.Spacing.md, alignment: .top)],
                         alignment: .leading,
-                        spacing: 14
+                        spacing: AppleDesign.Spacing.md
                     ) {
-                        ForEach(servers) { server in
+                        ForEach(visibleServers) { server in
                             VPSSummaryCard(
                                 server: server,
                                 runtime: appState.runtime(for: server),
@@ -67,12 +91,31 @@ struct DashboardOverviewView: View {
                         }
                     }
                     .scrollTargetLayout()
+                    if visibleServers.isEmpty {
+                        ContentUnavailableView {
+                            Label("没有匹配的服务器", systemImage: "line.3.horizontal.decrease.circle")
+                        } description: {
+                            Text("筛选只影响显示，后台监控仍按原设置运行。")
+                        } actions: {
+                            Button("清除筛选") {
+                                searchText = ""
+                                selectedGroup = ""
+                                selectedTag = ""
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                        .applePanel()
+                    }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 1100, alignment: .leading)
+            .padding(AppleDesign.Spacing.lg)
+            .frame(maxWidth: AppleDesign.Layout.contentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .scrollPosition(id: $scrollAnchor, anchor: .center)
+        .onChange(of: visibleServers.map(\.id)) { _, ids in
+            if let scrollAnchor, !ids.contains(scrollAnchor) { self.scrollAnchor = ids.first }
+        }
     }
 }
 
@@ -81,38 +124,38 @@ private struct DashboardFleetSummary: View {
     @ObservedObject var state: FleetMonitoringSummaryState
 
     private var summary: FleetMonitoringSummary { state.value }
+    private var pendingCount: Int { max(0, serverCount - summary.onlineCount - summary.issueCount) }
 
     var body: some View {
         AppleUnifiedPanel {
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 DashboardSummaryCard(
-                    title: "服务器总数",
+                    title: "全部服务器",
                     value: DisplayFormat.integer(serverCount),
-                    subtitle: "平均 CPU \(DisplayFormat.percent(summary.averageCPU))",
-                    icon: "server.rack",
-                    tint: .appAccent
+                    subtitle: summary.onlineCount > 0
+                        ? "在线平均 CPU \(DisplayFormat.percent(summary.averageCPU))"
+                        : "等待资源采集",
+                    icon: "server.rack", tint: .primary
                 )
-                Divider().frame(height: 64)
+                Divider().padding(.vertical, AppleDesign.Spacing.lg)
                 DashboardSummaryCard(
                     title: "在线",
                     value: DisplayFormat.integer(summary.onlineCount),
                     subtitle: summary.refreshingCount > 0
-                        ? "\(DisplayFormat.integer(summary.refreshingCount)) 台后台刷新"
-                        : "资源采集正常",
-                    icon: "checkmark.circle.fill",
-                    tint: .appLive
+                        ? "\(DisplayFormat.integer(summary.refreshingCount)) 台正在刷新"
+                        : (pendingCount > 0 ? "\(DisplayFormat.integer(pendingCount)) 台等待检测" : "已完成状态检测"),
+                    icon: "checkmark.circle", tint: .appLive
                 )
-                Divider().frame(height: 64)
+                Divider().padding(.vertical, AppleDesign.Spacing.lg)
                 DashboardSummaryCard(
-                    title: "离线 / 异常",
+                    title: "需要关注",
                     value: DisplayFormat.integer(summary.issueCount),
-                    subtitle: summary.issueCount == 0
-                        ? "所有服务器状态正常"
-                        : "请检查连接或认证",
-                    icon: "exclamationmark.triangle.fill",
-                    tint: summary.issueCount == 0 ? .secondary : .appError
+                    subtitle: summary.issueCount > 0 ? "连接中断或认证异常" : "暂无已知连接异常",
+                    icon: "exclamationmark.circle",
+                    tint: summary.issueCount > 0 ? .appError : .secondary
                 )
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -125,30 +168,23 @@ private struct DashboardSummaryCard: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 13) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 36, height: 36)
-                .background(tint.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: AppleDesign.Radius.thumbnail, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.system(size: 25, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-            }
-            Spacer()
-            Text(subtitle)
-                .font(.caption2)
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
+            Label(title, systemImage: icon)
+                .font(.callout)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
+                .lineLimit(1)
+            Text(value)
+                .font(.largeTitle.weight(.semibold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2, reservesSpace: true)
         }
-        .padding(AppleDesign.Spacing.md)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppleDesign.Spacing.lg)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -159,205 +195,131 @@ private struct VPSSummaryCard: View {
     let onVisibilityChange: (Bool) -> Void
     let onSelect: () -> Void
     let onOpenTerminal: () -> Void
+    @AppStorage("hideIPInformation") private var hideIPInformation = false
 
     private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
     private var status: ServerConnectionStatus { runtime.renderState.status }
 
     var body: some View {
         let _ = PerformanceTrace.event(.dashboardCardBodyUpdate)
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 8) {
-                StatusDot(status: status)
-                Text(server.name)
-                    .font(.system(size: 14, weight: .bold))
-                Spacer()
-                Text(status.title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(statusColor)
-                Button(action: onOpenTerminal) {
-                    Image(systemName: "terminal")
-                }
-                .buttonStyle(CompactActionButtonStyle())
-                .help("打开 SSH 终端")
-                .accessibilityLabel("打开 \(server.name) SSH 终端")
-            }
-
-            if runtime.renderState.hasSnapshot {
-                HStack(spacing: 12) {
-                    DashboardMetadata(
-                        icon: "cpu",
-                        value: "\(DisplayFormat.integer(snapshot.coreCount)) 核"
-                    )
-                    DashboardMetadata(icon: "memorychip", value: DisplayFormat.bytes(snapshot.memoryTotalBytes))
-                    DashboardMetadata(icon: "internaldrive", value: DisplayFormat.bytes(snapshot.diskTotalBytes))
-                    Spacer(minLength: 0)
-                    DashboardMetadata(icon: "clock", value: snapshot.uptime)
-                }
-
-                HStack(spacing: 18) {
-                    CircularResourceGauge(title: "CPU", value: snapshot.cpuUsage, tint: .appAccent)
-                    CircularResourceGauge(title: "内存", value: snapshot.memoryUsage, tint: .appLive)
-                    VStack(spacing: 8) {
-                        DashboardResourceRow(
-                            title: "磁盘",
-                            leading: DisplayFormat.percent(snapshot.diskUsage),
-                            trailing: DisplayFormat.bytes(snapshot.diskUsedBytes)
-                        )
-                        DashboardResourceRow(
-                            title: "网络",
-                            leading: "↓ \(DisplayFormat.speed(snapshot.downloadBytesPerSecond))",
-                            trailing: "↑ \(DisplayFormat.speed(snapshot.uploadBytesPerSecond))"
-                        )
-                        DashboardResourceRow(
-                            title: "负载",
-                            leading: DisplayFormat.decimal(snapshot.load1, fractionLength: 2),
-                            trailing: "\(DisplayFormat.integer(snapshot.processCount)) 进程"
-                        )
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            } else {
-                HStack(spacing: AppleDesign.Spacing.sm) {
-                    if runtime.renderState.isRefreshing || status == .connecting {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "hourglass")
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: onSelect) {
+                VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                    HStack {
+                        Label(server.groupName, systemImage: "folder")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: AppleDesign.Spacing.xs)
+                        ServerStatusBadge(status: status)
                     }
                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
-                        Text("等待首次资源采集")
-                            .font(.callout.weight(.semibold))
-                        Text("采集完成前不会把空快照显示为真实的 0%。")
-                            .font(.caption2)
+                        Text(server.displayName)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(1)
+                            .help(server.displayName)
+                        Text(hideIPInformation ? "[IP]" : server.host)
+                            .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !server.tags.isEmpty {
+                            Label(server.tags.joined(separator: " · "), systemImage: "tag")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .help(server.tags.joined(separator: " · "))
+                        }
                     }
-                    Spacer()
+
+                    if runtime.renderState.hasSnapshot {
+                        HStack(spacing: AppleDesign.Spacing.md) {
+                            DashboardResourceMetric(title: "CPU", value: snapshot.cpuUsage)
+                            DashboardResourceMetric(title: "内存", value: snapshot.memoryUsage)
+                            DashboardResourceMetric(title: "磁盘", value: snapshot.diskUsage)
+                        }
+                        HStack(spacing: AppleDesign.Spacing.md) {
+                            Label(DisplayFormat.speed(snapshot.downloadBytesPerSecond), systemImage: "arrow.down")
+                            Label(DisplayFormat.speed(snapshot.uploadBytesPerSecond), systemImage: "arrow.up")
+                        }
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    } else {
+                        HStack(spacing: AppleDesign.Spacing.sm) {
+                            if runtime.renderState.isRefreshing || status == .connecting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: status == .failed ? "exclamationmark.circle" : "clock")
+                                    .foregroundStyle(.secondary)
+                            }
+                            VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                                Text(status == .failed ? "暂时无法采集" : "等待首次资源采集")
+                                    .font(.callout.weight(.medium))
+                                Text("采集完成后显示资源使用情况")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(height: 88)
+                    }
                 }
-                .frame(maxWidth: .infinity, minHeight: 105)
+                .padding(AppleDesign.Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("打开服务器监控详情")
 
-            HStack {
+            Divider().padding(.horizontal, AppleDesign.Spacing.md)
+
+            HStack(spacing: AppleDesign.Spacing.xs) {
                 Text(footerText)
-                    .font(.caption2)
-                    .foregroundStyle(status == .failed ? Color.appError : Color.secondary)
+                    .font(.caption)
+                    .foregroundStyle(status == .failed || status == .offline ? Color.appError : .secondary)
                     .lineLimit(1)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.tertiary)
+                    .help(footerText)
+                Spacer(minLength: AppleDesign.Spacing.xxs)
+                Button(action: onOpenTerminal) {
+                    Label("终端", systemImage: "terminal")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderless)
+                .help("打开 \(server.displayName) 的 SSH 终端")
+                .accessibilityLabel("打开 \(server.displayName) 的 SSH 终端")
             }
+            .padding(AppleDesign.Spacing.md)
         }
-        .frame(minHeight: 190, alignment: .top)
-        .applePanel(padding: AppleDesign.Spacing.md, radius: AppleDesign.Radius.card)
-        .contentShape(RoundedRectangle(cornerRadius: AppleDesign.Radius.card, style: .continuous))
-        .onTapGesture(perform: onSelect)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            onSelect()
-        }
-        .onAppear {
-            onVisibilityChange(true)
-        }
-        .onDisappear {
-            onVisibilityChange(false)
-        }
-    }
-
-    private var statusColor: Color {
-        switch status {
-        case .online: .appLive
-        case .connecting: .appWarning
-        case .failed, .offline: .appError
-        case .unknown: .secondary
-        }
+        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+        .appleInteractiveSurface()
+        .onAppear { onVisibilityChange(true) }
+        .onDisappear { onVisibilityChange(false) }
     }
 
     private var footerText: String {
-        if let error = runtime.renderState.error {
-            return error
-        }
-        if runtime.renderState.isStale(refreshInterval: refreshInterval) {
-            return "监控数据已过期"
-        }
-        if status == .unknown {
-            return server.verificationStatus == .unverified ? "未验证 · 可先离线保存" : "等待首次资源采集"
-        }
-        let host = PrivacySettings.hideIPInformation ? "[IP]" : server.host
-        let latency = server.lastLatencyMS > 0
-            ? " · \(DisplayFormat.integer(Int(server.lastLatencyMS))) ms"
-            : ""
-        return "\(snapshot.distribution) · \(host)\(latency) · \(server.verificationStatus.title)"
+        if let error = runtime.renderState.error { return error }
+        if runtime.renderState.isStale(refreshInterval: refreshInterval) { return "数据已过期 · 保留上次结果" }
+        guard runtime.renderState.hasSnapshot else { return server.verificationStatus.title }
+        return "\(snapshot.distribution) · \(DisplayFormat.integer(snapshot.coreCount)) 核"
     }
 }
 
-private struct DashboardMetadata: View {
-    let icon: String
-    let value: String
-
-    var body: some View {
-        Label(value, systemImage: icon)
-            .font(.caption2.weight(.medium))
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-    }
-}
-
-private struct CircularResourceGauge: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
+private struct DashboardResourceMetric: View {
     let title: String
     let value: Double
-    let tint: Color
 
     var body: some View {
-        VStack(spacing: 5) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ZStack {
-                Circle()
-                    .stroke(tint.opacity(0.15), lineWidth: 5)
-                Circle()
-                    .trim(from: 0, to: min(max(value / 100, 0), 1))
-                    .stroke(
-                        value >= 90 ? Color.appError : tint,
-                        style: StrokeStyle(lineWidth: 5, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .animation(reduceMotion ? nil : AppleDesign.quick, value: value)
-                Text(DisplayFormat.percent(value))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-            }
-            .frame(width: 54, height: 54)
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(DisplayFormat.percent(value))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+            MonitorLinearGauge(value: value)
+                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(DisplayFormat.percent(value))
-    }
-}
-
-private struct DashboardResourceRow: View {
-    let title: String
-    let leading: String
-    let trailing: String
-
-    var body: some View {
-        VStack(spacing: 3) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(leading)
-                Text(trailing)
-                    .foregroundStyle(.secondary)
-            }
-            .font(.caption2.monospaced().weight(.medium))
-            Divider().opacity(0.45)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -436,70 +398,6 @@ struct ServerDetailView: View {
         .animation(reduceMotion ? nil : AppleDesign.quick, value: presentedOverlay)
     }
 
-    private var monitoringContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let error = runtime.renderState.error, status == .failed {
-                    HStack(spacing: 9) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Color.appError)
-                        Text(error)
-                            .font(.caption)
-                            .lineLimit(2)
-                        Spacer()
-                        Button("重试") {
-                            Task { await appState.refresh(server) }
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    .padding(11)
-                    .background(Color.appError.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: AppleDesign.Radius.thumbnail, style: .continuous))
-                }
-
-                AppleUnifiedPanel {
-                    HStack(alignment: .top, spacing: 0) {
-                    MetricCard(
-                        title: "CPU",
-                        value: DisplayFormat.percent(snapshot.cpuUsage),
-                        subtitle: "负载 \(DisplayFormat.decimal(snapshot.load1, fractionLength: 1)) / \(DisplayFormat.decimal(snapshot.load5, fractionLength: 1)) / \(DisplayFormat.decimal(snapshot.load15, fractionLength: 1))",
-                        progress: snapshot.cpuUsage / 100,
-                        tint: .appAccent
-                    )
-                    Divider().frame(height: 112)
-                    MetricCard(
-                        title: "内存",
-                        value: DisplayFormat.percent(snapshot.memoryUsage),
-                        subtitle: "\(DisplayFormat.bytes(snapshot.memoryUsedBytes)) / \(DisplayFormat.bytes(snapshot.memoryTotalBytes))",
-                        progress: snapshot.memoryUsage / 100,
-                        tint: .appLive
-                    )
-                    Divider().frame(height: 112)
-                    MetricCard(
-                        title: "磁盘",
-                        value: DisplayFormat.percent(snapshot.diskUsage),
-                        subtitle: "\(DisplayFormat.bytes(snapshot.diskUsedBytes)) / \(DisplayFormat.bytes(snapshot.diskTotalBytes))",
-                        progress: snapshot.diskUsage / 100,
-                        tint: .secondary
-                    )
-                    Divider().frame(height: 112)
-                    MetricCard(
-                        title: "网络",
-                        value: "↓ \(DisplayFormat.speed(snapshot.downloadBytesPerSecond))",
-                        subtitle: "↑ \(DisplayFormat.speed(snapshot.uploadBytesPerSecond))",
-                        progress: min(1, snapshot.downloadBytesPerSecond / 10_000_000),
-                        tint: .appLive
-                    )
-                    }
-                }
-
-                ResourceTrendCard(points: runtime.renderState.history)
-                SystemAndProcessesCard(snapshot: snapshot)
-            }
-            .padding(18)
-            .frame(maxWidth: 1200, alignment: .leading)
-        }
-    }
 }
 
 private enum ServerDetailOverlay: Equatable {
@@ -590,166 +488,67 @@ private struct ServerDetailHeader: View {
     }
 
     private var standardHeader: some View {
-        HStack(spacing: 12) {
-            Button(action: onBack) {
-                Label("返回\(backTitle)", systemImage: "chevron.backward")
-            }
-            .help("返回\(backTitle)")
-            .keyboardShortcut("[", modifiers: .command)
-            StatusDot(status: status, size: 10)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(server.displayName)
-                    .font(.system(size: 20, weight: .bold))
-                Text(headerSubtitle)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-            Picker("视图", selection: $mode) {
-                ForEach(DetailMode.allCases) { item in
-                    Text(item.title).tag(item)
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+            HStack(spacing: AppleDesign.Spacing.sm) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.backward")
                 }
+                .help("返回\(backTitle)")
+                .accessibilityLabel("返回\(backTitle)")
+                .keyboardShortcut("[", modifiers: .command)
+
+                VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                    Text(server.displayName)
+                        .font(.title2.weight(.semibold))
+                        .lineLimit(1)
+                        .help(server.displayName)
+                    Text(headerSubtitle)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(headerSubtitle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                ServerStatusBadge(status: status)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 210)
-            Spacer()
-            Button {
-                Task { await appState.refresh(server) }
-            } label: {
-                Label("刷新", systemImage: "arrow.clockwise")
-            }
-            Button("事件", systemImage: "list.bullet.rectangle", action: onEventLog)
-            if runtime.renderState.diagnostics != nil {
-                Button("诊断", systemImage: "stethoscope", action: onDiagnostics)
-            }
-            Button {
-                appState.openTerminal(for: server)
-            } label: {
-                Label("SSH 连接", systemImage: "terminal")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.appAccent)
-            Button {
-                appState.detailMode = .sftp
-            } label: {
-                Label("SFTP", systemImage: "folder")
-            }
-            Menu {
-                Button("编辑服务器", systemImage: "pencil", action: onEdit)
-                Divider()
-                Button("删除服务器", systemImage: "trash", role: .destructive, action: onDelete)
-            } label: {
-                Image(systemName: "ellipsis.circle")
+            HStack(spacing: AppleDesign.Spacing.sm) {
+                Picker("视图", selection: $mode) {
+                    ForEach(DetailMode.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 230)
+                Spacer(minLength: AppleDesign.Spacing.xs)
+                if mode == .monitor {
+                    Button {
+                        Task { await appState.refresh(server) }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(runtime.renderState.isRefreshing)
+                    .help("刷新此服务器的监控数据")
+                }
+                Menu {
+                    Button("事件日志", systemImage: "list.bullet.rectangle", action: onEventLog)
+                    if runtime.renderState.diagnostics != nil {
+                        Button("诊断", systemImage: "stethoscope", action: onDiagnostics)
+                    }
+                    Divider()
+                    Button("编辑服务器", systemImage: "pencil", action: onEdit)
+                    Button("删除服务器", systemImage: "trash", role: .destructive, action: onDelete)
+                } label: {
+                    Label("更多", systemImage: "ellipsis.circle")
+                }
+                .help("服务器操作")
             }
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
+        .controlSize(.regular)
+        .padding(AppleDesign.Spacing.lg)
         .background(Color.appGround)
-    }
-}
-
-private struct ResourceTrendCard: View {
-    let points: [MetricPoint]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("近期趋势")
-                    .font(.system(size: 14, weight: .bold))
-                Spacer()
-                HStack(spacing: 12) {
-                    LegendDot(color: .appAccent, text: "CPU")
-                    LegendDot(color: .appLive, text: "内存")
-                }
-            }
-            Chart {
-                ForEach(points) { point in
-                    LineMark(
-                        x: .value("时间", point.date),
-                        y: .value("CPU", point.cpu)
-                    )
-                    .foregroundStyle(Color.appAccent)
-                    .interpolationMethod(.catmullRom)
-
-                    LineMark(
-                        x: .value("时间", point.date),
-                        y: .value("内存", point.memory)
-                    )
-                    .foregroundStyle(Color.appLive)
-                    .interpolationMethod(.catmullRom)
-                }
-            }
-            .chartYScale(domain: 0...100)
-            .chartYAxis {
-                AxisMarks(position: .trailing, values: [0, 50, 100]) {
-                    AxisGridLine()
-                    AxisValueLabel()
-                }
-            }
-            .frame(height: 150)
-        }
-        .applePanel()
-    }
-}
-
-private struct LegendDot: View {
-    let color: Color
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(text).font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct SystemAndProcessesCard: View {
-    let snapshot: ServerSnapshot
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("系统与进程")
-                        .font(.system(size: 14, weight: .bold))
-                    Text("\(snapshot.distribution) · \(snapshot.kernel) · 已运行 \(snapshot.uptime)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(
-                    "\(DisplayFormat.integer(snapshot.processCount)) 个进程 · " +
-                    "\(DisplayFormat.integer(snapshot.loggedInUsers)) 位登录用户"
-                )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Table(snapshot.topProcesses) {
-                TableColumn("进程") { process in
-                    Text(process.name)
-                        .fontWeight(.semibold)
-                }
-                TableColumn("PID") { process in
-                    Text("\(process.pid)").monospacedDigit()
-                }
-                .width(70)
-                TableColumn("CPU") { process in
-                    Text(DisplayFormat.decimal(process.cpu, fractionLength: 1) + "%")
-                        .monospacedDigit()
-                }
-                .width(70)
-                TableColumn("内存") { process in
-                    Text(DisplayFormat.decimal(process.memory, fractionLength: 1) + "%")
-                        .monospacedDigit()
-                }
-                .width(70)
-            }
-            .frame(height: 170)
-        }
-        .applePanel()
     }
 }

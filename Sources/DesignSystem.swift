@@ -53,6 +53,11 @@ enum AppleDesign {
         static let pill: CGFloat = 999
     }
 
+    enum Layout {
+        static let contentWidth: CGFloat = 1200
+        static let readingWidth: CGFloat = 960
+    }
+
     static let spring = Animation.spring(duration: 0.38, bounce: 0)
     static let quick = Animation.easeOut(duration: 0.18)
 }
@@ -125,8 +130,7 @@ struct ApplePanelModifier: ViewModifier {
                         lineWidth: 1
                     )
             }
-            .shadow(color: .black.opacity(0.04), radius: 2, y: 1)
-            .shadow(color: .black.opacity(0.05), radius: 20, y: 8)
+            .shadow(color: .black.opacity(0.025), radius: 3, y: 1)
     }
 }
 
@@ -136,6 +140,27 @@ extension View {
         radius: CGFloat = AppleDesign.Radius.panel
     ) -> some View {
         modifier(ApplePanelModifier(padding: padding, radius: radius))
+    }
+
+    func appleInteractiveSurface(radius: CGFloat = AppleDesign.Radius.card) -> some View {
+        modifier(AppleInteractiveSurface(radius: radius))
+    }
+}
+
+private struct AppleInteractiveSurface: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+    let radius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(hovering ? Color.appAccent.opacity(0.45) : .clear, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+            .onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : AppleDesign.quick, value: hovering)
     }
 }
 
@@ -161,8 +186,6 @@ struct AppleUnifiedPanel<Content: View>: View {
                     lineWidth: 1
                 )
         }
-        .shadow(color: .black.opacity(0.035), radius: 2, y: 1)
-        .shadow(color: .black.opacity(0.045), radius: 18, y: 7)
     }
 }
 
@@ -173,14 +196,118 @@ struct AppleSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
             Text(title)
-                .font(.title2.weight(.bold))
-                .tracking(-0.35)
+                .font(.title2.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// A shared page heading that keeps actions usable at the minimum window width.
+struct AppleWorkspaceHeader<Actions: View>: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    @ViewBuilder let actions: Actions
+
+    init(title: String, subtitle: String, symbol: String, @ViewBuilder actions: () -> Actions) {
+        self.title = title
+        self.subtitle = subtitle
+        self.symbol = symbol
+        self.actions = actions()
+    }
+
+    private var heading: some View {
+        HStack(alignment: .center, spacing: AppleDesign.Spacing.sm) {
+            Image(systemName: symbol)
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.thumbnail))
+                .accessibilityHidden(true)
+            AppleSectionHeader(title: title, subtitle: subtitle)
+        }
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: AppleDesign.Spacing.lg) {
+                heading
+                Spacer(minLength: AppleDesign.Spacing.md)
+                actions.fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                heading
+                actions
+            }
+        }
+        .controlSize(.regular)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct AppleSearchField: View {
+    let prompt: String
+    @Binding var text: String
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: AppleDesign.Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .accessibilityLabel(prompt)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("清除搜索")
+                .accessibilityLabel("清除搜索")
+            }
+        }
+        .padding(AppleDesign.Spacing.xs)
+        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.chip))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppleDesign.Radius.chip)
+                .strokeBorder(isFocused ? Color.appAccent : Color.appHairline.opacity(0.5), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+struct ServerStatusBadge: View {
+    let status: ServerConnectionStatus
+
+    private var tint: Color {
+        switch status {
+        case .online: .appLive
+        case .connecting: .appWarning
+        case .failed, .offline: .appError
+        case .unknown: .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: AppleDesign.Spacing.xxs) {
+            StatusDot(status: status, size: 6)
+            Text(status.title).font(.caption.weight(.medium))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, AppleDesign.Spacing.xs)
+        .padding(.vertical, AppleDesign.Spacing.xxs)
+        .background(tint.opacity(0.08), in: Capsule())
+        .fixedSize()
+        .accessibilityElement(children: .combine)
     }
 }
 

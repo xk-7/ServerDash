@@ -14,6 +14,7 @@ ServerDash is a native macOS monitoring, SSH terminal, and SFTP client for Linux
 - NVIDIA GPU utilization, VRAM, temperature, fan speed, power, and GPU processes.
 - Docker version, container states, images, and runtime details.
 - Reorderable and hideable monitoring cards with automatic capability-based visibility.
+- Shared dashboard/machine search, group and tag filters, and name/group/creation-date sorting without changing monitoring scope. Retry failed monitoring from the toolbar (`⌘⇧R`).
 - Capability probing, SSH latency, last-success timestamps, data age, and stale-data indicators.
 - A single bounded monitoring coordinator with per-server deduplication, priority scheduling, capped retry backoff, low-power behavior, and configurable 1–60 second refresh intervals or manual mode.
 - Independent per-server runtime state, incremental fleet summaries, explicit first-snapshot waiting UI, and preservation of the last successful data after a collection failure.
@@ -51,6 +52,7 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 - Global appearance settings affect new sessions only; active sessions can be customized independently.
 - `⌘T` opens a terminal; `⌘+` / `⌘=` and `⌘-` adjust the current session font size; `⌘0` restores its initial size.
 - `⌘F` searches terminal output, `⌃Tab` / `⌃⇧Tab` switch tabs, and `⌘⇧,` opens terminal appearance settings. These shortcuts are listed in the Terminal menu.
+- `⌘⌥I` toggles a Status / Snippets inspector with resource snapshots, stale-data notices, and searchable commands. Execution and multiline insertion require confirmation and stay bound to the original session.
 
 ### SFTP
 
@@ -79,6 +81,10 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete update history.
 
+## Product Experience Reference
+
+The [SwiftServer product page](https://swiftserver.app/) and [official documentation](https://swiftserver.app/docs) are the primary experience references for server organization, monitoring cards, the terminal inspector, SFTP, and connection diagnostics. ServerDash retains its own identity, native macOS structure, and security constraints. This does not claim feature parity or implicitly add paid limits, iCloud, or an SSH-engine replacement.
+
 ## Requirements
 
 - macOS 14 or later
@@ -89,7 +95,7 @@ The project uses the local `Vendor/SwiftTerm` package and does not download Swif
 
 ## Development Status
 
-S11 professional SSH routes and tunnels are implemented on top of the S07 baseline. The current internal build passes 117 automated tests plus Debug and Universal Release builds. An isolated three-sshd fixture validates a real system-OpenSSH chain; production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability remain explicitly pending isolated or real-device validation.
+S11 professional SSH routes and tunnels are implemented on top of the S07 baseline. The current suite contains 144 automated tests and the Debug build passes. In the latest full run, 143 tests passed directly; the existing process-cancellation timing test exceeded its one-second threshold under concurrent load and passed when rerun in isolation. An isolated three-sshd fixture validates a real system-OpenSSH chain; production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability remain explicitly pending isolated or real-device validation.
 
 See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for requirement-to-code mapping, batch results, acceptance coverage, and the remaining isolated/real-device checks.
 

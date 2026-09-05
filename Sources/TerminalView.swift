@@ -9,6 +9,7 @@ struct TerminalShortcutActions {
     let font: (TerminalFontShortcut) -> Void
     let find: () -> Void
     let appearance: () -> Void
+    let inspector: () -> Void
     let switchTab: (Int) -> Void
 }
 
@@ -55,6 +56,9 @@ struct TerminalCommands: Commands {
             Button("终端外观…") { perform { $0.appearance() } }
                 .keyboardShortcut(",", modifiers: [.command, .shift])
                 .disabled(actions?.hasSession != true)
+            Button("显示 / 隐藏检查器") { perform { $0.inspector() } }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(actions?.hasSession != true)
             Divider()
             Button("下一个标签页") { perform { $0.switchTab(1) } }
                 .keyboardShortcut(.tab, modifiers: .control)
@@ -81,8 +85,10 @@ private struct TerminalWorkspaceContent: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \CommandSnippetRecord.title) private var snippets: [CommandSnippetRecord]
-    @State private var snippetPendingExecution: CommandSnippetRecord?
+    @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
+    @SceneStorage("terminal.inspector.visible") private var showingInspector = false
+    @SceneStorage("terminal.inspector.tab") private var inspectorTab = "status"
 
     let server: ServerRecord
     @ObservedObject var registry: TerminalSessionRegistry
@@ -105,6 +111,7 @@ private struct TerminalWorkspaceContent: View {
             font: { selectedController?.performFontShortcut($0) },
             find: { selectedController?.hostView.showFindPanel() },
             appearance: { showingAppearance = true },
+            inspector: { showingInspector.toggle() },
             switchTab: switchTab
         )
     }
@@ -201,10 +208,10 @@ private struct TerminalWorkspaceContent: View {
                         ForEach(snippets) { snippet in
                             Menu(snippet.title) {
                                 Button("插入命令", systemImage: "text.cursor") {
-                                    insert(snippet, into: selectedSession.id, execute: false)
+                                    requestSnippet(snippet, into: selectedSession.id, execute: false)
                                 }
                                 Button("执行…", systemImage: "play") {
-                                    snippetPendingExecution = snippet
+                                    requestSnippet(snippet, into: selectedSession.id, execute: true)
                                 }
                             }
                         }
@@ -216,6 +223,17 @@ private struct TerminalWorkspaceContent: View {
                     .help("插入代码片段")
                     .accessibilityLabel("代码片段")
                 }
+                Button {
+                    showingInspector.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .foregroundStyle(showingInspector ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .frame(width: 32, height: 32)
+                .disabled(selectedController == nil)
+                .help("显示状态与代码片段（⌘⌥I）")
+                .accessibilityLabel(showingInspector ? "隐藏终端检查器" : "显示终端检查器")
             }
             .controlSize(.regular)
             .frame(height: 44)
@@ -252,26 +270,39 @@ private struct TerminalWorkspaceContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .inspector(isPresented: $showingInspector) {
+            if let selectedController {
+                TerminalInspectorView(
+                    server: server, controller: selectedController,
+                    runtime: appState.runtime(for: server), snippets: snippets,
+                    refreshInterval: appState.refreshInterval,
+                    selectedTab: $inspectorTab,
+                    onInsert: { requestSnippet($0, into: selectedController.id, execute: false) },
+                    onRun: { requestSnippet($0, into: selectedController.id, execute: true) }
+                )
+                .inspectorColumnWidth(min: 280, ideal: 300, max: 360)
+            }
+        }
         .focusedSceneValue(\.terminalShortcuts, shortcutActions)
         .confirmationDialog(
-            "执行“\(snippetPendingExecution?.title ?? "代码片段")”？",
+            "向“\(snippetPendingExecution?.serverName ?? "终端")”发送“\(snippetPendingExecution?.title ?? "代码片段")”？",
             isPresented: Binding(
                 get: { snippetPendingExecution != nil },
                 set: { if !$0 { snippetPendingExecution = nil } }
             )
         ) {
-            Button("执行命令") {
-                guard let snippet = snippetPendingExecution,
-                      let selectedSession else { return }
-                insert(snippet, into: selectedSession.id, execute: true)
+            Button(snippetPendingExecution?.execute == true ? "执行命令" : "确认插入") {
+                guard let request = snippetPendingExecution else { return }
+                deliverSnippet(request)
                 snippetPendingExecution = nil
             }
             Button("取消", role: .cancel) {
                 snippetPendingExecution = nil
             }
         } message: {
-            Text(snippetPendingExecution?.command ?? "")
+            Text("\(snippetPendingExecution?.command ?? "")\n\n命令或控制字符可能立即执行。请确认目标会话及命令内容。")
         }
+        .onChange(of: appState.selectedTerminalID) { _, _ in snippetPendingExecution = nil }
         .sheet(isPresented: $showingAppearance, onDismiss: {
             selectedController?.hostView.focusTerminal()
         }) {
@@ -300,16 +331,28 @@ private struct TerminalWorkspaceContent: View {
         }
     }
 
-    private func insert(
+    private func requestSnippet(
         _ snippet: CommandSnippetRecord,
         into sessionID: UUID,
         execute: Bool
     ) {
-        TerminalCommandBus.insert(
-            snippet.command + (execute ? "\n" : ""),
-            into: sessionID
+        guard let controller = registry.controller(for: sessionID), controller.status == .connected else { return }
+        let request = TerminalSnippetRequest(
+            snippetID: snippet.id, sessionID: sessionID, serverName: controller.serverName,
+            title: snippet.title, command: snippet.command, execute: execute
         )
-        snippet.lastUsedAt = .now
+        if request.requiresConfirmation {
+            snippetPendingExecution = request
+        } else {
+            deliverSnippet(request)
+        }
+    }
+
+    private func deliverSnippet(_ request: TerminalSnippetRequest) {
+        guard request.canDeliver(selectedSessionID: appState.selectedTerminalID,
+                                 status: registry.controller(for: request.sessionID)?.status) else { return }
+        TerminalCommandBus.insert(request.payload, into: request.sessionID)
+        snippets.first { $0.id == request.snippetID }?.lastUsedAt = .now
         try? modelContext.save()
     }
 
@@ -319,6 +362,223 @@ private struct TerminalWorkspaceContent: View {
             return controller.serverName
         }
         return "\(controller.serverName) · \(DisplayFormat.integer(index + 1))"
+    }
+}
+
+struct TerminalSnippetRequest {
+    let snippetID: UUID
+    let sessionID: UUID
+    let serverName: String
+    let title: String
+    let command: String
+    let execute: Bool
+
+    var requiresConfirmation: Bool {
+        execute || command.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
+
+    var payload: String { command + (execute ? "\n" : "") }
+
+    func canDeliver(selectedSessionID: UUID?, status: TerminalConnectionStatus?) -> Bool {
+        selectedSessionID == sessionID && status == .connected
+    }
+}
+
+struct TerminalInspectorView: View {
+    let server: ServerRecord
+    @ObservedObject var controller: TerminalSessionController
+    @ObservedObject var runtime: ServerRuntimeState
+    let snippets: [CommandSnippetRecord]
+    let refreshInterval: TimeInterval
+    @Binding var selectedTab: String
+    let onInsert: (CommandSnippetRecord) -> Void
+    let onRun: (CommandSnippetRecord) -> Void
+    @State private var search = ""
+    @State private var copiedSnippetID: UUID?
+
+    private var state: ServerRenderState { runtime.renderState }
+    private var snapshot: ServerSnapshot { state.snapshot }
+    private var filteredSnippets: [CommandSnippetRecord] {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return snippets.filter {
+            term.isEmpty || [$0.title, $0.command, $0.category].contains { $0.localizedCaseInsensitiveContains(term) }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+                Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
+                Text(controller.serverName)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Picker("检查器内容", selection: $selectedTab) {
+                    Text("状态").tag("status")
+                    Text("代码片段").tag("snippets")
+                }
+                .pickerStyle(.segmented).labelsHidden()
+            }
+            .padding(AppleDesign.Spacing.md)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                    if selectedTab == "snippets" { snippetContent } else { statusContent }
+                }
+                .padding(AppleDesign.Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(Color.appGround)
+    }
+
+    @ViewBuilder private var statusContent: some View {
+        HStack {
+            Label(controller.status.title, systemImage: "terminal")
+                .foregroundStyle(controller.status.displayColor)
+            Spacer()
+            Text("SSH 会话").foregroundStyle(.secondary)
+        }
+        .font(.caption)
+
+        if controller.serverID != server.id {
+            Text("正在切换服务器…").foregroundStyle(.secondary)
+        } else if state.hasSnapshot {
+            HStack {
+                Text("资源快照").font(.headline)
+                Spacer()
+                ServerStatusBadge(status: state.status)
+            }
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                metric("CPU", value: snapshot.cpuUsage, detail: "\(snapshot.coreCount) 核心")
+                Divider()
+                metric("内存", value: snapshot.memoryUsage,
+                       detail: "\(DisplayFormat.bytes(snapshot.memoryUsedBytes)) / \(DisplayFormat.bytes(snapshot.memoryTotalBytes))")
+                Divider()
+                metric("磁盘", value: snapshot.diskUsage,
+                       detail: "\(DisplayFormat.bytes(snapshot.diskUsedBytes)) / \(DisplayFormat.bytes(snapshot.diskTotalBytes))")
+            }
+            .applePanel()
+
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+                Text("平均负载").font(.headline)
+                HStack {
+                    load("1 分钟", value: snapshot.load1)
+                    load("5 分钟", value: snapshot.load5)
+                    load("15 分钟", value: snapshot.load15)
+                }
+                Divider()
+                HStack {
+                    Label(DisplayFormat.speed(snapshot.downloadBytesPerSecond), systemImage: "arrow.down")
+                    Spacer(minLength: 0)
+                    Label(DisplayFormat.speed(snapshot.uploadBytesPerSecond), systemImage: "arrow.up")
+                }
+                .font(.caption).monospacedDigit()
+            }
+            .applePanel()
+
+            if !snapshot.topProcesses.isEmpty {
+                VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+                    Text("活跃进程 · CPU").font(.headline)
+                    ForEach(snapshot.topProcesses.prefix(5)) { process in
+                        HStack {
+                            Text(process.name).lineLimit(1)
+                            Spacer(minLength: AppleDesign.Spacing.sm)
+                            Text(DisplayFormat.percent(process.cpu)).monospacedDigit()
+                        }
+                        .font(.caption)
+                    }
+                }
+                .applePanel()
+            }
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
+                    if !server.enableDashboardMonitor {
+                        Label("自动监控已关闭", systemImage: "pause.circle").foregroundStyle(.secondary)
+                    }
+                    if state.isStale(refreshInterval: refreshInterval, now: context.date) || state.status != .online {
+                        Label("当前显示最后一次成功采集的数据", systemImage: "clock.badge.exclamationmark")
+                            .foregroundStyle(Color.appWarning)
+                    }
+                    Text("采集于 \(snapshot.capturedAt.formatted(date: .omitted, time: .standard))")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            }
+        } else {
+            ContentUnavailableView {
+                Label(state.status == .failed ? "资源采集失败" : "暂无资源快照", systemImage: "waveform.path.ecg")
+            } description: {
+                Text(server.enableDashboardMonitor
+                     ? "采集成功后将在这里显示，终端连接与监控状态相互独立。"
+                     : "此服务器未开启仪表盘监控，可在机器设置中开启。")
+            }
+        }
+    }
+
+    @ViewBuilder private var snippetContent: some View {
+        AppleSearchField(prompt: "搜索代码片段", text: $search)
+        if filteredSnippets.isEmpty {
+            ContentUnavailableView {
+                Label(snippets.isEmpty ? "还没有代码片段" : "没有匹配的片段", systemImage: "curlybraces")
+            } description: {
+                Text(snippets.isEmpty ? "在侧栏的“代码片段”中保存常用命令，即可在这里使用。" : "试试其他关键词。")
+            }
+        } else {
+            Text("单行命令可插入后编辑；执行或发送多行内容前会再次确认。")
+                .font(.caption).foregroundStyle(.secondary)
+            AppleUnifiedPanel {
+                ForEach(filteredSnippets) { snippet in
+                    snippetRow(snippet)
+                    if snippet.id != filteredSnippets.last?.id {
+                        Divider().padding(.horizontal, AppleDesign.Spacing.md)
+                    }
+                }
+            }
+        }
+    }
+
+    private func snippetRow(_ snippet: CommandSnippetRecord) -> some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+            Text(snippet.title).font(.headline).lineLimit(2)
+            Text(snippet.category).font(.caption).foregroundStyle(.secondary)
+            Text(snippet.command)
+                .font(.caption.monospaced()).lineLimit(4).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: AppleDesign.Spacing.sm) {
+                Button(copiedSnippetID == snippet.id ? "已复制" : "复制", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(snippet.command, forType: .string)
+                    copiedSnippetID = snippet.id
+                }
+                .labelStyle(.iconOnly)
+                .help(copiedSnippetID == snippet.id ? "已复制" : "复制命令")
+                Spacer(minLength: 0)
+                Button("插入") { onInsert(snippet) }.disabled(controller.status != .connected)
+                Button("执行…") { onRun(snippet) }.disabled(controller.status != .connected)
+            }
+            .controlSize(.regular)
+        }
+        .padding(AppleDesign.Spacing.md)
+    }
+
+    private func metric(_ title: String, value: Double, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
+            HStack {
+                Text(title).font(.callout.weight(.medium))
+                Spacer()
+                Text(DisplayFormat.percent(value)).font(.headline).monospacedDigit()
+            }
+            ProgressView(value: min(100, max(0, value)), total: 100).tint(.accentColor)
+            Text(detail).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func load(_ title: String, value: Double) -> some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+            Text(value, format: .number.precision(.fractionLength(2))).font(.callout.weight(.medium))
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+        .monospacedDigit().frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

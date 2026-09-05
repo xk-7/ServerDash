@@ -16,12 +16,10 @@ struct IdentityManagementView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
-                HStack {
-                    AppleSectionHeader(
-                        title: "身份",
-                        subtitle: "复用用户名与认证凭据，不在服务器记录中保存密码。"
-                    )
-                    Spacer()
+                AppleWorkspaceHeader(
+                    title: "身份", subtitle: "在多台服务器间安全复用认证凭据。",
+                    symbol: "person.crop.circle.badge.checkmark"
+                ) {
                     Button("新建身份", systemImage: "plus") {
                         showingNewIdentity = true
                     }
@@ -53,6 +51,7 @@ struct IdentityManagementView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .appleInteractiveSurface(radius: AppleDesign.Radius.chip)
                             .contextMenu {
                                 Button("编辑身份", systemImage: "pencil") {
                                     editingIdentity = identity
@@ -70,7 +69,8 @@ struct IdentityManagementView: View {
                 }
             }
             .padding(AppleDesign.Spacing.lg)
-            .frame(maxWidth: 900)
+            .frame(maxWidth: AppleDesign.Layout.readingWidth)
+            .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $showingNewIdentity) {
             IdentityEditorView(identity: nil, keys: keys)
@@ -135,14 +135,17 @@ private struct IdentityRow: View {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text(identity.name)
                     .font(.headline)
+                    .lineLimit(1)
                 Text(identity.username)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
             Spacer()
             Text(identity.authentication.title + (identity.authentication.usesPrivateKey ? " · \(key?.name ?? "未选择密钥")" : ""))
-                .font(.callout)
+                .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(maxWidth: 200, alignment: .trailing)
             Text("\(DisplayFormat.integer(serverCount)) 台机器")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -317,12 +320,10 @@ struct SSHKeyManagementView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
-                HStack {
-                    AppleSectionHeader(
-                        title: "SSH 密钥",
-                        subtitle: "仅保存本地文件引用和公钥指纹，不复制私钥内容。"
-                    )
-                    Spacer()
+                AppleWorkspaceHeader(
+                    title: "SSH 密钥", subtitle: "管理本地密钥引用或保存在钥匙串中的私钥。",
+                    symbol: "key"
+                ) {
                     Button("导入密钥", systemImage: "plus") { showingNewKey = true }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut("k", modifiers: [.command, .shift])
@@ -351,6 +352,7 @@ struct SSHKeyManagementView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .appleInteractiveSurface(radius: AppleDesign.Radius.chip)
                             .contextMenu {
                                 Button("编辑密钥", systemImage: "pencil") { editingKey = key }
                                 Divider()
@@ -366,7 +368,8 @@ struct SSHKeyManagementView: View {
                 }
             }
             .padding(AppleDesign.Spacing.lg)
-            .frame(maxWidth: 900)
+            .frame(maxWidth: AppleDesign.Layout.readingWidth)
+            .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $showingNewKey) {
             SSHKeyEditorView(key: nil)
@@ -429,7 +432,7 @@ private struct SSHKeyRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
-                Text(key.name).font(.headline)
+                Text(key.name).font(.headline).lineLimit(1)
                 Text(key.fingerprint)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
@@ -673,18 +676,17 @@ struct SnippetManagementView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                AppleSectionHeader(
-                    title: "代码片段",
-                    subtitle: "保存常用命令；插入终端前始终由你确认。"
-                )
-                Spacer()
-                TextField("搜索代码片段", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 230)
-                Button("新建片段", systemImage: "plus") { showingNewSnippet = true }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("s", modifiers: [.command, .shift])
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                AppleWorkspaceHeader(
+                    title: "代码片段", subtitle: "让常用命令随手可用，执行前由你确认。",
+                    symbol: "curlybraces"
+                ) {
+                    Button("新建片段", systemImage: "plus") { showingNewSnippet = true }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("s", modifiers: [.command, .shift])
+                }
+                AppleSearchField(prompt: "搜索名称、命令或分类", text: $searchText)
+                    .frame(maxWidth: 360)
             }
             .padding(AppleDesign.Spacing.lg)
 
@@ -723,7 +725,8 @@ struct SnippetManagementView: View {
                     }
                     .padding(.horizontal, AppleDesign.Spacing.lg)
                     .padding(.bottom, AppleDesign.Spacing.lg)
-                    .frame(maxWidth: 900)
+                    .frame(maxWidth: AppleDesign.Layout.readingWidth)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -782,7 +785,7 @@ private struct SnippetRow: View {
         HStack(spacing: AppleDesign.Spacing.md) {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
                 HStack {
-                    Text(snippet.title).font(.headline)
+                    Text(snippet.title).font(.headline).lineLimit(1)
                     Text(snippet.category)
                         .font(.caption)
                         .foregroundStyle(.secondary)

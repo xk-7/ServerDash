@@ -474,6 +474,10 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             Form {
+            Section {
+                AppleSectionHeader(title: "通用设置", subtitle: "调整外观、监控频率与连接偏好。")
+                    .padding(.vertical, AppleDesign.Spacing.xs)
+            }
             Section("外观") {
                 Picker("显示模式", selection: $appAppearanceRawValue) {
                     ForEach(AppAppearance.allCases) { appearance in
@@ -533,7 +537,7 @@ struct SettingsView: View {
                         .monospacedDigit()
                         .frame(width: 44)
                 }
-                Text("主机指纹保存在应用专属 known_hosts。密钥变化时默认拒绝，需同时看到新旧指纹后才能替换。")
+                Text("首次连接时核验服务器身份。主机密钥变化时会阻止连接，需重新确认。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

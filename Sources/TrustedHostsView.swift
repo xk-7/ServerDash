@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct TrustedHostsView: View {
+    @AppStorage("hideIPInformation") private var hideIPInformation = false
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \TrustedHostKey.host) private var hosts: [TrustedHostKey]
     @State private var errorMessage: String?
@@ -10,10 +11,13 @@ struct TrustedHostsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
-                AppleSectionHeader(
-                    title: "可信主机",
-                    subtitle: "主机指纹保存在应用专属 known_hosts，所有连接共用此信任策略。"
-                )
+                AppleWorkspaceHeader(
+                    title: "可信主机", subtitle: "核验服务器指纹，管理已建立的信任。",
+                    symbol: "checkmark.shield"
+                ) {
+                    Text("\(DisplayFormat.integer(hosts.count)) 条记录")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 if hosts.isEmpty {
                     ContentUnavailableView {
                         Label("还没有可信主机", systemImage: "checkmark.shield")
@@ -25,34 +29,44 @@ struct TrustedHostsView: View {
                 } else {
                     AppleUnifiedPanel {
                         ForEach(Array(hosts.enumerated()), id: \.element.id) { index, host in
-                            HStack {
+                            HStack(spacing: AppleDesign.Spacing.md) {
+                                Image(systemName: "checkmark.shield")
+                                    .font(.title3).foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("\(host.host):\(host.port)")
+                                    Text("\(hideIPInformation ? "[IP]" : host.host):\(host.port)")
                                         .font(.headline.monospaced())
+                                        .lineLimit(1).truncationMode(.middle)
                                     Text("\(host.algorithm) · \(host.fingerprint)")
                                         .font(.caption.monospaced())
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
+                                        .lineLimit(1).truncationMode(.middle)
+                                        .help("\(host.algorithm) · \(host.fingerprint)")
                                 }
                                 Spacer()
                                 Button("重新扫描") {
                                     rescan(host)
                                 }
-                                Button("替换为扫描结果") {
-                                    replace(host)
+                                Menu {
+                                    Button("替换为扫描结果") { replace(host) }
+                                    Divider()
+                                    Button("删除", role: .destructive) { hostPendingDeletion = host }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle")
                                 }
-                                Button("删除", role: .destructive) {
-                                    hostPendingDeletion = host
-                                }
+                                .fixedSize()
+                                .accessibilityLabel("可信主机操作")
                             }
-                            .padding(.vertical, AppleDesign.Spacing.sm)
+                            .padding(AppleDesign.Spacing.md)
                             if index < hosts.count - 1 { Divider() }
                         }
                     }
                 }
             }
             .padding(AppleDesign.Spacing.lg)
-            .frame(maxWidth: 900)
+            .frame(maxWidth: AppleDesign.Layout.readingWidth)
+            .frame(maxWidth: .infinity)
         }
         .confirmationDialog(
             "删除可信主机？",

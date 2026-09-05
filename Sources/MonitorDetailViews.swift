@@ -244,13 +244,15 @@ struct MemoryDashboardDetailView: View {
                         Chart(Array(history.suffix(120))) { point in
                             LineMark(
                                 x: .value("时间", point.date),
-                                y: .value("内存", point.memory)
+                                y: .value("内存", point.memory),
+                                series: .value("指标", "内存")
                             )
                             .foregroundStyle(Color.appAccent)
                             .interpolationMethod(.catmullRom)
                             LineMark(
                                 x: .value("时间", point.date),
-                                y: .value("Swap", point.swapUsage)
+                                y: .value("Swap", point.swapUsage),
+                                series: .value("指标", "Swap")
                             )
                             .foregroundStyle(Color.appWarning)
                             .interpolationMethod(.catmullRom)
@@ -467,7 +469,8 @@ struct NetworkDashboardDetailView: View {
                                 y: .value(
                                     "下载",
                                     displayInBits ? point.download * 8 : point.download
-                                )
+                                ),
+                                series: .value("方向", "下载")
                             )
                             .foregroundStyle(Color.appAccent)
                             LineMark(
@@ -475,7 +478,8 @@ struct NetworkDashboardDetailView: View {
                                 y: .value(
                                     "上传",
                                     displayInBits ? point.upload * 8 : point.upload
-                                )
+                                ),
+                                series: .value("方向", "上传")
                             )
                             .foregroundStyle(Color.appLive)
                         }

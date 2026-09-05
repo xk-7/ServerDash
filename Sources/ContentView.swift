@@ -101,14 +101,6 @@ struct ContentView: View {
     @State private var dashboardScrollAnchor: UUID?
     @State private var machineScrollAnchor: UUID?
 
-    private var filteredServers: [ServerRecord] {
-        guard !searchText.isEmpty else { return servers }
-        return servers.filter { server in
-            [server.name, server.host, server.groupName, server.tagsText]
-                .contains { $0.localizedCaseInsensitiveContains(searchText) }
-        }
-    }
-
     private var sidebarDestination: SidebarDestination {
         route.sidebarDestination
     }
@@ -157,14 +149,8 @@ struct ContentView: View {
                 .background(Color.appGround)
         }
         .navigationSplitViewStyle(.balanced)
+        .navigationTitle("ServerDash")
         .toolbar {
-            if route == .section(.machines) {
-                ToolbarItem(placement: .principal) {
-                    TextField("搜索机器", text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 240)
-                }
-            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     Task { await appState.refreshAll(servers) }
@@ -174,6 +160,18 @@ struct ContentView: View {
                 .help("刷新全部服务器")
                 .disabled(servers.isEmpty)
                 .keyboardShortcut("r", modifiers: .command)
+
+                Menu {
+                    Button("仅重试失败的监控", systemImage: "arrow.clockwise.circle") {
+                        Task { await appState.refreshAll(servers, failedOnly: true) }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .help("更多刷新选项")
+                .accessibilityLabel("更多刷新选项")
+                .disabled(servers.isEmpty)
 
                 Button {
                     showingNewServer = true
@@ -243,11 +241,6 @@ struct ContentView: View {
         }
         .onChange(of: servers.map(\.id)) { _, serverIDs in
             handleServerListChange(serverIDs)
-        }
-        .onChange(of: filteredServers.map(\.id), initial: true) { _, serverIDs in
-            if let machineScrollAnchor, !serverIDs.contains(machineScrollAnchor) {
-                self.machineScrollAnchor = serverIDs.first
-            }
         }
         .modifier(
             HostTrustAlertModifier(
@@ -345,7 +338,7 @@ struct ContentView: View {
                 )
             case .machines:
                 MachineManagementView(
-                    servers: filteredServers,
+                    servers: servers,
                     searchText: $searchText,
                     scrollAnchor: $machineScrollAnchor,
                     onSelect: { server in

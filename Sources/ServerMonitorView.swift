@@ -76,7 +76,7 @@ struct ServerMonitorLayoutView: View {
                     .applePanel()
                 } else {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 330), spacing: AppleDesign.Spacing.md)],
+                        columns: [GridItem(.adaptive(minimum: 330), spacing: AppleDesign.Spacing.md, alignment: .top)],
                         alignment: .leading,
                         spacing: AppleDesign.Spacing.md
                     ) {
@@ -95,7 +95,8 @@ struct ServerMonitorLayoutView: View {
                 }
             }
             .padding(AppleDesign.Spacing.lg)
-            .frame(maxWidth: 1440, alignment: .leading)
+            .frame(maxWidth: AppleDesign.Layout.contentWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $showingLayoutEditor) {
             MonitorLayoutEditorView(serverID: server.id, snapshot: snapshot)
@@ -132,45 +133,49 @@ struct ServerMonitorLayoutView: View {
     }
 
     private var monitorToolbar: some View {
-        HStack(spacing: AppleDesign.Spacing.sm) {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
-                Text("服务器状态")
-                    .font(.title2.weight(.bold))
+                Text("资源监控")
+                    .font(.headline)
                 Text(monitorStatusText)
-                .font(.caption)
-                .foregroundStyle(
-                    runtime.renderState.isStale(refreshInterval: appState.refreshInterval)
-                        ? Color.appWarning
-                        : .secondary
-                )
-            }
-            Spacer()
-            if copiedMarkdown {
-                Label("已复制", systemImage: "checkmark")
                     .font(.caption)
-                    .foregroundStyle(Color.appLive)
-                    .transition(.opacity)
+                    .foregroundStyle(
+                        runtime.renderState.isStale(refreshInterval: appState.refreshInterval)
+                            ? Color.appWarning
+                            : .secondary
+                    )
             }
-            Button("编辑布局", systemImage: "rectangle.grid.2x2") {
-                showingLayoutEditor = true
-            }
-            Button("历史", systemImage: "chart.xyaxis.line") {
-                showingHistory = true
-            }
-            .help("查看持久化监控历史和 Data Gap")
-            Menu {
-                Button("复制 Markdown", systemImage: "doc.on.doc") {
-                    copyMarkdown()
+            HStack(spacing: AppleDesign.Spacing.xs) {
+                if copiedMarkdown {
+                    Label("已复制", systemImage: "checkmark")
+                        .font(.caption)
+                        .foregroundStyle(Color.appLive)
+                        .transition(.opacity)
                 }
-                Toggle("隐藏 IP 信息", isOn: $hideIPInformation)
-                Divider()
-                Button("恢复默认布局", systemImage: "arrow.counterclockwise") {
-                    layoutStore.reset(serverID: server.id)
+                Button("编辑布局", systemImage: "rectangle.grid.2x2") {
+                    showingLayoutEditor = true
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                Button("历史", systemImage: "chart.xyaxis.line") {
+                    showingHistory = true
+                }
+                .help("查看持久化监控历史和 Data Gap")
+                Menu {
+                    Button("复制 Markdown", systemImage: "doc.on.doc") {
+                        copyMarkdown()
+                    }
+                    Toggle("隐藏 IP 信息", isOn: $hideIPInformation)
+                    Divider()
+                    Button("恢复默认布局", systemImage: "arrow.counterclockwise") {
+                        layoutStore.reset(serverID: server.id)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .help("状态页操作")
+                Spacer(minLength: 0)
             }
-            .help("状态页操作")
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
         }
     }
 
@@ -210,7 +215,7 @@ struct ServerMonitorLayoutView: View {
         if !server.enableDashboardMonitor {
             return "此服务器未启用自动监控，可使用上方刷新操作手动采集。"
         }
-        return "正在准备监控数据，完成前不会显示占位的 0% 指标。"
+        return "首次连接可能需要几秒钟，采集完成后会自动显示资源状态。"
     }
 
     @ViewBuilder
@@ -306,11 +311,14 @@ private struct MonitorCardShell<Content: View>: View {
                 Text(card.title)
                     .font(.headline)
                 Spacer()
-                if onOpen != nil {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
+                if let onOpen {
+                    Button(action: onOpen) {
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .help("打开\(card.title)详情")
+                    .accessibilityLabel("打开\(card.title)详情")
                 }
                 Menu {
                     if let onOpen {
@@ -482,13 +490,13 @@ private struct LoadMonitorCard: View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             Chart {
                 ForEach(Array(history.suffix(100))) { point in
-                    LineMark(x: .value("时间", point.date), y: .value("1 分钟", point.load1))
+                    LineMark(x: .value("时间", point.date), y: .value("1 分钟", point.load1), series: .value("负载", "1 分钟"))
                         .foregroundStyle(Color.appAccent)
                         .interpolationMethod(.catmullRom)
-                    LineMark(x: .value("时间", point.date), y: .value("5 分钟", point.load5))
+                    LineMark(x: .value("时间", point.date), y: .value("5 分钟", point.load5), series: .value("负载", "5 分钟"))
                         .foregroundStyle(Color.appLive)
                         .interpolationMethod(.catmullRom)
-                    LineMark(x: .value("时间", point.date), y: .value("15 分钟", point.load15))
+                    LineMark(x: .value("时间", point.date), y: .value("15 分钟", point.load15), series: .value("负载", "15 分钟"))
                         .foregroundStyle(Color.appWarning)
                         .interpolationMethod(.catmullRom)
                 }
@@ -761,12 +769,14 @@ private struct NetworkMonitorCard: View {
                 .foregroundStyle(Color.appAccent.opacity(0.1))
                 LineMark(
                     x: .value("时间", point.date),
-                    y: .value("下载", point.download)
+                    y: .value("下载", point.download),
+                    series: .value("方向", "下载")
                 )
                 .foregroundStyle(Color.appAccent)
                 LineMark(
                     x: .value("时间", point.date),
-                    y: .value("上传", point.upload)
+                    y: .value("上传", point.upload),
+                    series: .value("方向", "上传")
                 )
                 .foregroundStyle(Color.appLive)
             }
@@ -1701,9 +1711,9 @@ private struct NetworkDetailView: View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
             Chart {
                 ForEach(Array(history.suffix(100))) { point in
-                    LineMark(x: .value("时间", point.date), y: .value("下载", point.download))
+                    LineMark(x: .value("时间", point.date), y: .value("下载", point.download), series: .value("方向", "下载"))
                         .foregroundStyle(Color.appAccent)
-                    LineMark(x: .value("时间", point.date), y: .value("上传", point.upload))
+                    LineMark(x: .value("时间", point.date), y: .value("上传", point.upload), series: .value("方向", "上传"))
                         .foregroundStyle(Color.appLive)
                 }
             }

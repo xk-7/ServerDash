@@ -164,6 +164,56 @@ final class ServerRecord {
     }
 }
 
+enum ServerBrowserSort: String, CaseIterable, Identifiable {
+    case name, nameDescending, group, newest
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .name: "名称 A–Z"
+        case .nameDescending: "名称 Z–A"
+        case .group: "按分组"
+        case .newest: "最近添加"
+        }
+    }
+}
+
+/// Shared, metadata-only browsing. Filtering never changes monitoring ownership.
+struct ServerBrowserQuery {
+    var search = ""
+    var group = ""
+    var tag = ""
+    var sort: ServerBrowserSort = .name
+
+    var hasFilters: Bool {
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !group.isEmpty || !tag.isEmpty
+    }
+
+    func apply(to servers: [ServerRecord]) -> [ServerRecord] {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return servers.filter { server in
+            (group.isEmpty || server.groupName == group) &&
+            (tag.isEmpty || server.tags.contains(tag)) &&
+            (term.isEmpty || [server.displayName, server.host, server.groupName, server.tagsText]
+                .contains { $0.localizedCaseInsensitiveContains(term) })
+        }.sorted { lhs, rhs in
+            if sort == .newest, lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt > rhs.createdAt
+            }
+            if sort == .group {
+                let groupOrder = lhs.groupName.localizedStandardCompare(rhs.groupName)
+                if groupOrder != .orderedSame { return groupOrder == .orderedAscending }
+            }
+            let nameOrder = lhs.displayName.localizedStandardCompare(rhs.displayName)
+            if nameOrder != .orderedSame {
+                return nameOrder == (sort == .nameDescending ? .orderedDescending : .orderedAscending)
+            }
+            // Identical names retain a deterministic position across refreshes.
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+}
+
 @Model
 final class IdentityRecord {
     @Attribute(.unique) var id: UUID
