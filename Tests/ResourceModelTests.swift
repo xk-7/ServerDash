@@ -173,6 +173,20 @@ final class ResourceModelTests: XCTestCase {
         XCTAssertEqual(ServerBrowserQuery(sort: .newest).apply(to: servers).first?.id, newer.id)
     }
 
+    func testServerBrowserCombinesWordsAcrossFieldsAndMonitoringFilter() {
+        let api = ServerRecord(name: "API 2", host: "api.example.test", username: "deploy",
+                               groupName: "生产", tagsText: "web", notes: "夜间备份")
+        let paused = ServerRecord(name: "API 3", host: "archive.example.test", username: "deploy",
+                                  groupName: "生产", tagsText: "web", notes: "夜间备份", enableDashboardMonitor: false)
+        let query = ServerBrowserQuery(search: "  API\tDEPLOY\n备份 ", group: "生产", tag: "web", monitoring: .enabled)
+        XCTAssertEqual(query.apply(to: [paused, api]).map(\.id), [api.id])
+        XCTAssertEqual(ServerBrowserQuery(monitoring: .paused).apply(to: [api, paused]).map(\.id), [paused.id])
+        XCTAssertTrue(ServerBrowserQuery(monitoring: .paused).hasFilters)
+        XCTAssertTrue(ServerBrowserQuery(search: "api missing").apply(to: [api]).isEmpty)
+        XCTAssertTrue(api.enableDashboardMonitor)
+        XCTAssertFalse(paused.enableDashboardMonitor)
+    }
+
     func testSnippetSingleLineInsertDoesNotAppendReturn() {
         let request = snippetRequest(command: "uptime", execute: false)
         XCTAssertFalse(request.requiresConfirmation)

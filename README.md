@@ -14,10 +14,13 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 - NVIDIA GPU utilization, VRAM, temperature, fan speed, power, and GPU processes.
 - Docker version, container states, images, and runtime details.
 - Reorderable and hideable monitoring cards with automatic capability-based visibility.
-- Shared dashboard/machine search, group and tag filters, and name/group/creation-date sorting without changing monitoring scope. Retry failed monitoring from the toolbar (`⌘⇧R`).
+- Shared dashboard/machine search, group/tag/monitoring filters, and name/group/creation-date sorting on all three platforms. Space-separated terms match across names, addresses, usernames, tags, and notes without changing monitoring scope. Retry failed monitoring from the Mac toolbar (`⌘⇧R`).
 - Capability probing, SSH latency, last-success timestamps, data age, and stale-data indicators.
-- A single bounded monitoring coordinator with per-server deduplication, priority scheduling, capped retry backoff, low-power behavior, and configurable 1–60 second refresh intervals or manual mode.
+- The Mac monitoring coordinator provides per-server deduplication, priority scheduling, capped retry backoff, low-power behavior, and configurable 1–60 second refresh intervals or manual mode.
 - Independent per-server runtime state, incremental fleet summaries, explicit first-snapshot waiting UI, and preservation of the last successful data after a collection failure.
+- Mobile distinguishes online, attention-needed, pending, and paused hosts, with pull-to-refresh, failed-host retry, direct server creation, network rates, and stale-data labels. iPad uses an adaptive grid; accessibility text sizes switch cards to a vertical layout.
+- Mobile monitoring is owned by the root view and continues when switching pages in the foreground. At most three hosts collect concurrently, with per-host deduplication and slots held until SSH closes. Choose manual mode or a 5/15/30/60-second delay after each completed round; failed-host backoff caps at five minutes and manual refresh bypasses it.
+- Pause individual hosts in the mobile editor. Deleting a host cancels its queued/running monitoring and closes its terminal; late results cannot restore deleted state. Cancelling a host-trust request dismisses that request and unblocks the next host.
 
 ### Local Monitoring History and Data Gaps
 
@@ -84,6 +87,7 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 
 ### Performance and Process Lifecycle
 
+- Server browsers compute filtering/sorting once per view update and read sort keys before comparing, avoiding per-row re-sorts and repeated SwiftData reads. Mobile monitoring responses are parsed off the main actor.
 - stdout and stderr are consumed in bounded 32 KiB chunks; output-limit, timeout, cancellation, and natural exit remain distinct outcomes.
 - Cancellation targets the owned process group, escalates from TERM to KILL, and can be scoped to one server without affecting another server's work.
 - Monitoring capacity uses continuation-backed FIFO waiters instead of polling and refills immediately when a slot becomes available.
@@ -116,7 +120,7 @@ The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, and `Vendor/swift-n
 
 ## Development Status
 
-The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 14 tests covering connection contracts, local Citadel password/key/PTY integration, host trust, lifecycle interruption, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
+The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 23 tests covering connection contracts, local Citadel password/key/PTY integration, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
 
 The existing macOS S11 professional SSH routes and tunnels remain available and continue to use system OpenSSH. Production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability still require isolated or real-device validation.
 

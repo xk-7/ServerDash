@@ -88,6 +88,18 @@ struct MobileRootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var runtime: MobileRuntime
     @State private var selection: MobileDestination? = .dashboard
+    @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
+    @Query private var identities: [IdentityRecord]
+    @Query private var keys: [SSHKeyRecord]
+    @Query private var routes: [ConnectionRouteRecord]
+    @AppStorage("mobileRefreshInterval") private var refreshInterval = 15
+
+    private struct Schedule: Equatable {
+        let serverIDs: [UUID]
+        let monitoredIDs: [UUID]
+        let interval: Int
+        let backgrounded: Bool
+    }
 
     var body: some View {
         Group {
@@ -120,6 +132,18 @@ struct MobileRootView: View {
         }
         .background(Color.appGround)
         .overlay { MobileTrustPresenter(broker: runtime.trustBroker) }
+        .task(id: Schedule(serverIDs: servers.map(\.id),
+                           monitoredIDs: servers.filter(\.enableDashboardMonitor).map(\.id),
+                           interval: refreshInterval, backgrounded: runtime.isBackgrounded)) {
+            runtime.reconcileServers(servers)
+            guard !runtime.isBackgrounded, refreshInterval > 0 else { return }
+            while !Task.isCancelled {
+                await runtime.refreshAll(servers: servers, identities: identities, keys: keys,
+                                         routes: routes, automatic: true)
+                do { try await Task.sleep(for: .seconds(max(5, refreshInterval))) }
+                catch { return }
+            }
+        }
     }
 
     @ViewBuilder

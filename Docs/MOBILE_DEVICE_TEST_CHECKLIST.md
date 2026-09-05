@@ -3,7 +3,14 @@
 - Target: `ServerDashMobile`
 - Minimum OS: iOS/iPadOS 18
 - Current status: **not executed on a physical device**
-- Simulator automation: iPhone 16e and iPad Air 11-inch (M3), 14/14 tests passed
+- Original mobile baseline: iPhone 16e and iPad Air 11-inch (M3), 14/14 tests passed.
+- UI/performance suite: 23 tests, including bounded monitoring, retry backoff,
+  deletion/background races, trust cancellation, fleet classification, and search.
+- 2026-09-05 final simulator run: iPhone 17 Pro and iPad Air 11-inch (M3),
+  23/23 passed on each, using iOS 26.3 simulator runtime.
+- Card-rendering fixtures cover 343-point phone width, 420-point tablet cards,
+  light/dark appearance, and accessibility Dynamic Type. These do not replace
+  device-level interaction, VoiceOver, rotation, or Split View checks below.
 - Local SSH integration: in-process Citadel test host validates password,
   imported Ed25519 key, host-key callback, stdout/stderr plus exit status, PTY
   Unicode input, and PTY resize on both simulator form factors.
@@ -41,6 +48,13 @@
 
 ## Adaptive UI and accessibility
 
+- [ ] Verify dashboard and machine search, group/tag/monitoring filters, sorting,
+  and clear-filter actions, including an empty result.
+- [ ] Switch tabs during foreground monitoring; collection continues and does
+  not exceed three concurrent hosts. Manual refresh bypasses retry backoff.
+- [ ] Pull-to-refresh stays active until the requested batch completes.
+- [ ] Delete a queued/running host and background/foreground during collection;
+  stale results never restore deleted state or replace a new request.
 - [ ] iPhone portrait and landscape, including the smallest supported compact
   width used by the test fleet.
 - [ ] iPad portrait/landscape, one-third and half Split View, and Stage Manager.

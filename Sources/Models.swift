@@ -178,39 +178,63 @@ enum ServerBrowserSort: String, CaseIterable, Identifiable {
     }
 }
 
+enum ServerMonitorFilter: String, CaseIterable, Identifiable {
+    case all, enabled, paused
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "全部机器"
+        case .enabled: "已启用监控"
+        case .paused: "已暂停监控"
+        }
+    }
+}
+
 /// Shared, metadata-only browsing. Filtering never changes monitoring ownership.
 struct ServerBrowserQuery {
     var search = ""
     var group = ""
     var tag = ""
     var sort: ServerBrowserSort = .name
+    var monitoring: ServerMonitorFilter = .all
 
     var hasFilters: Bool {
-        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !group.isEmpty || !tag.isEmpty
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !group.isEmpty || !tag.isEmpty || monitoring != .all
     }
 
     func apply(to servers: [ServerRecord]) -> [ServerRecord] {
-        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let terms = search.split(whereSeparator: \.isWhitespace).map(String.init)
         return servers.filter { server in
-            (group.isEmpty || server.groupName == group) &&
-            (tag.isEmpty || server.tags.contains(tag)) &&
-            (term.isEmpty || [server.displayName, server.host, server.groupName, server.tagsText]
-                .contains { $0.localizedCaseInsensitiveContains(term) })
+            guard (group.isEmpty || server.groupName == group),
+                  (tag.isEmpty || server.tags.contains(tag)),
+                  (monitoring == .all || server.enableDashboardMonitor == (monitoring == .enabled)) else {
+                return false
+            }
+            guard !terms.isEmpty else { return true }
+            let fields = [server.displayName, server.host, server.username, server.groupName, server.tagsText, server.notes]
+            return terms.allSatisfy { term in
+                fields.contains { $0.localizedCaseInsensitiveContains(term) }
+            }
+        }.map { server in
+            // Read SwiftData-backed sort keys once, not on every comparison.
+            (server: server, name: server.displayName, group: server.groupName,
+             createdAt: server.createdAt, id: server.id.uuidString)
         }.sorted { lhs, rhs in
             if sort == .newest, lhs.createdAt != rhs.createdAt {
                 return lhs.createdAt > rhs.createdAt
             }
             if sort == .group {
-                let groupOrder = lhs.groupName.localizedStandardCompare(rhs.groupName)
+                let groupOrder = lhs.group.localizedStandardCompare(rhs.group)
                 if groupOrder != .orderedSame { return groupOrder == .orderedAscending }
             }
-            let nameOrder = lhs.displayName.localizedStandardCompare(rhs.displayName)
+            let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
             if nameOrder != .orderedSame {
                 return nameOrder == (sort == .nameDescending ? .orderedDescending : .orderedAscending)
             }
             // Identical names retain a deterministic position across refreshes.
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
+            return lhs.id < rhs.id
+        }.map(\.server)
     }
 }
 

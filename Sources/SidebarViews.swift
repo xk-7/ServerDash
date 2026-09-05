@@ -104,6 +104,7 @@ struct ServerBrowserControls: View {
     @Binding var group: String
     @Binding var tag: String
     @Binding var sortRawValue: String
+    @Binding var monitoringRawValue: String
 
     private var groups: [String] {
         Set(servers.map(\.groupName).filter { !$0.isEmpty }).sorted {
@@ -120,7 +121,7 @@ struct ServerBrowserControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             HStack(spacing: AppleDesign.Spacing.sm) {
-                AppleSearchField(prompt: "搜索服务器、地址或标签", text: $search)
+                AppleSearchField(prompt: "搜索名称、地址、标签或备注（空格组合）", text: $search)
                     .frame(maxWidth: .infinity)
                 Menu {
                     Picker("分组", selection: $group) {
@@ -134,6 +135,15 @@ struct ServerBrowserControls: View {
                 .frame(maxWidth: 150)
                 .help(group.isEmpty ? "按分组筛选服务器" : group)
                 Menu {
+                    Picker("监控范围", selection: $monitoringRawValue) {
+                        ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                } label: {
+                    Label((ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all).title,
+                          systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .help("按监控开关筛选；不改变采集设置")
+                Menu {
                     Picker("排序", selection: $sortRawValue) {
                         ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) }
                     }
@@ -144,7 +154,7 @@ struct ServerBrowserControls: View {
                 .help("排序：\((ServerBrowserSort(rawValue: sortRawValue) ?? .name).title)")
                 .accessibilityLabel("服务器排序")
             }
-            if !tags.isEmpty || !tag.isEmpty || !group.isEmpty {
+            if !tags.isEmpty || !tag.isEmpty || !group.isEmpty || !search.isEmpty || monitoringRawValue != "all" {
                 HStack(spacing: AppleDesign.Spacing.sm) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: AppleDesign.Spacing.xs) {
@@ -153,10 +163,10 @@ struct ServerBrowserControls: View {
                         }
                         .padding(.vertical, AppleDesign.Spacing.xxs)
                     }
-                    if !tag.isEmpty || !group.isEmpty {
-                        Button("重置") { group = ""; tag = "" }
+                    if !tag.isEmpty || !group.isEmpty || !search.isEmpty || monitoringRawValue != "all" {
+                        Button("重置") { group = ""; tag = ""; search = ""; monitoringRawValue = "all" }
                             .buttonStyle(.borderless)
-                            .help("清除分组和标签筛选")
+                            .help("清除全部筛选")
                     }
                 }
             }
@@ -207,6 +217,7 @@ struct MachineManagementView: View {
     @SceneStorage("machines.filter.group") private var selectedGroup = ""
     @SceneStorage("machines.filter.tag") private var selectedTag = ""
     @SceneStorage("machines.sort") private var sortRawValue = ServerBrowserSort.name.rawValue
+    @SceneStorage("machines.filter.monitoring") private var monitoringRawValue = ServerMonitorFilter.all.rawValue
 
     let servers: [ServerRecord]
     @Binding var searchText: String
@@ -218,10 +229,9 @@ struct MachineManagementView: View {
 
     private var query: ServerBrowserQuery {
         ServerBrowserQuery(search: searchText, group: selectedGroup, tag: selectedTag,
-                           sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name)
+                           sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name,
+                           monitoring: ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all)
     }
-
-    private var visibleServers: [ServerRecord] { query.apply(to: servers) }
 
     private var viewMode: MachineViewMode {
         MachineViewMode(rawValue: viewModeRawValue) ?? .grid
@@ -254,6 +264,7 @@ struct MachineManagementView: View {
     }
 
     var body: some View {
+        let visibleServers = query.apply(to: servers)
         VStack(spacing: 0) {
             VStack(spacing: AppleDesign.Spacing.md) {
                 AppleWorkspaceHeader(
@@ -281,7 +292,7 @@ struct MachineManagementView: View {
                 }
                 ServerBrowserControls(
                     servers: servers, search: $searchText, group: $selectedGroup,
-                    tag: $selectedTag, sortRawValue: $sortRawValue
+                    tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
                 )
             }
             .padding(AppleDesign.Spacing.lg)
@@ -349,6 +360,7 @@ struct MachineManagementView: View {
         searchText = ""
         selectedGroup = ""
         selectedTag = ""
+        monitoringRawValue = ServerMonitorFilter.all.rawValue
     }
 
     private func machineButton(_ server: ServerRecord) -> some View {

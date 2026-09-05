@@ -74,6 +74,7 @@
 		CC7674E94FF258B0698E192F /* RemoteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74225E5B629E05722E511CB /* RemoteConnection.swift */; };
 		CC8C2D7C57F4D1CE973DDD3E /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7B9A7128821971D27B4E3F /* Persistence.swift */; };
 		CF6813CD37ACDC631AAB05A6 /* MobileMachinesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE60D4240E4D237FB043D36 /* MobileMachinesView.swift */; };
+		D22602BBCE11D41A341CCAEA /* MobileMonitoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF28CDCD49A1BB59CBED9C36 /* MobileMonitoringTests.swift */; };
 		D5753998C729737254C87A77 /* CitadelAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC4699A6676D0A98E30AA649 /* CitadelAdapterTests.swift */; };
 		D99D7A6BA127C07D541E62E6 /* PortForwarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DFF908A3A8D318995EC034 /* PortForwarding.swift */; };
 		D9C13650C00BBACB6154146B /* TerminalAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */; };
@@ -173,6 +174,7 @@
 		EB900E71916CCEF6D7433EF9 /* swift-nio-ssh */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "swift-nio-ssh"; path = "Vendor/swift-nio-ssh"; sourceTree = SOURCE_ROOT; };
 		EDB4D429C12E8558788B4533 /* DisplayFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayFormat.swift; sourceTree = "<group>"; };
 		EEB9BA1FAC400EDD1F7E4F8B /* OpenSSHRemoteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSSHRemoteConnection.swift; sourceTree = "<group>"; };
+		EF28CDCD49A1BB59CBED9C36 /* MobileMonitoringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileMonitoringTests.swift; sourceTree = "<group>"; };
 		F74225E5B629E05722E511CB /* RemoteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnection.swift; sourceTree = "<group>"; };
 		FCE60D4240E4D237FB043D36 /* MobileMachinesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileMachinesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -258,6 +260,7 @@
 			children = (
 				AC4699A6676D0A98E30AA649 /* CitadelAdapterTests.swift */,
 				029595E88FA8270DB9B567A7 /* MobileFoundationTests.swift */,
+				EF28CDCD49A1BB59CBED9C36 /* MobileMonitoringTests.swift */,
 				450F63708D3343F645EA1658 /* MobileSSHIntegrationTests.swift */,
 				ACBFF726785965F2AE20CB92 /* MobileTrustLifecycleTests.swift */,
 				788A40AAE53965A03CA17693 /* RemoteConnectionContractTests.swift */,
@@ -529,6 +532,7 @@
 			files = (
 				D5753998C729737254C87A77 /* CitadelAdapterTests.swift in Sources */,
 				96F2EF85FAFBE1A40421CB3B /* MobileFoundationTests.swift in Sources */,
+				D22602BBCE11D41A341CCAEA /* MobileMonitoringTests.swift in Sources */,
 				CC3A70F8103703C520FCB637 /* MobileSSHIntegrationTests.swift in Sources */,
 				858DD08AB44FFD6239827F1F /* MobileTrustLifecycleTests.swift in Sources */,
 				102FAC76A74E85319F8D9E3D /* RemoteConnectionContractTests.swift in Sources */,
@@ -609,6 +613,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -845,6 +850,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

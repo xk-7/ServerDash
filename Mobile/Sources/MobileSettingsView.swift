@@ -6,6 +6,7 @@ struct MobileSettingsView: View {
     @AppStorage("disableLocationLookup") private var disableLocationLookup = true
     @AppStorage("confirmHostFingerprint") private var confirmHostFingerprint = true
     @AppStorage("sshConnectTimeout") private var connectTimeout = 8.0
+    @AppStorage("mobileRefreshInterval") private var refreshInterval = 15
 
     var body: some View {
         Form {
@@ -16,6 +17,18 @@ struct MobileSettingsView: View {
                             .tag(appearance.rawValue)
                     }
                 }
+            }
+
+            Section("监控") {
+                Picker("自动刷新", selection: $refreshInterval) {
+                    Text("手动刷新").tag(0)
+                    ForEach([5, 15, 30, 60], id: \.self) { seconds in
+                        Text("每轮完成后 \(seconds) 秒").tag(seconds)
+                    }
+                }
+                Text("前台统一刷新，最多同时采集 3 台机器。连接失败后逐步延长重试间隔，手动刷新可立即重试。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("SSH 安全") {
@@ -35,9 +48,12 @@ struct MobileSettingsView: View {
             }
 
             Section("隐私") {
-                Toggle("隐藏诊断中的 IP", isOn: $hideIPInformation)
+                Toggle("隐藏机器概览中的 IP", isOn: $hideIPInformation)
                 Toggle("禁用远程位置查询", isOn: $disableLocationLookup)
                 Text("服务器配置、历史和凭据不会通过 iCloud 同步。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("地址隐藏适用于仪表盘、机器列表与连接详情；编辑表单和主机信任核对仍显示完整地址。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

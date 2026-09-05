@@ -7,6 +7,7 @@ struct DashboardOverviewView: View {
     @SceneStorage("dashboard.filter.group") private var selectedGroup = ""
     @SceneStorage("dashboard.filter.tag") private var selectedTag = ""
     @SceneStorage("dashboard.sort") private var sortRawValue = ServerBrowserSort.name.rawValue
+    @SceneStorage("dashboard.filter.monitoring") private var monitoringRawValue = ServerMonitorFilter.all.rawValue
 
     let servers: [ServerRecord]
     @Binding var scrollAnchor: UUID?
@@ -16,12 +17,12 @@ struct DashboardOverviewView: View {
 
     private var query: ServerBrowserQuery {
         ServerBrowserQuery(search: searchText, group: selectedGroup, tag: selectedTag,
-                           sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name)
+                           sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name,
+                           monitoring: ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all)
     }
 
-    private var visibleServers: [ServerRecord] { query.apply(to: servers) }
-
     var body: some View {
+        let visibleServers = query.apply(to: servers)
         ScrollView {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
                 AppleWorkspaceHeader(
@@ -49,7 +50,7 @@ struct DashboardOverviewView: View {
 
                     ServerBrowserControls(
                         servers: servers, search: $searchText, group: $selectedGroup,
-                        tag: $selectedTag, sortRawValue: $sortRawValue
+                        tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
                     )
 
                     HStack {
@@ -101,6 +102,7 @@ struct DashboardOverviewView: View {
                                 searchText = ""
                                 selectedGroup = ""
                                 selectedTag = ""
+                                monitoringRawValue = ServerMonitorFilter.all.rawValue
                             }
                         }
                         .frame(maxWidth: .infinity, minHeight: 240)

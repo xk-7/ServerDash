@@ -72,6 +72,28 @@ final class MobileTrustLifecycleTests: XCTestCase {
         XCTAssertEqual(controller.status, .interrupted)
     }
 
+    func testCancellingTrustRequestDismissesItAndAdvancesQueue() async throws {
+        try await withTemporaryKnownHosts { _ in
+            let broker = MobileHostTrustBroker()
+            let first = Task { try await broker.evaluate(Self.presentation(blob: "first")) }
+            for _ in 0..<100 where broker.pending == nil { await Task.yield() }
+            let secondPresentation = Self.presentation(blob: "second")
+            let second = Task { try await broker.evaluate(secondPresentation) }
+            await Task.yield()
+            first.cancel()
+            do {
+                _ = try await first.value
+                XCTFail("A cancelled trust request must not continue connecting")
+            } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+            for _ in 0..<100 where broker.pending?.presentation != secondPresentation { await Task.yield() }
+            XCTAssertEqual(broker.pending?.presentation, secondPresentation)
+            broker.respond(.reject)
+            let decision = try await second.value
+            XCTAssertEqual(decision, .reject)
+            XCTAssertNil(broker.pending)
+        }
+    }
+
     private func withTemporaryKnownHosts(
         _ operation: (URL) async throws -> Void
     ) async throws {
