@@ -13,6 +13,8 @@ struct MobileMachinesView: View {
     @AppStorage("hideIPInformation") private var hideIPInformation = false
     @State private var editingServer: ServerRecord?
     @State private var showingNewServer = false
+    @State private var showingSessionImport = false
+    @State private var showingSessionExport = false
     @State private var pendingDelete: ServerRecord?
     @State private var deletionError: String?
 
@@ -56,6 +58,11 @@ struct MobileMachinesView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
+                        if server.credentialReadiness == .needsConfiguration {
+                            Label("凭据待配置", systemImage: "exclamationmark.key.fill")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.orange)
+                        }
                     }
                     .padding(.vertical, 5)
                 }
@@ -68,9 +75,22 @@ struct MobileMachinesView: View {
         .searchable(text: $search, prompt: "名称、地址、标签或备注")
         .navigationTitle("机器")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    Button("导入会话", systemImage: "square.and.arrow.down") {
+                        showingSessionImport = true
+                    }
+                    Button("导出会话", systemImage: "square.and.arrow.up") {
+                        showingSessionExport = true
+                    }
+                    .disabled(servers.isEmpty)
+                } label: {
+                    Label("会话迁移", systemImage: "arrow.left.arrow.right")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
                 Button { showingNewServer = true } label: {
                     Label("添加服务器", systemImage: "plus")
+                        .frame(minWidth: 44, minHeight: 44)
                 }
             }
         }
@@ -79,6 +99,12 @@ struct MobileMachinesView: View {
         }
         .sheet(item: $editingServer) { server in
             MobileServerEditor(server: server)
+        }
+        .sheet(isPresented: $showingSessionImport) {
+            SessionImportWizard(existingServers: servers)
+        }
+        .sheet(isPresented: $showingSessionExport) {
+            SessionExportWizard(servers: servers)
         }
         .confirmationDialog("删除这台服务器？", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }
@@ -99,8 +125,12 @@ struct MobileMachinesView: View {
                     Label("还没有服务器", systemImage: "server.rack")
                 } description: { Text("添加服务器后即可使用监控、终端与 SFTP。") }
                 actions: {
-                    Button("添加服务器", systemImage: "plus") { showingNewServer = true }
-                        .buttonStyle(.borderedProminent).frame(minHeight: 44)
+                    HStack {
+                        Button("导入会话", systemImage: "square.and.arrow.down") { showingSessionImport = true }
+                            .frame(minHeight: 44)
+                        Button("添加服务器", systemImage: "plus") { showingNewServer = true }
+                            .buttonStyle(.borderedProminent).frame(minHeight: 44)
+                    }
                 }
             } else if filtered.isEmpty {
                 ContentUnavailableView {
@@ -171,6 +201,17 @@ struct MobileServerDetailView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .disabled(server.credentialReadiness == .needsConfiguration)
+
+                if server.credentialReadiness == .needsConfiguration {
+                    Label("连接凭据尚未配置。请编辑服务器，填写密码或选择已导入密钥的共享身份。",
+                          systemImage: "exclamationmark.key.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                }
 
                 GroupBox("连接") {
                     VStack(spacing: 12) {

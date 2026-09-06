@@ -49,6 +49,38 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 - 移动端仅开放密码与导入的 OpenSSH Ed25519/RSA 私钥；凭据使用“仅本设备可访问”的 Keychain 等级。外部密钥路径、SSH Agent、SSH Config、代理、跳板机与端口转发均隐藏。
 - 本地 NIOSSH 0.3.6 已回移 Apple `31cdc3c` 修复，并为 [GHSA-998x-vgvp-xwpc](https://github.com/apple/swift-nio-ssh/security/advisories/GHSA-998x-vgvp-xwpc) 增加回归测试；安全门失败时移动端真实 SSH 不具备交付条件。
 
+### 会话导入与导出
+
+- 三端机器管理页可以批量导入 XShell、SecureCRT、MobaXterm、FinalShell、XTerminal、PuTTY、ServerDash JSON 与 OpenSSH Config。
+- macOS 支持选择文件、目录或 ZIP，并可由用户主动检查已知的 SecureCRT、FinalShell、PuTTY 与 OpenSSH 配置位置；iPhone/iPad 通过系统“文件”选择器导入。
+- 导入步骤：
+  1. 在主机管理面板点击**「导入」**。
+  2. 选择之前使用的终端工具或“自动识别”。
+  3. 浏览并选择对应工具的配置文件、导出文件、目录或 ZIP。
+  4. 预览将要导入的主机列表，确认无误后点击**「确定」**。
+- 重复会话默认跳过且不会覆盖已有配置，也可以逐项选择“导入副本”。
+- 明文密码导入默认关闭；明确开启后只保存到本设备 Keychain。XShell、MobaXterm、FinalShell 等客户端的专有加密密码不会被破解。
+- 可导出 ServerDash 通用 JSON、OpenSSH Config、XShell、MobaXterm、XTerminal 与 PuTTY 文件。SecureCRT 和 FinalShell 原生导出在完成目标客户端实机验证前显示为“待验证”。
+- 所有导出均排除密码、私钥正文、Passphrase、可信主机、终端/监控历史、代理、跳板机与端口转发；目标客户端中需要重新配置相关凭据。
+
+| 客户端 / 格式 | 导入 | 导出 | 当前验证边界 |
+| --- | --- | --- | --- |
+| XShell 8 | `.xsh`、目录、ZIP | 无密码 `.xsh` ZIP | 已覆盖脱敏样本和 ServerDash 往返；真实 XShell 回导待执行 |
+| SecureCRT 9.6+ | XML、CSV/文本向导、`Config/Sessions/*.ini` | 禁用 | 已覆盖脱敏样本；原生导出继续门控 |
+| MobaXterm | `MobaXterm.ini`、`.mxtsessions` | `.mxtsessions` | 已覆盖脱敏样本和 ServerDash 往返；真实 MobaXterm 回导待执行 |
+| FinalShell 3.9–4.6 | `conn/*.json`、目录、ZIP | 禁用 | 已覆盖脱敏样本；原生导出继续门控 |
+| XTerminal | 官方 JSON 与文本格式 | JSON | 已覆盖官方语法样本和 ServerDash 往返；真实 XTerminal 回导待执行 |
+| PuTTY 0.84 | UTF-16LE `.reg`、Unix 会话目录 | UTF-16LE `.reg` | 已覆盖脱敏样本和 ServerDash 往返；真实 PuTTY 回导待执行 |
+| ServerDash | `com.serverdash.sessions` JSON v1 | JSON v1 | 自动化往返通过 |
+| OpenSSH | 具体 `Host` 块 | SSH config | 自动化往返通过；`Include`、`Match`、代理、脚本和转发只报告，不复刻行为 |
+
+导出步骤：
+
+1. 在机器管理页点击**「导出」**。
+2. 选择全部主机、指定分组或逐项选择主机。
+3. 选择目标客户端；未完成实机验证的格式不可选择。
+4. 选择保存位置，在目标客户端导入文件并重新配置凭据。
+
 ### 多会话终端
 
 - 基于仓库内固定的 SwiftTerm 1.11.2；macOS 使用 OpenSSH PTY，iPhone 与 iPad 使用 Citadel PTY。
@@ -79,6 +111,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 | 多远程终端 | 支持 | 支持；进入后台后中断 |
 | SFTP 浏览/上传/下载/重命名/移动/删除 | 支持 | 支持；通过“文件”导入导出 |
 | 密码与导入私钥认证 | 支持 | 支持 |
+| 多客户端会话导入/导出 | 支持文件、目录、ZIP 与主动本机发现 | 支持“文件”导入/导出 |
 | 外部私钥路径 / SSH Agent / SSH Config | 支持 | 不支持 |
 | 跳板机与 SOCKS5 / HTTP CONNECT 代理 | 支持 | 不支持 |
 | Local / Remote / Dynamic 转发 | 支持 | 不支持 |
@@ -116,11 +149,11 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 - Xcode 26
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-项目使用仓库内的 `Vendor/SwiftTerm`、`Vendor/Citadel` 与 `Vendor/swift-nio-ssh` 本地 package；其传递依赖由 `Package.resolved` 固定。
+项目使用仓库内的 `Vendor/SwiftTerm`、`Vendor/Citadel`、`Vendor/swift-nio-ssh` 与 `Vendor/ZIPFoundation` 本地 package；其传递依赖由 `Package.resolved` 固定。
 
 ## 开发与验证状态
 
-通用 `ServerDashMobile` Target 已通过 iPhone 与 iPad Simulator 构建。移动端专项套件现有 23 项测试，覆盖连接协议、本地 Citadel 密码/密钥/PTY 集成、主机信任及取消、监控并发与退避、后台恢复和删除清理、跨字段筛选、状态汇总、卡片截图、平台能力门控和凭据脱敏；Vendored NIOSSH 另有两项畸形 ECDSA 签名安全回归测试。实体设备 SSH/SFTP 与辅助功能检查尚未执行，详见[移动端实机检查清单](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md)。
+通用 `ServerDashMobile` Target 已通过 iPhone 与 iPad Simulator 构建。移动端专项套件现有 65 项测试，其中 41 项为三端共用的会话迁移测试，覆盖格式映射、畸形输入处理、重复识别、跳过原因、ZIP 路径穿越与符号链接防护、敏感信息排除、Keychain 授权、取消与事务回滚；其余用例覆盖连接协议、本地 Citadel 密码/密钥/PTY 集成、可操作的认证错误映射、主机信任及取消、监控并发与退避、后台恢复和删除清理、跨字段筛选、状态汇总、卡片截图、平台能力门控和凭据脱敏。Vendored NIOSSH 另有两项畸形 ECDSA 签名安全回归测试。实体设备 SSH/SFTP 与辅助功能检查尚未执行，详见[移动端实机检查清单](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md)。
 
 已有 macOS S11 专业 SSH 路线与隧道保持可用，并继续使用系统 OpenSSH。生产多跳、认证代理、Remote Forward、硬件密钥和长时间稳定性仍需隔离环境或实机验证。
 
@@ -213,6 +246,7 @@ Resources/TerminalThemes/   本地终端主题与许可证说明
 Vendor/SwiftTerm/           固定并扩展的 SwiftTerm 1.11.2
 Vendor/Citadel/             本地固定 Citadel 0.12.1
 Vendor/swift-nio-ssh/       本地固定 NIOSSH 0.3.6 与安全补丁
+Vendor/ZIPFoundation/       固定 ZIPFoundation 0.9.20
 project.yml                 XcodeGen 工程定义
 ```
 

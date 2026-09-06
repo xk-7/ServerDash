@@ -95,6 +95,8 @@ struct ContentView: View {
 
     @State private var searchText = ""
     @State private var showingNewServer = false
+    @State private var showingSessionImport = false
+    @State private var showingSessionExport = false
     @State private var editingServer: ServerRecord?
     @State private var serverPendingDeletion: ServerRecord?
     @State private var route: MainContentRoute = .section(.dashboard)
@@ -197,6 +199,12 @@ struct ContentView: View {
         }
         .sheet(item: $editingServer) { server in
             ServerEditorView(server: server)
+        }
+        .sheet(isPresented: $showingSessionImport) {
+            SessionImportWizard(existingServers: servers)
+        }
+        .sheet(isPresented: $showingSessionExport) {
+            SessionExportWizard(servers: servers)
         }
         .confirmationDialog(
             "删除 \(serverPendingDeletion?.name ?? "服务器")？",
@@ -349,6 +357,8 @@ struct ContentView: View {
                         )
                     },
                     onAdd: { showingNewServer = true },
+                    onImport: { showingSessionImport = true },
+                    onExport: { showingSessionExport = true },
                     onEdit: { editingServer = $0 },
                     onDelete: { serverPendingDeletion = $0 }
                 )

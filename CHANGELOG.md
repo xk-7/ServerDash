@@ -4,7 +4,22 @@
 
 ## 未发布
 
-暂无未发布变更。
+### Added
+
+- macOS、iPhone 与 iPad 的机器管理页新增统一会话导入/导出向导，可预览并批量导入 XShell、SecureCRT、MobaXterm、FinalShell、XTerminal、PuTTY、ServerDash JSON 和 OpenSSH Config。
+- 新增无凭据的 ServerDash JSON、OpenSSH Config、XShell、MobaXterm、XTerminal 与 PuTTY 导出；SecureCRT 和 FinalShell 原生导出保留真实客户端验证门控。
+- 增加重复会话默认跳过、按项导入副本、凭据待配置状态、明文密码显式授权及 Keychain 补偿回滚。
+- 固定 ZIPFoundation 0.9.20，并对 ZIP 文件执行大小、项目数、路径穿越与符号链接检查。
+
+### Security
+
+- 导出文件不包含密码、私钥正文、Passphrase、可信主机、终端/监控历史、代理、跳板机或端口转发；专有客户端加密密码不会被解密。
+
+### Verification
+
+- iPhone 17 Pro 与 iPad Pro 13-inch (M5) 模拟器的移动端全量套件各 65/65 项通过，其中 41 项为共用会话迁移、凭据、取消与归档安全测试。
+- macOS 全量套件 190 项中 189 项通过；唯一失败为既有进程取消用例在并发负载下超过 1 秒时序门限，该用例单独复跑通过。实体设备及六种第三方客户端的实际回导冒烟仍待执行；SecureCRT 与 FinalShell 原生导出因此继续保持禁用。
+- macOS Release 与通用 iPhone/iPad Simulator Release 构建通过；新增代码无编译警告，构建输出仅保留固定版本 SwiftTerm、Citadel 与 NIOSSH 的既有警告。
 
 ## 1.0.0 - 2026-09-05
 

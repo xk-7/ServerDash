@@ -27,6 +27,14 @@ Patch provenance and verification commands are recorded in
 SwiftTerm 1.11.2 remains vendored under its existing license and notices in
 `Vendor/SwiftTerm`.
 
+## Session archive dependency
+
+ServerDash vendors ZIPFoundation 0.9.20, upstream commit
+`22787ffb59de99e5dc1fbfe80b19c97a904ad48d`, for bounded, local ZIP session
+import and export on macOS, iPhone, and iPad. ZIPFoundation is distributed
+under the MIT License; the complete license is preserved at
+`Vendor/ZIPFoundation/LICENSE`.
+
 ## Apple-native design guidance
 
 ServerDash's Apple-native design rules were adapted from

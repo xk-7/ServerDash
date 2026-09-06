@@ -15,6 +15,8 @@ packages:
     path: Vendor/Citadel
   NIOSSH:
     path: Vendor/swift-nio-ssh
+  ZIPFoundation:
+    path: Vendor/ZIPFoundation
 
 targets:
   ServerDash:
@@ -26,6 +28,7 @@ targets:
         buildPhase: resources
     dependencies:
       - package: SwiftTerm
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app
@@ -50,6 +53,7 @@ targets:
       - path: Tests
     dependencies:
       - target: ServerDash
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.tests
@@ -75,12 +79,16 @@ targets:
       - path: Sources/MonitoringHistory.swift
       - path: Sources/MonitorLayout.swift
       - path: Sources/RemoteConnection.swift
+      - path: Sources/SessionTransfer.swift
+      - path: Sources/SessionTransferAdapters.swift
+      - path: Sources/SessionTransferViews.swift
       - path: Resources
         buildPhase: resources
     dependencies:
       - package: SwiftTerm
       - package: Citadel
       - package: NIOSSH
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.ios
@@ -106,8 +114,10 @@ targets:
     deploymentTarget: "18.0"
     sources:
       - path: Mobile/Tests
+      - path: Tests/SessionTransferTests.swift
     dependencies:
       - target: ServerDashMobile
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.ios.tests

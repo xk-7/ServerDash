@@ -49,6 +49,38 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 - Mobile authentication is limited to passwords and imported OpenSSH Ed25519/RSA private keys. Secrets use this-device-only Keychain accessibility; external key paths, SSH Agent, SSH Config, proxies, jump hosts, and forwarding are hidden.
 - The local NIOSSH 0.3.6 source includes Apple's `31cdc3c` fix and regression tests for [GHSA-998x-vgvp-xwpc](https://github.com/apple/swift-nio-ssh/security/advisories/GHSA-998x-vgvp-xwpc); mobile SSH is not release-ready if that security gate fails.
 
+### Session Import and Export
+
+- The Machines screen on macOS, iPhone, and iPad imports XShell, SecureCRT, MobaXterm, FinalShell, XTerminal, PuTTY, ServerDash JSON, and OpenSSH Config sessions.
+- On macOS, choose a file, directory, or ZIP, or explicitly inspect known SecureCRT, FinalShell, PuTTY, and OpenSSH locations. iPhone and iPad use the system Files picker.
+- Import flow:
+  1. Click **Import** in Machines.
+  2. Choose the previous terminal client or automatic detection.
+  3. Select its configuration/export file, directory, or ZIP.
+  4. Review the hosts and click **Confirm**.
+- Exact host/port/username duplicates are skipped by default and never overwrite an existing profile; individual rows can be imported as copies.
+- Plaintext-password import is off by default and, when explicitly enabled, writes only to this device's Keychain. Proprietary encrypted client passwords are never decrypted.
+- Export targets are ServerDash JSON, OpenSSH Config, XShell, MobaXterm, XTerminal, and PuTTY. Native SecureCRT and FinalShell export remains marked as awaiting real-client validation.
+- Every export excludes passwords, private-key bodies, passphrases, trusted hosts, terminal/monitoring history, proxies, jump hosts, and forwarding rules.
+
+| Client / format | Import | Export | Current validation boundary |
+| --- | --- | --- | --- |
+| XShell 8 | `.xsh`, directory, ZIP | Password-free `.xsh` ZIP | Sanitized fixture and ServerDash round trip; real XShell import pending |
+| SecureCRT 9.6+ | XML, CSV/text wizard, `Config/Sessions/*.ini` | Disabled | Sanitized fixture covered; native export remains gated |
+| MobaXterm | `MobaXterm.ini`, `.mxtsessions` | `.mxtsessions` | Sanitized fixture and ServerDash round trip; real MobaXterm import pending |
+| FinalShell 3.9–4.6 | `conn/*.json`, directory, ZIP | Disabled | Sanitized fixture covered; native export remains gated |
+| XTerminal | Official JSON and text formats | JSON | Official syntax fixtures and ServerDash round trip; real XTerminal import pending |
+| PuTTY 0.84 | UTF-16LE `.reg`, Unix session directory | UTF-16LE `.reg` | Sanitized fixture and ServerDash round trip; real PuTTY import pending |
+| ServerDash | `com.serverdash.sessions` JSON v1 | JSON v1 | Automated round trip |
+| OpenSSH | Concrete `Host` blocks | SSH config | Automated round trip; `Include`, `Match`, proxy, script, and forwarding behavior is reported but not reproduced |
+
+Export flow:
+
+1. Click **Export** in Machines.
+2. Choose all hosts, one group, or individual hosts.
+3. Choose the target client; gated formats cannot be selected.
+4. Save the generated file, import it in the target client, and configure credentials there.
+
 ### Persistent Multi-Session Terminal
 
 - Built on the repository-pinned SwiftTerm 1.11.2 package, with OpenSSH PTY on macOS and Citadel PTY on iPhone and iPad.
@@ -79,6 +111,7 @@ Primary targets are Ubuntu LTS and Debian Stable. AlmaLinux and Rocky Linux are 
 | Multiple remote terminals | Yes | Yes; interrupted in background |
 | SFTP browse/upload/download/rename/move/delete | Yes | Yes; Files import/export |
 | Password and imported private-key authentication | Yes | Yes |
+| Multi-client session import/export | Files, directories, ZIP, and explicit local discovery | Files import/export |
 | External private-key path / SSH Agent / SSH Config | Yes | No |
 | Jump hosts and SOCKS5 / HTTP CONNECT proxies | Yes | No |
 | Local, remote, and dynamic forwarding | Yes | No |
@@ -116,11 +149,11 @@ The [SwiftServer product page](https://swiftserver.app/) and [official documenta
 - Xcode 26
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
-The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, and `Vendor/swift-nio-ssh` packages. SwiftPM still resolves their pinned transitive dependencies from `Package.resolved`.
+The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, `Vendor/swift-nio-ssh`, and `Vendor/ZIPFoundation` packages. SwiftPM still resolves their pinned transitive dependencies from `Package.resolved`.
 
 ## Development Status
 
-The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 24 tests covering connection contracts, local Citadel password/key/PTY integration, actionable authentication-error mapping, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
+The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 65 tests, including 41 shared session-migration cases for format mapping, malformed-input handling, duplicate detection, skipped-session reporting, ZIP traversal/symlink hardening, secret omission, Keychain authorization, cancellation, and rollback; the remaining tests cover connection contracts, local Citadel password/key/PTY integration, actionable authentication-error mapping, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
 
 The existing macOS S11 professional SSH routes and tunnels remain available and continue to use system OpenSSH. Production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability still require isolated or real-device validation.
 
@@ -213,6 +246,7 @@ Resources/TerminalThemes/   Local terminal themes and licensing notes
 Vendor/SwiftTerm/           Pinned and extended SwiftTerm 1.11.2
 Vendor/Citadel/             Locally pinned Citadel 0.12.1
 Vendor/swift-nio-ssh/       Locally pinned NIOSSH 0.3.6 plus security backport
+Vendor/ZIPFoundation/       Pinned ZIPFoundation 0.9.20
 project.yml                 XcodeGen project definition
 ```
 

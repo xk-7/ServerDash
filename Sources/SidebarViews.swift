@@ -224,6 +224,8 @@ struct MachineManagementView: View {
     @Binding var scrollAnchor: UUID?
     let onSelect: (ServerRecord) -> Void
     let onAdd: () -> Void
+    let onImport: () -> Void
+    let onExport: () -> Void
     let onEdit: (ServerRecord) -> Void
     let onDelete: (ServerRecord) -> Void
 
@@ -270,6 +272,9 @@ struct MachineManagementView: View {
                 AppleWorkspaceHeader(
                     title: "机器", subtitle: "管理连接，随时进入你的服务器。", symbol: "server.rack"
                 ) {
+                    Button("导入", systemImage: "square.and.arrow.down", action: onImport)
+                    Button("导出", systemImage: "square.and.arrow.up", action: onExport)
+                        .disabled(servers.isEmpty)
                     Button("添加服务器", systemImage: "plus", action: onAdd)
                         .buttonStyle(.borderedProminent)
                 }
@@ -313,6 +318,7 @@ struct MachineManagementView: View {
                     if query.hasFilters {
                         Button("清除筛选") { clearFilters() }
                     } else {
+                        Button("导入会话", systemImage: "square.and.arrow.down", action: onImport)
                         Button("添加服务器", action: onAdd)
                             .buttonStyle(.borderedProminent)
                     }
@@ -435,6 +441,12 @@ private struct MachineGridCard: View {
                     .help(server.tags.joined(separator: " · "))
             }
 
+            if server.credentialReadiness == .needsConfiguration {
+                Label("凭据待配置", systemImage: "exclamationmark.key.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+            }
+
             Divider()
 
             HStack(spacing: AppleDesign.Spacing.sm) {
@@ -492,6 +504,12 @@ private struct MachineListRow: View {
                 .background(Color.appTrack)
                 .clipShape(Capsule())
                 .frame(width: 100)
+            if server.credentialReadiness == .needsConfiguration {
+                Label("待配置", systemImage: "key")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .fixedSize()
+            }
             MachineMetric(
                 title: "CPU",
                 value: runtime.renderState.hasSnapshot
