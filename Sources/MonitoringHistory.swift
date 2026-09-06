@@ -119,7 +119,7 @@ enum MonitoringGapReason: String, CaseIterable, Codable, Sendable {
             return .unknown
         }
         switch connectionError {
-        case .timeout:
+        case .timeout, .queueTimeout:
             return .timeout
         case .dnsFailed, .connectionRefused, .networkUnreachable:
             return .unreachable

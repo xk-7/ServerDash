@@ -88,6 +88,109 @@ final class ConnectionErrorClassificationTests: XCTestCase {
     }
 }
 
+final class SSHSupportAuthenticationTests: XCTestCase {
+    func testPasswordAuthenticationOverridesSSHConfigForCommandAndSFTP() throws {
+        let config = makeConfig(authentication: .password)
+
+        let command = try SSHSupport.directArguments(
+            for: config,
+            strictHostChecking: "yes"
+        )
+        let sftp = try SSHSupport.directArgumentsForSFTP(config: config)
+
+        for arguments in [command, sftp] {
+            XCTAssertTrue(arguments.contains("BatchMode=no"))
+            XCTAssertTrue(arguments.contains("PreferredAuthentications=password,keyboard-interactive"))
+            XCTAssertTrue(arguments.contains("PubkeyAuthentication=no"))
+            XCTAssertTrue(arguments.contains("PasswordAuthentication=yes"))
+            XCTAssertTrue(arguments.contains("KbdInteractiveAuthentication=yes"))
+        }
+    }
+
+    func testKeyThenPasswordIncludesKeyboardInteractiveFallback() throws {
+        let config = makeConfig(authentication: .keyThenPassword)
+
+        let arguments = try SSHSupport.directArguments(
+            for: config,
+            strictHostChecking: "yes"
+        )
+
+        XCTAssertTrue(arguments.contains("PreferredAuthentications=publickey,password,keyboard-interactive"))
+        XCTAssertTrue(arguments.contains("PasswordAuthentication=yes"))
+        XCTAssertTrue(arguments.contains("KbdInteractiveAuthentication=yes"))
+    }
+
+    func testPrivateKeyAuthenticationDoesNotFallBackToPasswordMethods() throws {
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Test",
+            host: "example.test",
+            port: 2_222,
+            username: "deploy",
+            authentication: .privateKey,
+            privateKeyPath: "/dev/null"
+        )
+
+        let command = try SSHSupport.directArguments(
+            for: config,
+            strictHostChecking: "yes"
+        )
+        let sftp = try SSHSupport.directArgumentsForSFTP(config: config)
+
+        for arguments in [command, sftp] {
+            XCTAssertTrue(arguments.contains("PreferredAuthentications=publickey"))
+            XCTAssertTrue(arguments.contains("PasswordAuthentication=no"))
+            XCTAssertTrue(arguments.contains("KbdInteractiveAuthentication=no"))
+        }
+    }
+
+    func testAskPassKeepsPasswordAndKeyPassphraseAccountsSeparate() throws {
+        let credentialID = UUID()
+        let keyID = UUID()
+        let passphraseAccount = KeychainService.passphraseAccount(for: keyID)
+        try KeychainService.savePassword("login-secret", for: credentialID)
+        try KeychainService.saveSecret("key-secret", account: passphraseAccount)
+        defer {
+            try? KeychainService.deletePassword(for: credentialID)
+            try? KeychainService.deleteSecret(account: passphraseAccount)
+        }
+        var config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: credentialID,
+            name: "Test",
+            host: "example.test",
+            port: 2_222,
+            username: "deploy",
+            authentication: .keyThenPassword,
+            privateKeyPath: ""
+        )
+        config.sshKeyID = keyID
+        config.hasPassphrase = true
+
+        let environment = SSHSupport.environment(for: config)
+
+        XCTAssertEqual(environment["SERVERDASH_PASSWORD_ACCOUNT"], credentialID.uuidString)
+        XCTAssertEqual(environment["SERVERDASH_PASSPHRASE_ACCOUNT"], passphraseAccount)
+        XCTAssertNil(environment["SERVERDASH_KEYCHAIN_ACCOUNT"])
+        XCTAssertFalse(environment["SSH_ASKPASS", default: ""].isEmpty)
+        XCTAssertEqual(environment["SSH_ASKPASS_REQUIRE"], "force")
+    }
+
+    private func makeConfig(authentication: AuthenticationMethod) -> ServerConnectionConfig {
+        ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Test",
+            host: "example.test",
+            port: 2_222,
+            username: "deploy",
+            authentication: authentication,
+            privateKeyPath: ""
+        )
+    }
+}
+
 final class DiagnosticRedactorTests: XCTestCase {
     func testRedactsSecretsAndIPByDefault() {
         let text = "password=super-secret host=203.0.113.10"
@@ -1767,7 +1870,7 @@ final class ConnectionLimiterTests: XCTestCase {
             try await limiter.acquire(serverID: nil)
             XCTFail("等待名额超时后不应成功")
         } catch {
-            XCTAssertEqual(error as? ConnectionError, .timeout)
+            XCTAssertEqual(error as? ConnectionError, .queueTimeout)
         }
 
         let waitingCount = await limiter.waitingCount()

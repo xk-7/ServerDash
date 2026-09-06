@@ -14,27 +14,33 @@ struct CitadelRemoteConnectionEngine: RemoteConnectionEngine {
         guard config.route.isDirect else {
             throw RemoteConnectionFailure.indirectRouteUnsupported
         }
-        guard !config.identityReferenceMissing,
-              !config.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !config.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let username = config.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !config.identityReferenceMissing, !host.isEmpty, !username.isEmpty else {
             throw RemoteConnectionFailure.missingCredential
         }
 
-        let authentication = try MobileSSHKeyCodec.authenticationFactory(for: config)
+        let authentication = try MobileSSHKeyCodec.authenticationFactory(
+            for: config,
+            username: username
+        )
         let validator = SSHHostKeyValidator.custom(
             CitadelHostKeyValidator(
-                host: config.host,
+                host: host,
                 port: config.port,
                 trustHandler: trustHandler
             )
         )
         var settings = SSHClientSettings(
-            host: config.host,
+            host: host,
             port: config.port,
             authenticationMethod: authentication.make,
             hostKeyValidator: validator
         )
         settings.connectTimeout = .seconds(Int64(max(5, config.connectTimeout.rounded(.up))))
+        settings.authenticationTimeout = .seconds(
+            Int64(max(60, config.connectTimeout.rounded(.up) + 30))
+        )
         settings.algorithms = authentication.algorithms
 
         do {
@@ -58,7 +64,25 @@ struct CitadelRemoteConnectionEngine: RemoteConnectionEngine {
         }
     }
 
-    private static func map(_ error: Error) -> RemoteConnectionFailure {
+    static func map(_ error: Error) -> RemoteConnectionFailure {
+        if error is AuthenticationTimeout {
+            return .authenticationTimedOut
+        }
+        if error is AuthenticationFailed {
+            return .authenticationFailed
+        }
+        if let clientError = error as? SSHClientError {
+            switch clientError {
+            case .unsupportedPasswordAuthentication:
+                return .passwordAuthenticationUnsupported
+            case .unsupportedPrivateKeyAuthentication,
+                 .unsupportedHostBasedAuthentication,
+                 .allAuthenticationOptionsFailed:
+                return .authenticationFailed
+            case .channelCreationFailed:
+                return .transport("无法建立 SSH 通道。")
+            }
+        }
         let message = error.localizedDescription
         let lowered = message.lowercased()
         if lowered.contains("timed out") || lowered.contains("timeout") {
@@ -89,8 +113,10 @@ enum MobileSSHKeyCodec {
     }
 
     fileprivate static func authenticationFactory(
-        for config: ServerConnectionConfig
+        for config: ServerConnectionConfig,
+        username: String? = nil
     ) throws -> MobileAuthenticationFactory {
+        let username = username ?? config.username.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = try KeychainService.password(for: config.credentialID)
         let key: ParsedPrivateKey? = try loadPrivateKey(for: config)
         let algorithms = key?.requiresRSARegistration == true ? rsaAlgorithms() : SSHAlgorithms()
@@ -101,13 +127,13 @@ enum MobileSSHKeyCodec {
                 throw RemoteConnectionFailure.missingCredential
             }
             return MobileAuthenticationFactory(
-                make: { .passwordBased(username: config.username, password: password) },
+                make: { .passwordBased(username: username, password: password) },
                 algorithms: algorithms
             )
         case .privateKey:
             guard let key else { throw RemoteConnectionFailure.missingCredential }
             return MobileAuthenticationFactory(
-                make: { key.authentication(username: config.username) },
+                make: { key.authentication(username: username) },
                 algorithms: algorithms
             )
         case .keyThenPassword:
@@ -117,7 +143,7 @@ enum MobileSSHKeyCodec {
             return MobileAuthenticationFactory(
                 make: {
                     let offers = MobileAuthenticationDelegate(
-                        username: config.username,
+                        username: username,
                         privateKey: key?.nioKey,
                         password: password
                     )
@@ -260,7 +286,7 @@ private final class MobileAuthenticationDelegate: NIOSSHClientUserAuthentication
                 return
             }
         }
-        nextChallengePromise.fail(RemoteConnectionFailure.missingCredential)
+        nextChallengePromise.fail(RemoteConnectionFailure.authenticationFailed)
     }
 }
 

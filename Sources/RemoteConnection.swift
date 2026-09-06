@@ -183,6 +183,9 @@ enum RemoteConnectionFailure: LocalizedError, Sendable, Equatable {
     case sessionClosed
     case outputLimitExceeded
     case timedOut
+    case authenticationTimedOut
+    case authenticationFailed
+    case passwordAuthenticationUnsupported
     case transport(String)
 
     var errorDescription: String? {
@@ -195,6 +198,9 @@ enum RemoteConnectionFailure: LocalizedError, Sendable, Equatable {
         case .sessionClosed: "SSH 会话已关闭。"
         case .outputLimitExceeded: "远程输出超过安全上限。"
         case .timedOut: "连接或命令执行超时。"
+        case .authenticationTimedOut: "网络已连接，但主机确认或身份认证超时。请重试并及时完成主机指纹确认。"
+        case .authenticationFailed: "服务器未接受当前用户名或凭据。请核对用户名、认证方式及服务器 SSH 策略。"
+        case .passwordAuthenticationUnsupported: "服务器未提供标准 SSH 密码认证；移动端暂不支持 keyboard-interactive/PAM 挑战。请启用 PasswordAuthentication 或使用私钥。"
         case .transport(let detail): detail.isEmpty ? "SSH 连接失败。" : detail
         }
     }

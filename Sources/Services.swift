@@ -77,10 +77,14 @@ enum KeychainService {
     }
 
     static func hasPassword(for credentialID: UUID) -> Bool {
+        hasSecret(account: credentialID.uuidString)
+    }
+
+    static func hasSecret(account: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: credentialID.uuidString,
+            kSecAttrAccount as String: account,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
@@ -241,6 +245,7 @@ enum SSHSupport {
         var arguments = [
             "-p", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "BatchMode=\(batchMode ? "yes" : "no")",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
             "-o", "StrictHostKeyChecking=\(strictHostChecking)",
@@ -258,10 +263,20 @@ enum SSHSupport {
                     reason: "目标私钥缺失"
                 )
             }
-            arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+            arguments += [
+                "-i", keyPath,
+                "-o", "IdentitiesOnly=yes",
+                "-o", "PreferredAuthentications=publickey",
+                "-o", "PasswordAuthentication=no",
+                "-o", "KbdInteractiveAuthentication=no"
+            ]
         case .password:
-            arguments += ["-o", "PreferredAuthentications=password,keyboard-interactive"]
-            arguments += ["-o", "PubkeyAuthentication=no"]
+            arguments += [
+                "-o", "PreferredAuthentications=password,keyboard-interactive",
+                "-o", "PubkeyAuthentication=no",
+                "-o", "PasswordAuthentication=yes",
+                "-o", "KbdInteractiveAuthentication=yes"
+            ]
         case .keyThenPassword:
             if let keyPath {
                 arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
@@ -269,10 +284,11 @@ enum SSHSupport {
                 // Do not silently fall back to unrelated ssh-agent or default-file identities.
                 arguments += ["-o", "PubkeyAuthentication=no"]
             }
-            arguments += ["-o", "PreferredAuthentications=publickey,password"]
-        }
-        if batchMode {
-            arguments += ["-o", "BatchMode=yes"]
+            arguments += [
+                "-o", "PreferredAuthentications=publickey,password,keyboard-interactive",
+                "-o", "PasswordAuthentication=yes",
+                "-o", "KbdInteractiveAuthentication=yes"
+            ]
         }
 
         arguments.append("\(config.username)@\(config.host)")
@@ -287,6 +303,7 @@ enum SSHSupport {
             "-q",
             "-P", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "BatchMode=no",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
             "-o", "StrictHostKeyChecking=yes",
@@ -303,11 +320,19 @@ enum SSHSupport {
                     reason: "目标私钥缺失"
                 )
             }
-            arguments += ["-i", keyPath, "-o", "IdentitiesOnly=yes"]
+            arguments += [
+                "-i", keyPath,
+                "-o", "IdentitiesOnly=yes",
+                "-o", "PreferredAuthentications=publickey",
+                "-o", "PasswordAuthentication=no",
+                "-o", "KbdInteractiveAuthentication=no"
+            ]
         case .password:
             arguments += [
                 "-o", "PreferredAuthentications=password,keyboard-interactive",
-                "-o", "PubkeyAuthentication=no"
+                "-o", "PubkeyAuthentication=no",
+                "-o", "PasswordAuthentication=yes",
+                "-o", "KbdInteractiveAuthentication=yes"
             ]
         case .keyThenPassword:
             if let keyPath {
@@ -315,7 +340,11 @@ enum SSHSupport {
             } else {
                 arguments += ["-o", "PubkeyAuthentication=no"]
             }
-            arguments += ["-o", "PreferredAuthentications=publickey,password"]
+            arguments += [
+                "-o", "PreferredAuthentications=publickey,password,keyboard-interactive",
+                "-o", "PasswordAuthentication=yes",
+                "-o", "KbdInteractiveAuthentication=yes"
+            ]
         }
         arguments.append("\(config.username)@\(config.host)")
         return arguments
@@ -350,6 +379,7 @@ enum SSHSupport {
         var arguments = [
             "-p", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "BatchMode=\(batchMode ? "yes" : "no")",
             "-o", "StrictHostKeyChecking=\(strictHostChecking)",
             "-o", userKnownHostsOption,
             "-o", "GlobalKnownHostsFile=/dev/null",
@@ -360,7 +390,6 @@ enum SSHSupport {
             "-o", "PasswordAuthentication=no",
             "-o", "KbdInteractiveAuthentication=no"
         ]
-        if batchMode { arguments += ["-o", "BatchMode=yes"] }
         arguments.append("\(config.username)@\(config.host)")
         if let remoteCommand { arguments.append(remoteCommand) }
         return arguments
@@ -374,20 +403,29 @@ enum SSHSupport {
             environment["SERVERDASH_DISABLE_GEO"] = "1"
         }
 
-        let needsAskPass =
-            (config.authentication.usesPassword && KeychainService.hasPassword(for: config.credentialID)) ||
-            (config.hasPassphrase && config.sshKeyID != nil)
-        if needsAskPass {
+        let passwordAccount = config.authentication.usesPassword &&
+            KeychainService.hasPassword(for: config.credentialID)
+            ? config.credentialID.uuidString
+            : nil
+        let passphraseAccount: String? = if config.hasPassphrase, let keyID = config.sshKeyID {
+            KeychainService.hasSecret(account: KeychainService.passphraseAccount(for: keyID))
+                ? KeychainService.passphraseAccount(for: keyID)
+                : nil
+        } else {
+            nil
+        }
+        environment.removeValue(forKey: "SERVERDASH_KEYCHAIN_ACCOUNT")
+        environment.removeValue(forKey: "SERVERDASH_PASSWORD_ACCOUNT")
+        environment.removeValue(forKey: "SERVERDASH_PASSPHRASE_ACCOUNT")
+        if passwordAccount != nil || passphraseAccount != nil {
             environment["SSH_ASKPASS"] = askPassHelperURL.path
             environment["SSH_ASKPASS_REQUIRE"] = "force"
-            environment["DISPLAY"] = environment["DISPLAY"] ?? ":0"
-            environment["SERVERDASH_KEYCHAIN_SERVICE"] = KeychainService.serviceName
-            if config.hasPassphrase, let keyID = config.sshKeyID,
-               !KeychainService.hasPassword(for: config.credentialID) {
-                environment["SERVERDASH_KEYCHAIN_ACCOUNT"] = KeychainService.passphraseAccount(for: keyID)
-            } else {
-                environment["SERVERDASH_KEYCHAIN_ACCOUNT"] = config.credentialID.uuidString
+            if environment["DISPLAY"]?.isEmpty != false {
+                environment["DISPLAY"] = ":0"
             }
+            environment["SERVERDASH_KEYCHAIN_SERVICE"] = KeychainService.serviceName
+            environment["SERVERDASH_PASSWORD_ACCOUNT"] = passwordAccount
+            environment["SERVERDASH_PASSPHRASE_ACCOUNT"] = passphraseAccount
         }
         return environment
     }
@@ -398,9 +436,18 @@ enum SSHSupport {
         let file = directory.appendingPathComponent("serverdash-askpass")
         let script = """
         #!/bin/sh
+        prompt=$(printf '%s' "$1" | /usr/bin/tr '[:upper:]' '[:lower:]')
+        case "$prompt" in
+          *passphrase*) account="${SERVERDASH_PASSPHRASE_ACCOUNT:-}" ;;
+          *) account="${SERVERDASH_PASSWORD_ACCOUNT:-}" ;;
+        esac
+        if [ -z "$account" ]; then
+          account="${SERVERDASH_PASSWORD_ACCOUNT:-${SERVERDASH_PASSPHRASE_ACCOUNT:-}}"
+        fi
+        [ -n "$account" ] || exit 1
         exec /usr/bin/security find-generic-password \
           -s "$SERVERDASH_KEYCHAIN_SERVICE" \
-          -a "$SERVERDASH_KEYCHAIN_ACCOUNT" -w
+          -a "$account" -w
         """
         do {
             try FileManager.default.createDirectory(

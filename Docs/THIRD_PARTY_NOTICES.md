@@ -15,7 +15,8 @@ implementation:
 
 ServerDash changes Citadel's package manifest to resolve the local NIOSSH copy,
 removes its unused server example dependency, and annotates its immutable
-algorithm-metatype containers for Swift concurrency compatibility. ServerDash
+algorithm-metatype containers for Swift concurrency compatibility. It also
+adds a configurable, separately reported SSH authentication timeout. ServerDash
 changes NIOSSH's package manifest to omit the documentation plugin from
 application builds and backports Apple's security fix
 `31cdc3c3391a10460dedf1170530cf651d2ca496` for

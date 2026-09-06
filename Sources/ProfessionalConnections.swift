@@ -476,7 +476,7 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
             arguments = try SSHSupport.directArguments(
                 for: config,
                 strictHostChecking: "yes",
-                batchMode: !config.authentication.usesPassword,
+                batchMode: !config.authentication.usesPassword && !config.hasPassphrase,
                 remoteCommand: command
             )
         case .portForward(let rule):
@@ -709,7 +709,9 @@ private enum OpenSSHRouteMaterializer {
             )
             environment["SSH_ASKPASS"] = helper.path
             environment["SSH_ASKPASS_REQUIRE"] = "force"
-            environment["DISPLAY"] = environment["DISPLAY"] ?? ":0"
+            if environment["DISPLAY"]?.isEmpty != false {
+                environment["DISPLAY"] = ":0"
+            }
             environment["SERVERDASH_KEYCHAIN_SERVICE"] = KeychainService.serviceName
         }
         return MaterializedOpenSSHRoute(
@@ -749,6 +751,8 @@ private enum OpenSSHRouteMaterializer {
         case .password(let account):
             lines += [
                 "    PubkeyAuthentication no",
+                "    PasswordAuthentication yes",
+                "    KbdInteractiveAuthentication yes",
                 "    PreferredAuthentications password,keyboard-interactive"
             ]
             interactiveAccounts.append(("\(endpoint.username)@\(endpoint.host)", account))
@@ -756,6 +760,8 @@ private enum OpenSSHRouteMaterializer {
             lines += [
                 "    IdentityFile \(quote(path))",
                 "    IdentitiesOnly yes",
+                "    PasswordAuthentication yes",
+                "    KbdInteractiveAuthentication yes",
                 "    PreferredAuthentications publickey,password,keyboard-interactive"
             ]
             if let passphraseAccount {

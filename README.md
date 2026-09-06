@@ -120,7 +120,7 @@ The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, and `Vendor/swift-n
 
 ## Development Status
 
-The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 23 tests covering connection contracts, local Citadel password/key/PTY integration, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
+The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 24 tests covering connection contracts, local Citadel password/key/PTY integration, actionable authentication-error mapping, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
 
 The existing macOS S11 professional SSH routes and tunnels remain available and continue to use system OpenSSH. Production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability still require isolated or real-device validation.
 

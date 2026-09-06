@@ -77,8 +77,11 @@ final class ClientHandshakeHandler: ChannelInboundHandler, Sendable {
         let promise = eventLoop.makePromise(of: Void.self)
         self.promise = promise
 
-        eventLoop.scheduleTask(deadline: .now() + loginTimeout) {
-            promise.fail(ChannelError.connectTimeout(loginTimeout))
+        let timeoutTask = eventLoop.scheduleTask(deadline: .now() + loginTimeout) {
+            promise.fail(AuthenticationTimeout())
+        }
+        promise.futureResult.whenComplete { _ in
+            timeoutTask.cancel()
         }
     }
 
@@ -108,6 +111,7 @@ public struct SSHClientSettings: Sendable {
     public var group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton
     internal var channelHandlers: [ChannelHandler & Sendable] = []
     public var connectTimeout: TimeAmount = .seconds(30)
+    public var authenticationTimeout: TimeAmount = .seconds(60)
 
     public init(
         host: String,
@@ -169,7 +173,7 @@ final class SSHClientSession: Sendable {
     ) -> EventLoopFuture<Void> {
         let handshakeHandler = ClientHandshakeHandler(
             eventLoop: channel.eventLoop,
-            loginTimeout: .seconds(10)
+            loginTimeout: settings.authenticationTimeout
         )
         var clientConfiguration = SSHClientConfiguration(
             userAuthDelegate: settings.authenticationMethod(),

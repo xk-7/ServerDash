@@ -18,6 +18,11 @@ metatypes, including NIOSSH's RSA registration pair, whose upstream protocols
 do not declare `Sendable`; the annotation removes a Swift 6 migration warning
 without changing the enabled algorithms or runtime behavior.
 
+Citadel's client settings also expose a separate authentication timeout (60
+seconds by default) and report it as `AuthenticationTimeout`. This keeps a slow
+host-key decision or PAM-backed login distinct from a TCP connection timeout;
+the scheduled timeout is cancelled as soon as authentication finishes.
+
 ## GHSA-998x-vgvp-xwpc / CVE-2026-43798
 
 The upstream issue allows malformed ECDSA signatures containing oversized `r`

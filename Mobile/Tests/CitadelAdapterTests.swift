@@ -1,9 +1,25 @@
+@preconcurrency import Citadel
 import Foundation
 import XCTest
 
 @testable import ServerDashMobile
 
 final class CitadelAdapterTests: XCTestCase {
+    func testAuthenticationErrorsHaveActionableMobileMappings() {
+        XCTAssertEqual(
+            CitadelRemoteConnectionEngine.map(AuthenticationTimeout()),
+            .authenticationTimedOut
+        )
+        XCTAssertEqual(
+            CitadelRemoteConnectionEngine.map(SSHClientError.allAuthenticationOptionsFailed),
+            .authenticationFailed
+        )
+        XCTAssertEqual(
+            CitadelRemoteConnectionEngine.map(SSHClientError.unsupportedPasswordAuthentication),
+            .passwordAuthenticationUnsupported
+        )
+    }
+
     func testEd25519OpenSSHKeyCanBeInspectedWithoutPersistingAPath() throws {
         let key = """
         -----BEGIN OPENSSH PRIVATE KEY-----

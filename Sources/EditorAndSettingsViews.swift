@@ -74,7 +74,7 @@ struct ServerEditorView: View {
                     HStack {
                         TextField("用户名", text: $username)
                             .disabled(selectedIdentityID != nil)
-                        TextField("SSH 端口", value: $port, format: .number)
+                        TextField("SSH 端口", value: $port, format: .number.grouping(.never))
                             .frame(width: 120)
                     }
                 }

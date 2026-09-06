@@ -264,7 +264,7 @@ struct MobileServerEditor: View {
                     TextField("主机或 IP", text: $host)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    TextField("端口", value: $port, format: .number)
+                    TextField("端口", value: $port, format: .number.grouping(.never))
                         .keyboardType(.numberPad)
                 }
                 Section("身份认证") {
@@ -278,10 +278,12 @@ struct MobileServerEditor: View {
                         TextField("用户名", text: $username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .textContentType(.username)
                         Picker("认证方式", selection: $authentication) {
                             Text(AuthenticationMethod.password.title).tag(AuthenticationMethod.password)
                         }
                         SecureField("密码", text: $password)
+                            .textContentType(.password)
                     } else {
                         Text("共享身份中的用户名、密钥和密码将在连接时使用。")
                             .font(.caption)
@@ -311,27 +313,29 @@ struct MobileServerEditor: View {
     }
 
     private func save() {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanHost.isEmpty, (1...65_535).contains(port) else {
             errorMessage = "请输入有效的主机和端口。"
             return
         }
-        if identityID == nil && username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if identityID == nil && cleanUsername.isEmpty {
             errorMessage = "请输入用户名或选择共享身份。"
             return
         }
 
         let value = server ?? ServerRecord(
-            name: name,
+            name: cleanName,
             host: cleanHost,
             port: port,
-            username: username,
+            username: cleanUsername,
             authentication: authentication
         )
-        value.name = name
+        value.name = cleanName
         value.host = cleanHost
         value.port = port
-        value.username = username
+        value.username = cleanUsername
         value.authentication = authentication
         value.identityID = identityID
         value.groupName = groupName.isEmpty ? "默认分组" : groupName
@@ -341,7 +345,7 @@ struct MobileServerEditor: View {
         if server == nil { modelContext.insert(value) }
 
         if let identityID, let identity = identities.first(where: { $0.id == identityID }) {
-            value.username = identity.username
+            value.username = identity.username.trimmingCharacters(in: .whitespacesAndNewlines)
             value.authentication = identity.authentication
         } else if !password.isEmpty {
             do {

@@ -34,6 +34,7 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
     case connectionRefused
     case networkUnreachable
     case timeout
+    case queueTimeout
     case authenticationFailed
     case privateKeyOrPassphraseFailed
     case hostKeyChanged(oldFingerprint: String?, newFingerprint: String?)
@@ -54,6 +55,7 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
         case .connectionRefused: "SSH_REFUSED"
         case .networkUnreachable: "SSH_UNREACHABLE"
         case .timeout: "SSH_TIMEOUT"
+        case .queueTimeout: "SSH_QUEUE_TIMEOUT"
         case .authenticationFailed: "SSH_AUTH"
         case .privateKeyOrPassphraseFailed: "SSH_KEY"
         case .hostKeyChanged: "SSH_HOSTKEY_CHANGED"
@@ -73,7 +75,7 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
     var phase: ConnectionPhase {
         switch self {
         case .dnsFailed: .resolving
-        case .connectionRefused, .networkUnreachable, .timeout: .connecting
+        case .connectionRefused, .networkUnreachable, .timeout, .queueTimeout: .connecting
         case .hostKeyChanged, .hostKeyUntrusted: .awaitingTrust
         case .authenticationFailed, .privateKeyOrPassphraseFailed, .keyboardInteractiveRequired:
             .authenticating
@@ -93,8 +95,10 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
             "网络不可达。"
         case .timeout:
             "连接超时。"
+        case .queueTimeout:
+            "等待可用连接名额超时，请稍后重试。"
         case .authenticationFailed:
-            "认证失败，请检查用户名或密码。"
+            "服务器未接受当前用户名或凭据，请核对认证方式和服务器 SSH 策略。"
         case .privateKeyOrPassphraseFailed:
             "私钥或口令不正确。"
         case .hostKeyChanged(let oldFingerprint, let newFingerprint):
@@ -396,7 +400,7 @@ actor ConnectionLimiter {
         guard let index = waiters.firstIndex(where: { $0.id == waiterID }) else { return }
         let waiter = waiters.remove(at: index)
         timeoutTasks[waiterID] = nil
-        waiter.continuation.resume(throwing: ConnectionError.timeout)
+        waiter.continuation.resume(throwing: ConnectionError.queueTimeout)
         drainWaiters()
     }
 }
@@ -740,7 +744,10 @@ enum SSHConnectionTester {
                 arguments: plan.arguments,
                 environment: plan.environment,
                 connectTimeout: config.connectTimeout,
-                totalTimeout: max(12, config.connectTimeout + 8),
+                // TCP connection timeout and SSH authentication timeout are different.
+                // PAM/LDAP-backed password authentication can legitimately take longer
+                // after the socket is connected, so do not report it as a network timeout.
+                totalTimeout: max(60, config.connectTimeout + 30),
                 maxOutputBytes: 4_096,
                 serverID: config.id,
                 module: .ssh,

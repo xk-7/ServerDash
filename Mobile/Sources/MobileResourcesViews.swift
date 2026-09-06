@@ -95,6 +95,7 @@ private struct MobileIdentityEditor: View {
                     TextField("用户名", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .textContentType(.username)
                     Picker("认证方式", selection: $authentication) {
                         ForEach(AuthenticationMethod.allCases) { Text($0.title).tag($0) }
                     }
@@ -115,6 +116,7 @@ private struct MobileIdentityEditor: View {
                 if authentication.usesPassword {
                     Section("密码") {
                         SecureField(identity == nil ? "密码" : "新密码（留空则不修改）", text: $password)
+                            .textContentType(.password)
                         Text("密码仅保存在本设备 Keychain。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -132,8 +134,9 @@ private struct MobileIdentityEditor: View {
     }
 
     private func save() {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty, !cleanUsername.isEmpty else {
             errorMessage = "请输入名称和用户名。"
             return
         }
@@ -142,12 +145,12 @@ private struct MobileIdentityEditor: View {
             return
         }
         let value = identity ?? IdentityRecord(
-            name: name,
-            username: username,
+            name: cleanName,
+            username: cleanUsername,
             authentication: authentication
         )
-        value.name = name
-        value.username = username
+        value.name = cleanName
+        value.username = cleanUsername
         value.authentication = authentication
         value.sshKeyID = authentication.usesPrivateKey ? keyID : nil
         value.notes = notes

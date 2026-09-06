@@ -43,3 +43,9 @@ public enum CitadelError: Error {
 }
 
 public struct AuthenticationFailed: Error, Equatable {}
+
+/// The TCP connection succeeded, but host-key validation or user authentication
+/// did not finish within the configured authentication window.
+public struct AuthenticationTimeout: Error, Equatable {
+    public init() {}
+}
