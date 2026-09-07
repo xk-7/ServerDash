@@ -42,6 +42,8 @@ struct AppSidebar: View {
                         .tag(SidebarDestination.sshKeys)
                     Label("代码片段", systemImage: "curlybraces")
                         .tag(SidebarDestination.snippets)
+                    Label("录制", systemImage: "record.circle")
+                        .tag(SidebarDestination.recordings)
                 }
 
                 Section("连接与安全") {

@@ -35,6 +35,21 @@ SSH, authentication, input encoding, buffer contents or copied text. Existing
 SwiftTerm search remains in use. Cross-platform regression tests are in
 `Tests/TerminalWorkspaceTests.swift`.
 
+The macOS recording implementation adds a data-only `TerminalDisplaySnapshot`
+API and read-only native cell metrics to SwiftTerm. It resolves Unicode grapheme
+clusters and visible cell attributes without serializing scrollback, parser state,
+image payloads or hyperlink actions. This does not change SSH input or terminal
+parsing. The patch is in `DisplaySnapshot.swift` and `AppleTerminalView.swift`;
+regression coverage is in `Tests/RecordingTests.swift`.
+Recording/GIF compression and rendering use Apple's Compression, CryptoKit,
+CoreText, CoreGraphics and ImageIO frameworks; no additional third-party encoder
+or external process is introduced.
+
+The streaming GIF writer follows the [GIF89a specification](https://www.w3.org/Graphics/GIF/spec-gif89a.txt)
+for image blocks and local color tables; ImageIO supplies the per-frame compressed
+image data. Graphics Interchange Format and GIF are the property and service mark
+of CompuServe Incorporated.
+
 ## Session archive dependency
 
 ServerDash vendors ZIPFoundation 0.9.20, upstream commit

@@ -201,6 +201,7 @@ struct WorkspaceTabStrip: View {
     var onSelect: (WorkspaceTab) -> Void
     var onClose: (WorkspaceTab) -> Void
     var onCloseMultiple: (([WorkspaceTab]) -> Void)? = nil
+    var recordingPaneIDs: Set<UUID> = []
 
     var body: some View {
         HStack(spacing: 0) {
@@ -211,6 +212,10 @@ struct WorkspaceTabStrip: View {
                     LazyHStack(spacing: 4) {
                         ForEach(workspace.tabs) { tab in
                             HStack(spacing: 0) {
+                                if tab.layout.panes.contains(where: recordingPaneIDs.contains) {
+                                    Image(systemName: "record.circle.fill").foregroundStyle(.red)
+                                        .accessibilityLabel("正在录制").padding(.trailing, 4)
+                                }
                                 Button { onSelect(tab) } label: {
                                     Label(tab.title + (tab.layout.panes.count > 1 ? " · \(tab.layout.panes.count)" : ""), systemImage: tab.kind.icon)
                                         .lineLimit(1).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)

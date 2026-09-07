@@ -6,6 +6,13 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 
 ## Features
 
+### Session recording (macOS)
+
+- Record each connected SSH pane independently from the existing terminal toolbar; tab/page changes keep recording. Stop saves automatically to `~/Documents/ServerDash/recordings`, configurable in Settings → Recording.
+- Replay local `.sdrec` recordings with pause, 0.25×–8× speed, idle skipping and timeline seeking. Export up to five-minute GIF clips with 1–30 FPS, quality scaling and optional text watermark.
+- Captures the initial visible screen and subsequent output, not raw keystrokes or hidden password input. Screen/output can still contain secrets; review before sharing. No automatic upload, reliable redaction or tamper-proof audit guarantee.
+- Recording is macOS-only; iPhone/iPad are unchanged. See [usage, format and safety](Docs/SESSION_RECORDING.md) and [verification status](Docs/SESSION_RECORDING_QA.md).
+
 ### Multi-tab terminal workspace
 
 - Shared macOS/iPhone/iPad SSH tabs with no fixed tab-count limit; memory and server limits still apply. The **+** menu also opens SFTP and monitoring tabs. RDP, VNC and online AI completion are not implemented.

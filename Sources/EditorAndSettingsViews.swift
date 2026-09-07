@@ -551,6 +551,8 @@ struct SettingsView: View {
                 .tabItem {
                     Label("终端主题", systemImage: "terminal")
                 }
+            RecordingSettingsView()
+                .tabItem { Label("录制", systemImage: "record.circle") }
         }
         .preferredColorScheme(appAppearance.colorScheme)
         .frame(width: 920, height: 720)

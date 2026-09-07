@@ -65,6 +65,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     var connectionGeneration = UUID()
     let createdAt: Date
     let hostView: TerminalHostView
+    let recording: TerminalRecordingController
     private let attachProcess: Bool
     private let initialAppearanceProfile: TerminalAppearanceProfile
 
@@ -92,6 +93,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     ) {
         let sessionID = UUID()
         id = sessionID
+        recording = TerminalRecordingController(paneID: sessionID)
         serverID = server.id
         serverName = server.displayName
         self.config = config ?? server.connectionConfig
@@ -106,7 +108,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
             appearanceProfile: appearance
         )
         hostView.onTerminated = { [weak self] code in
-            guard let self, self.status == .connected else { return }
+            guard let self else { return }
+            self.recording.stop(reason: "disconnected")
+            guard self.status == .connected else { return }
             self.status = code == 0 ? .disconnected : .failed
             self.lastError = code == 0 ? "会话已结束" : "SSH 进程退出，代码 \(code ?? -1)"
             EventLogStore.shared.append(
@@ -123,6 +127,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         hostView.onFontShortcut = { [weak self] shortcut in
             self?.performFontShortcut(shortcut)
         }
+        hostView.onRecordingOutput = { [weak self] in self?.recording.output($0) }
+        hostView.onRecordingDisplayChanged = { [weak self] in self?.recording.displayChanged() }
+        hostView.shouldCaptureOutput = { [weak self] in self?.recording.isRecording == true }
     }
 
     func start() {
@@ -150,6 +157,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     }
 
     func terminate() {
+        recording.stop(reason: "closed")
         connectionGeneration = UUID()
         connectionTask?.cancel()
         connectionTask = nil
@@ -157,6 +165,12 @@ final class TerminalSessionController: ObservableObject, Identifiable {
             hostView.stop()
         }
         status = .disconnected
+    }
+
+    func startRecording() {
+        recording.start(name: serverName, connected: status == .connected,
+                        initial: hostView.recordingFrame(followOutput: false),
+                        capture: { [hostView] in hostView.recordingFrame(followOutput: true) })
     }
 
     func applyAppearance(_ profile: TerminalAppearanceProfile, dark: Bool) {
@@ -261,6 +275,8 @@ final class TerminalSessionRegistry: ObservableObject {
 final class ServerDashTerminalView: LocalProcessTerminalView {
     var onFocus: (() -> Void)?
     var onOutput: (() -> Void)?
+    var onRecordingOutput: ((Data) -> Void)?
+    var shouldCaptureOutput: (() -> Bool)?
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result { onFocus?() }
@@ -290,6 +306,7 @@ final class ServerDashTerminalView: LocalProcessTerminalView {
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        if shouldCaptureOutput?() == true { onRecordingOutput?(Data(slice)) }
         onOutput?()
         if hostKeyFailureDetector.ingest(slice) {
             onHostKeyFailure?()
@@ -403,6 +420,17 @@ final class TerminalHostView: NSView {
         appliedDarkAppearance ?? (effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
     }
 
+    var onRecordingOutput: ((Data) -> Void)?
+    var onRecordingDisplayChanged: (() -> Void)?
+    var shouldCaptureOutput: (() -> Bool)?
+
+    func recordingFrame(followOutput: Bool) -> RecordingFrame {
+        let size = terminalView.recordingCellSize
+        return .init(screen: terminalView.getTerminal().displaySnapshot(followOutput: followOutput),
+                     appearance: .init(fontName: terminalView.font.fontName, fontSize: terminalView.font.pointSize,
+                                       cellWidth: size.width, cellHeight: size.height))
+    }
+
     init(
         sessionID: UUID,
         config: ServerConnectionConfig,
@@ -415,6 +443,8 @@ final class TerminalHostView: NSView {
         super.init(frame: .zero)
         tools.attach(terminalView)
         terminalView.onOutput = { [weak self] in self?.tools.refreshPrompt() }
+        terminalView.onRecordingOutput = { [weak self] in self?.onRecordingOutput?($0) }
+        terminalView.shouldCaptureOutput = { [weak self] in self?.shouldCaptureOutput?() == true }
         terminalView.onFocus = { [weak self] in self?.onFocus?() }
         wantsLayer = true
         terminalView.onTerminated = { [weak self] code in
@@ -468,6 +498,7 @@ final class TerminalHostView: NSView {
         )
         if terminalView.frame != terminalFrame {
             terminalView.frame = terminalFrame
+            onRecordingDisplayChanged?()
         }
     }
 
@@ -545,6 +576,7 @@ final class TerminalHostView: NSView {
             terminalView.bellEnabled = profile.terminalBellEnabled
         }
         terminalView.needsDisplay = true
+        onRecordingDisplayChanged?()
     }
 
     func startIfNeeded() throws {

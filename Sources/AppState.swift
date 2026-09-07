@@ -990,6 +990,7 @@ final class AppState: ObservableObject {
     func reconnectTerminal(_ session: TerminalSession) {
         guard let controller = terminalRegistry.controller(for: session.id),
               let server = serverRecords[session.serverID] else { return }
+        controller.recording.stop(reason: "reconnect")
         connectTerminal(controller, server: server)
     }
 
@@ -1019,6 +1020,8 @@ final class AppState: ObservableObject {
         fileControllers.values.forEach { $0.close() }
         fileControllers.removeAll()
         terminalRegistry.terminateAll()
+        // Writers do not call the main actor to drain; a late OS termination still leaves recoverable blocks.
+        _ = RecordingWriter.pendingWrites.wait(timeout: .now() + 3)
         KeyMaterialStore.cleanupAll()
         do {
             try monitoringHistory?.beginLifecycleGap(

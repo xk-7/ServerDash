@@ -110,6 +110,7 @@ private struct TerminalWorkspaceContent: View {
     @State private var pendingClose: [WorkspaceTab] = []
     @ObservedObject var registry: TerminalSessionRegistry
     @ObservedObject var workspace: TerminalWorkspace
+    @ObservedObject private var recordingStore = RecordingStore.shared
 
     private var selectedSession: TerminalSession? {
         selectedController?.session
@@ -163,7 +164,8 @@ private struct TerminalWorkspaceContent: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: AppleDesign.Spacing.xs) {
-                WorkspaceTabStrip(workspace: workspace, onSelect: select, onClose: close, onCloseMultiple: requestClose)
+                WorkspaceTabStrip(workspace: workspace, onSelect: select, onClose: close, onCloseMultiple: requestClose,
+                                  recordingPaneIDs: recordingStore.activePaneIDs)
 
                 Divider()
                     .frame(height: 20)
@@ -658,7 +660,7 @@ private struct TerminalSessionPane: View {
         VStack(spacing: 0) {
             if isActive {
                 TerminalToolsBar(tools: controller.hostView.tools, connected: controller.status == .connected,
-                                 send: controller.hostView.sendCommand)
+                                 send: controller.hostView.sendCommand, recordingController: controller)
             }
             PersistentTerminalView(controller: controller)
                 // The controller owns the persistent NSView; a different session must mount its own view.
@@ -698,6 +700,7 @@ private struct TerminalSessionPane: View {
                         .frame(width: 7, height: 7)
                 }
                 .fixedSize()
+                RecordingPaneIndicator(recording: controller.recording)
                 Text(endpoint)
                     .font(.caption.monospaced())
                     .lineLimit(1)

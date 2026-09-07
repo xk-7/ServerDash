@@ -57,6 +57,8 @@ struct ViewLineInfo {
 }
 
 extension TerminalView {
+    /// Actual text metrics for read-only recording renderers.
+    public var recordingCellSize: CGSize { CGSize(width: cellDimension.width, height: cellDimension.height) }
     typealias CellDimension = CGSize
     
     func resetCaches ()

@@ -43,6 +43,7 @@ struct ServerDashApp: App {
                     for: NSWorkspace.willSleepNotification
                 )
             ) { _ in
+                appState.terminalRegistry.controllers.forEach { $0.recording.stop(reason: "sleep") }
                 appState.setMonitoringSleeping(true)
             }
             .onReceive(

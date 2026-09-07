@@ -11,6 +11,7 @@ enum SidebarDestination: String, Identifiable, Hashable {
     case trustedHosts
     case connections
     case terminal
+    case recordings
 
     var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum SidebarDestination: String, Identifiable, Hashable {
         case .trustedHosts: "可信主机"
         case .connections: "连接与隧道"
         case .terminal: "终端"
+        case .recordings: "录制"
         }
     }
 }
@@ -351,6 +353,8 @@ struct ContentView: View {
                 ProfessionalConnectionsView()
             case .terminal:
                 TerminalWorkspaceView()
+            case .recordings:
+                RecordingLibraryView()
             }
         }
     }

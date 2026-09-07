@@ -8,6 +8,9 @@ struct TerminalToolsBar: View {
     @Query(sort: \CommandSnippetRecord.title) private var snippets: [CommandSnippetRecord]
     let connected: Bool
     let send: (String) -> Void
+    #if os(macOS)
+    var recordingController: TerminalSessionController? = nil
+    #endif
     @State private var pendingCommand: String?
     @State private var historySearch = ""
     @State private var showingShellIntegration = false
@@ -70,6 +73,9 @@ struct TerminalToolsBar: View {
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel("Shell 集成")
                 Spacer(minLength: 0)
+                #if os(macOS)
+                if let recordingController { RecordingToolbarButton(controller: recordingController) }
+                #endif
                 Button { tools.searchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
                     .accessibilityLabel("终端搜索 Ctrl+F")
             }.font(.caption).padding(.horizontal, 8).frame(minHeight: 44)
