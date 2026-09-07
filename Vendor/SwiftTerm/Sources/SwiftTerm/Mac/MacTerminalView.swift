@@ -36,6 +36,8 @@ import CoreGraphics
  * defaults, otherwise, this uses its own set of defaults colors.
  */
 open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, TerminalDelegate {
+    /// ServerDash: non-mutating, visible-row decorations; never changes copied terminal text.
+    public var cellHighlights: ((BufferLine) -> [TerminalCellHighlight])?
     struct FontSet {
         public let normal: NSFont
         let bold: NSFont
@@ -611,7 +613,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     //
     // NSTextInputClient protocol implementation
     //
-    public override func becomeFirstResponder() -> Bool {
+    open override func becomeFirstResponder() -> Bool {
         let response = super.becomeFirstResponder()
         if response {
             hasFocus = true

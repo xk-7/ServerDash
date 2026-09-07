@@ -69,15 +69,15 @@ struct ServerDashApp: App {
             TerminalCommands()
             CommandMenu("服务器") {
                 Button("切换到监控") {
-                    appState.detailMode = .monitor
+                    appState.showDetailMode(.monitor)
                 }
                 .keyboardShortcut("1", modifiers: [.command])
                 Button("切换到终端") {
-                    appState.detailMode = .terminal
+                    appState.showDetailMode(.terminal)
                 }
                 .keyboardShortcut("2", modifiers: [.command])
                 Button("切换到 SFTP") {
-                    appState.detailMode = .sftp
+                    appState.showDetailMode(.sftp)
                 }
                 .keyboardShortcut("3", modifiers: [.command])
             }

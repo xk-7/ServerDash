@@ -170,6 +170,14 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
         process.terminate()
     }
 
+    /// Preserve terminal scrollback but give a reconnect its own process/delegate.
+    /// Output from a retiring process can no longer enter the new session.
+    public func replaceProcess() {
+        process.delegate = nil
+        process.terminate()
+        process = LocalProcess(delegate: self)
+    }
+
     /**
      * Implements the LocalProcessDelegate method.
      */

@@ -99,7 +99,10 @@ struct ContentView: View {
     @State private var showingSessionExport = false
     @State private var editingServer: ServerRecord?
     @State private var serverPendingDeletion: ServerRecord?
-    @State private var route: MainContentRoute = .section(.dashboard)
+    private var route: MainContentRoute {
+        get { appState.route }
+        nonmutating set { appState.route = newValue }
+    }
     @State private var dashboardScrollAnchor: UUID?
     @State private var machineScrollAnchor: UUID?
 
@@ -114,11 +117,16 @@ struct ContentView: View {
 
     private var detailModeBinding: Binding<DetailMode> {
         Binding(
-            get: { route.detailMode ?? appState.detailMode },
+            get: { route.detailMode ?? .monitor },
             set: { mode in
                 guard case .server(let id, let origin, _) = route else { return }
-                route = .server(id: id, origin: origin, mode: mode)
-                appState.detailMode = mode
+                if mode == .terminal, let server = servers.first(where: { $0.id == id }) {
+                    appState.openTerminal(for: server)
+                } else if mode == .sftp, let server = servers.first(where: { $0.id == id }) {
+                    appState.openSFTP(for: server)
+                } else {
+                    route = .server(id: id, origin: origin, mode: .monitor)
+                }
             }
         )
     }
@@ -241,12 +249,6 @@ struct ContentView: View {
         .onChange(of: connectionRoutes.map(\.revision)) {
             synchronizeIdentityConnections()
         }
-        .onChange(of: appState.selectedServerID) { _, serverID in
-            handleSelectedServerChange(serverID)
-        }
-        .onChange(of: appState.detailMode) { _, mode in
-            handleDetailModeChange(mode)
-        }
         .onChange(of: servers.map(\.id)) { _, serverIDs in
             handleServerListChange(serverIDs)
         }
@@ -268,27 +270,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             appState.shutdown()
         }
-    }
-
-    private func handleSelectedServerChange(_ serverID: UUID?) {
-        guard let serverID,
-              servers.contains(where: { $0.id == serverID }),
-              case .server(_, let origin, _) = route else {
-            return
-        }
-        route = .server(
-            id: serverID,
-            origin: origin,
-            mode: appState.detailMode
-        )
-    }
-
-    private func handleDetailModeChange(_ mode: DetailMode) {
-        guard case .server(let id, let origin, let currentMode) = route,
-              currentMode != mode else {
-            return
-        }
-        route = .server(id: id, origin: origin, mode: mode)
     }
 
     private func handleServerListChange(_ serverIDs: [UUID]) {
@@ -336,11 +317,7 @@ struct ContentView: View {
                     onOpenTerminal: { server in
                         dashboardScrollAnchor = server.id
                         appState.openTerminal(for: server)
-                        route = .server(
-                            id: server.id,
-                            origin: .dashboard,
-                            mode: .terminal
-                        )
+
                     },
                     onAdd: { showingNewServer = true }
                 )
@@ -373,11 +350,7 @@ struct ContentView: View {
             case .connections:
                 ProfessionalConnectionsView()
             case .terminal:
-                TerminalSessionsLandingView(
-                    sessions: appState.terminalSessions,
-                    onOpen: openTerminalSession,
-                    onChooseServer: { navigate(.machines) }
-                )
+                TerminalWorkspaceView()
             }
         }
     }
@@ -385,16 +358,6 @@ struct ContentView: View {
     private func navigate(_ destination: SidebarDestination) {
         route = .section(destination)
         appState.select(nil)
-    }
-
-    private func openTerminalSession(_ session: TerminalSession) {
-        guard let server = servers.first(where: { $0.id == session.serverID }) else { return }
-        appState.selectTerminal(session)
-        route = .server(
-            id: server.id,
-            origin: .terminal,
-            mode: .terminal
-        )
     }
 
     private func openServerDetail(

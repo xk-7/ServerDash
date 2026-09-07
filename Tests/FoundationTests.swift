@@ -999,13 +999,14 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
             appState.terminalRegistry.registerForTesting(controller)
             return controller
         }
+        appState.route = .section(.terminal)
         appState.selectTerminal(controllers[0].session)
 
         appState.closeTerminal(controllers[0].session)
 
         XCTAssertEqual(appState.selectedTerminalID, controllers[1].id)
-        XCTAssertEqual(appState.selectedServerID, controllers[1].serverID)
-        XCTAssertEqual(appState.detailMode, .terminal)
+        XCTAssertNil(appState.selectedServerID)
+        XCTAssertEqual(appState.detailMode, .monitor)
         XCTAssertTrue(appState.terminalRegistry.controller(for: controllers[1].id) === controllers[1])
         XCTAssertEqual(controllers[1].status, .connected)
         XCTAssertEqual(controllers[2].status, .connected)
@@ -1013,7 +1014,7 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
         appState.closeTerminal(controllers[1].session)
         appState.closeTerminal(controllers[2].session)
         XCTAssertNil(appState.selectedTerminalID)
-        XCTAssertEqual(appState.detailMode, .monitor)
+        XCTAssertEqual(appState.route, .section(.terminal))
     }
 
     func testClosingBackgroundTabPreservesSelectedSession() {
@@ -1028,7 +1029,7 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
         appState.closeTerminal(background.session)
 
         XCTAssertEqual(appState.selectedTerminalID, selected.id)
-        XCTAssertEqual(appState.selectedServerID, selected.serverID)
+        XCTAssertNil(appState.selectedServerID)
         XCTAssertEqual(appState.terminalSessions.map(\.id), [selected.id])
         XCTAssertNotEqual(selected.status, .disconnected)
     }
@@ -1039,6 +1040,7 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
             server: ServerRecord(name: "Demo", host: "192.0.2.1", username: "root"),
             attachProcess: false
         )
+        appState.terminalRegistry.registerForTesting(controller)
         appState.selectTerminal(controller.session)
         var publications = 0
         let observation = appState.objectWillChange.sink { publications += 1 }
@@ -1047,8 +1049,8 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
 
         XCTAssertEqual(publications, 0)
         XCTAssertEqual(appState.selectedTerminalID, controller.id)
-        XCTAssertEqual(appState.selectedServerID, controller.serverID)
-        XCTAssertEqual(appState.detailMode, .terminal)
+        XCTAssertNil(appState.selectedServerID)
+        XCTAssertEqual(appState.detailMode, .monitor)
         withExtendedLifetime(observation) {}
     }
 
@@ -1057,30 +1059,32 @@ final class TerminalRegistryLifecycleTests: XCTestCase {
         let server = ServerRecord(name: "Demo", host: "192.0.2.1", username: "root")
         let first = TerminalSessionController(server: server, attachProcess: false)
         let second = TerminalSessionController(server: server, attachProcess: false)
+        appState.terminalRegistry.registerForTesting(first)
+        appState.terminalRegistry.registerForTesting(second)
         appState.selectTerminal(first.session)
         var sessionChanges: [UUID?] = []
         var serverChanges: [UUID?] = []
         var modeChanges: [DetailMode] = []
         let observations = [
-            appState.$selectedTerminalID.dropFirst().sink { sessionChanges.append($0) },
+            appState.terminalRegistry.workspace.$selectedTabID.dropFirst().sink { sessionChanges.append($0) },
             appState.$selectedServerID.dropFirst().sink { serverChanges.append($0) },
             appState.$detailMode.dropFirst().sink { modeChanges.append($0) }
         ]
 
         appState.selectTerminal(second.session)
 
-        XCTAssertEqual(sessionChanges, [second.id])
+        XCTAssertEqual(sessionChanges, [appState.terminalRegistry.workspace.selectedTabID])
         XCTAssertTrue(serverChanges.isEmpty)
         XCTAssertTrue(modeChanges.isEmpty)
-        XCTAssertEqual(appState.selectedServerID, server.id)
-        XCTAssertEqual(appState.detailMode, .terminal)
+        XCTAssertNil(appState.selectedServerID)
+        XCTAssertEqual(appState.detailMode, .monitor)
 
-        appState.detailMode = .monitor
+        appState.detailMode = .sftp
         appState.selectTerminal(second.session)
 
-        XCTAssertEqual(sessionChanges, [second.id])
+        XCTAssertEqual(sessionChanges, [appState.terminalRegistry.workspace.selectedTabID])
         XCTAssertTrue(serverChanges.isEmpty)
-        XCTAssertEqual(modeChanges, [.monitor, .terminal])
+        XCTAssertEqual(modeChanges, [.sftp])
         withExtendedLifetime(observations) {}
     }
 
@@ -1964,5 +1968,79 @@ final class PerformanceInstrumentationTests: XCTestCase {
                 _ = try! MonitoringResponseParser.parse(payload)
             }
         }
+    }
+}
+
+@MainActor
+final class SessionNavigationRegressionTests: XCTestCase {
+    func testReuseDisconnectedMRUDoesNotAuthorizeOrChangeMonitorSelection() {
+        var scans = 0
+        let trust = HostTrustCoordinator(inspector: { _, _ in scans += 1; throw CancellationError() }, truster: { _, _ in })
+        let app = AppState(trustCoordinator: trust, terminalRegistry: TerminalSessionRegistry(attachProcess: false))
+        let monitor = ServerRecord(name: "Monitor", host: "monitor.test", username: "test")
+        app.select(monitor)
+        let server = ServerRecord(name: "SSH", host: "ssh.test", username: "test")
+        let first = TerminalSessionController(server: server, attachProcess: false)
+        let second = TerminalSessionController(server: server, attachProcess: false)
+        for controller in [first, second] { controller.status = .disconnected; app.terminalRegistry.registerForTesting(controller) }
+        app.selectTerminal(first.session)
+        for _ in 0..<20 { app.openTerminal(for: server) }
+        XCTAssertEqual(app.selectedTerminalID, first.id)
+        XCTAssertEqual(app.terminalRegistry.controllers.count, 2)
+        XCTAssertEqual(first.status, .disconnected)
+        XCTAssertEqual(scans, 0)
+        XCTAssertEqual(app.selectedServerID, monitor.id)
+        XCTAssertEqual(app.route, .section(.terminal))
+        app.closeTerminal(first.session)
+        app.closeTerminal(second.session)
+        XCTAssertEqual(app.route, .section(.terminal))
+    }
+
+    func testMissingCredentialFailureBelongsToPaneAndDoesNotNavigate() async throws {
+        let app = AppState()
+        let server = ServerRecord(name: "Missing credential", host: "fixture.invalid", username: "tester", authentication: .password)
+        app.openTerminal(for: server)
+        let controller = try XCTUnwrap(app.terminalRegistry.controllers.first)
+        let request = controller.connectionTask
+        app.route = .section(.machines)
+        await request?.value
+        XCTAssertEqual(controller.status, .failed)
+        XCTAssertNotNil(controller.lastError)
+        XCTAssertEqual(app.route, .section(.machines))
+        XCTAssertEqual(app.status(for: server), .unknown)
+        XCTAssertNil(app.runtime(for: server).renderState.error)
+        app.closeTerminal(controller.session)
+    }
+
+    func testTrustCancelCloseDeleteAndReconnectNeverReviveOrNavigate() async throws {
+        let key = FileManager.default.temporaryDirectory.appendingPathComponent("ServerDash-nav-key-\(UUID())")
+        try Data("non-secret fixture; no process is launched".utf8).write(to: key)
+        defer { try? FileManager.default.removeItem(at: key) }
+        let trust = HostTrustCoordinator(inspector: { config, _ in
+            .unknown(SSHHostKeyProbe(host: config.host, port: config.port, algorithm: "ssh-ed25519", fingerprint: "SHA256:fixture", keyLine: "\(config.host) ssh-ed25519 Zml4dHVyZQ=="))
+        }, truster: { _, _ in })
+        let app = AppState(trustCoordinator: trust, terminalRegistry: TerminalSessionRegistry(attachProcess: false))
+        let server = ServerRecord(name: "Fixture", host: "fixture.invalid", username: "tester", authentication: .privateKey, privateKeyPath: key.path)
+        app.openTerminal(for: server)
+        let controller = try XCTUnwrap(app.terminalRegistry.controllers.first)
+        for _ in 0..<1000 { if trust.current != nil { break }; await Task.yield() }
+        let pending = try XCTUnwrap(trust.current)
+        app.route = .section(.machines)
+        trust.reject(pending.id)
+        await controller.connectionTask?.value
+        XCTAssertEqual(controller.status, .disconnected)
+        XCTAssertEqual(app.route, .section(.machines))
+        server.port = 2222
+        app.cacheConfig(server.connectionConfig)
+        app.reconnectTerminal(controller.session)
+        for _ in 0..<1000 { if trust.current != nil { break }; await Task.yield() }
+        XCTAssertEqual(trust.current?.probe.port, 2222)
+        let request = controller.connectionTask
+        app.removeRuntimeData(for: server.id)
+        await request?.value
+        XCTAssertNil(app.terminalRegistry.controller(for: controller.id))
+        XCTAssertTrue(app.terminalRegistry.workspace.tabs.isEmpty)
+        XCTAssertNil(trust.current)
+        XCTAssertEqual(app.route, .section(.machines))
     }
 }

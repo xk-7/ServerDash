@@ -6,6 +6,22 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 
 ## Features
 
+### Multi-tab terminal workspace
+
+- Shared macOS/iPhone/iPad SSH tabs with no fixed tab-count limit; memory and server limits still apply. The **+** menu also opens SFTP and monitoring tabs. RDP, VNC and online AI completion are not implemented.
+- Drag to reorder, use tab context menus to close current/other/all tabs, and scroll fixed-width tabs with previous/next controls.
+- **Ctrl+Tab / Ctrl+Shift+Tab** switch tabs. **Ctrl+Shift+D** splits right, **Ctrl+Shift+E** splits below, and **Ctrl+Shift+W** closes the active pane. Mobile shortcuts require a hardware keyboard.
+- Each SSH pane owns its connection and scrollback. Choose another server from **+ → server → split**; maximum 16 panes per tab. Drag dividers, arrange as a grid up to 4×4, or maximize one pane without disconnecting the others.
+- **Ctrl+F** (also **Cmd+F** on Mac) searches retained scrollback and highlights visible same-row matches. Seven keyword presets, custom regex rules and twelve colors decorate text without modifying output.
+- Command suggestions use local history, Linux commands and saved snippets. The command bar asks for confirmation before submitting; selecting history only fills text.
+- Direct-terminal automatic history and suggestions require OSC 133 shell integration. Choose **… → Enable automatic command history**, select Bash 4.4+ or Zsh and confirm sending at a shell prompt. Only the current shell is modified, not remote startup files; unsupported shells use the command bar.
+- Local history retains up to 2,000 commands with disable/clear controls. Raw keystrokes and password responses are not recorded. Leading spaces, control characters, assignments and recognized sensitive keywords suppress recording. The filter cannot identify every secret: disable history for other confidential arguments. History is not synced or exported.
+- **Sessions → Choose server** opens the terminal workspace directly. Selecting a host reuses its most recently selected SSH pane, including disconnected panes; only **New tab** or **Split** allocates an independent connection. Canceling the picker leaves the workspace unchanged. Ordinary machine rows still open monitoring details.
+- Layouts are in-memory. Foreground navigation retains SSH, SFTP and transfers through workspace-owned controllers. Closing a tab with a running transfer asks for confirmation; mobile downloads remain available for explicit export even when completed off-screen.
+- Mobile backgrounding interrupts connections. Reconnect explicitly starts a new shell with current configuration and trust checks; it does not restore remote processes or resume partially transferred files. See [navigation verification status](Docs/SESSION_NAVIGATION_QA.md) for the final test gate.
+
+See [workspace design and verification checklist](Docs/TERMINAL_WORKSPACE.md).
+
 ### Linux Resource Monitoring
 
 - Overall and per-core CPU usage, temperature, load averages, memory, swap, processes, and logged-in users.

@@ -49,6 +49,8 @@ public extension Notification.Name {
  * defaults, otherwise, this uses its own set of defaults colors.
  */
 open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate, TerminalDelegate {
+    /// ServerDash: non-mutating, visible-row decorations; never changes copied terminal text.
+    public var cellHighlights: ((BufferLine) -> [TerminalCellHighlight])?
     public static var textInputDebugEnabled: Bool = false
     internal static var textInputLogCounter: Int = 0
 

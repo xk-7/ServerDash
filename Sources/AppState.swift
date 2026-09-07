@@ -560,9 +560,13 @@ final class AppState: ObservableObject {
             }
         }
     }
+    @Published var route: MainContentRoute = .section(.dashboard)
     @Published var detailMode: DetailMode = .monitor
     @Published private(set) var configs: [UUID: ServerConnectionConfig] = [:]
-    @Published var selectedTerminalID: UUID?
+    var selectedTerminalID: UUID? {
+        guard terminalRegistry.workspace.selectedTab?.kind == .terminal else { return nil }
+        return terminalRegistry.workspace.activePane
+    }
     @Published private(set) var pendingTrust: HostTrustRequest?
     @Published private(set) var monitoringHistoryError: String?
     @Published private(set) var portForwardSnapshots: [UUID: PortForwardSnapshot] = [:]
@@ -573,7 +577,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    let terminalRegistry = TerminalSessionRegistry()
+    let terminalRegistry: TerminalSessionRegistry
     let eventLog = EventLogStore.shared
     let fleetSummaryState = FleetMonitoringSummaryState()
 
@@ -612,8 +616,10 @@ final class AppState: ObservableObject {
     init(
         trustCoordinator: HostTrustCoordinator,
         monitoringClock: any MonitoringClock = SystemMonitoringClock(),
-        portForwardSupervisor: PortForwardSupervisor = .shared
+        portForwardSupervisor: PortForwardSupervisor = .shared,
+        terminalRegistry: TerminalSessionRegistry? = nil
     ) {
+        self.terminalRegistry = terminalRegistry ?? TerminalSessionRegistry()
         self.trustCoordinator = trustCoordinator
         self.monitoringClock = monitoringClock
         self.portForwardSupervisor = portForwardSupervisor
@@ -894,57 +900,97 @@ final class AppState: ObservableObject {
         }
     }
 
+    func openSession(_ request: SessionOpenRequest, for server: ServerRecord) {
+        guard request.serverID == server.id else { return }
+        let workspace = terminalRegistry.workspace
+        if case .split(let pane, _) = request.policy, !workspace.canSplit(pane) { return }
+        route = .section(.terminal)
+        serverRecords[server.id] = server
+        if request.policy == .reuseRecent,
+           let id = workspace.mostRecentTerminal(for: server.id),
+           let controller = terminalRegistry.controller(for: id) {
+            selectTerminal(controller.session)
+            return
+        }
+        let controller = terminalRegistry.open(for: server, forceNew: true,
+            config: connectionConfig(for: server), startImmediately: false)
+        if case .split(let pane, let axis) = request.policy,
+           !workspace.split(pane, inserting: controller.id, axis: axis) {
+            terminalRegistry.close(controller.id)
+            return
+        }
+        selectTerminal(controller.session)
+        connectTerminal(controller, server: server)
+    }
+
+    @Published private(set) var fileControllers: [UUID: MacSFTPController] = [:]
+
+    func openSFTP(for server: ServerRecord) {
+        route = .section(.terminal)
+        let id = UUID()
+        let controller = MacSFTPController(server: server, appState: self)
+        fileControllers[id] = controller
+        terminalRegistry.workspace.add(sessionID: id, serverID: server.id, title: server.displayName, kind: .sftp)
+        controller.beginIfNeeded()
+    }
+
+    func closeWorkspaceTabs(_ tabs: [WorkspaceTab]) {
+        for tab in tabs {
+            for id in tab.layout.panes {
+                fileControllers.removeValue(forKey: id)?.close()
+                if let controller = terminalRegistry.controller(for: id) { closeTerminal(controller.session) }
+            }
+            terminalRegistry.workspace.remove(tab: tab.id)
+        }
+    }
+
+    func showDetailMode(_ mode: DetailMode) {
+        let serverID = terminalRegistry.workspace.selectedTab?.kind == .terminal && route == .section(.terminal)
+            ? terminalRegistry.controller(for: terminalRegistry.workspace.activePane ?? UUID())?.serverID
+            : route.serverID
+        guard let serverID, let server = serverRecords[serverID] else {
+            if mode == .terminal { route = .section(.terminal) }
+            return
+        }
+        switch mode {
+        case .terminal: openTerminal(for: server)
+        case .sftp: openSFTP(for: server)
+        case .monitor:
+            select(server)
+            route = .server(id: server.id, origin: .machines, mode: .monitor)
+        }
+    }
+
     func openTerminal(for server: ServerRecord) {
-        prepareTerminal(for: server, forceNew: false)
+        openSession(SessionOpenRequest(serverID: server.id), for: server)
     }
 
     func newTerminal(for server: ServerRecord) {
-        prepareTerminal(for: server, forceNew: true)
+        openSession(SessionOpenRequest(serverID: server.id, policy: .newTab), for: server)
+    }
+
+    func splitTerminal(for server: ServerRecord, pane: UUID, axis: TerminalSplitAxis) {
+        openSession(SessionOpenRequest(serverID: server.id, policy: .split(pane: pane, axis: axis)), for: server)
     }
 
     func selectTerminal(_ session: TerminalSession) {
-        let interval = PerformanceTrace.begin(.terminalTabSwitch)
-        defer { PerformanceTrace.end(interval) }
-        if selectedTerminalID != session.id {
-            selectedTerminalID = session.id
-        }
-        if selectedServerID != session.serverID {
-            selectedServerID = session.serverID
-        }
-        selectedConfig = session.config
-        if detailMode != .terminal {
-            detailMode = .terminal
-        }
+        terminalRegistry.workspace.select(pane: session.id)
+        // Monitor selection and the main route are deliberately not changed by panel focus.
     }
 
     func closeTerminal(_ session: TerminalSession, context: ModelContext? = nil) {
-        let closedIndex = terminalSessions.firstIndex { $0.id == session.id } ?? 0
         terminalRegistry.close(session.id)
         if let context {
-            context.insert(
-                TerminalSessionHistory(
-                    serverID: session.serverID,
-                    serverName: session.serverName,
-                    startedAt: session.createdAt,
-                    endedAt: .now,
-                    result: session.status == .failed ? "failed" : "closed"
-                )
-            )
+            context.insert(TerminalSessionHistory(serverID: session.serverID, serverName: session.serverName,
+                startedAt: session.createdAt, endedAt: .now, result: session.status == .failed ? "failed" : "closed"))
             try? context.save()
-        }
-        if selectedTerminalID == session.id {
-            let remaining = terminalSessions
-            if remaining.isEmpty {
-                selectedTerminalID = nil
-                detailMode = .monitor
-            } else {
-                selectTerminal(remaining[min(closedIndex, remaining.count - 1)])
-            }
         }
     }
 
     func reconnectTerminal(_ session: TerminalSession) {
-        terminalRegistry.controller(for: session.id)?.reconnect()
+        guard let controller = terminalRegistry.controller(for: session.id),
+              let server = serverRecords[session.serverID] else { return }
+        connectTerminal(controller, server: server)
     }
 
     func removeRuntimeData(for serverID: UUID) {
@@ -953,6 +999,9 @@ final class AppState: ObservableObject {
         }
         configs[serverID] = nil
         serverRecords[serverID] = nil
+        for (id, controller) in fileControllers where controller.server.id == serverID {
+            controller.close(); fileControllers[id] = nil
+        }
         terminalRegistry.closeAll(for: serverID)
         Task {
             await monitoringCoordinator.remove(serverID: serverID)
@@ -967,6 +1016,8 @@ final class AppState: ObservableObject {
 
     func shutdown() {
         connectivityMonitor.cancel()
+        fileControllers.values.forEach { $0.close() }
+        fileControllers.removeAll()
         terminalRegistry.terminateAll()
         KeyMaterialStore.cleanupAll()
         do {
@@ -1388,51 +1439,35 @@ final class AppState: ObservableObject {
         )
     }
 
-    private func prepareTerminal(for server: ServerRecord, forceNew: Bool) {
+    private func connectTerminal(_ controller: TerminalSessionController, server: ServerRecord, forceScan: Bool = false) {
+        // Allocate the pane before authorization. Completion never navigates or changes focus.
+        controller.terminate()
+        let generation = UUID()
+        controller.connectionGeneration = generation
+        controller.status = .connecting
+        controller.lastError = nil
         let config = connectionConfig(for: server)
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await authorizeConnection(config, source: .terminal)
-                let controller = terminalRegistry.open(
-                    for: server,
-                    forceNew: forceNew,
-                    config: config,
-                    onHostKeyFailure: { [weak self] sessionID in
-                        self?.recoverTerminalAfterHostKeyChange(
-                            sessionID: sessionID,
-                            config: config
-                        )
-                    }
-                )
-                selectedTerminalID = controller.id
-                selectedServerID = server.id
-                selectedConfig = config
-                detailMode = .terminal
-            } catch {
-                guard (error as? ConnectionError) != .cancelled else { return }
-                applyFailure(error, to: server.id, remoteOS: nil)
-            }
+        controller.updateConfig(config)
+        controller.onHostKeyFailure = { [weak self, weak controller, weak server] _ in
+            guard let self, let controller, let server,
+                  self.terminalRegistry.controller(for: controller.id) === controller else { return }
+            self.connectTerminal(controller, server: server, forceScan: true)
         }
-    }
-
-    private func recoverTerminalAfterHostKeyChange(
-        sessionID: UUID,
-        config: ServerConnectionConfig
-    ) {
-        Task { [weak self] in
-            guard let self else { return }
+        controller.connectionTask = Task { [weak self, weak controller] in
+            guard let self, let controller else { return }
             do {
-                try await authorizeConnection(
-                    config,
-                    source: .terminal,
-                    forceScan: true
-                )
-                terminalRegistry.controller(for: sessionID)?.reconnect()
+                try await authorizeConnection(config, source: .terminal, forceScan: forceScan)
+                try Task.checkCancellation()
+                guard controller.connectionGeneration == generation,
+                      terminalRegistry.controller(for: controller.id) === controller else { return }
+                controller.start()
             } catch {
-                guard (error as? ConnectionError) != .cancelled else { return }
-                applyFailure(error, to: config.id, remoteOS: nil)
+                guard controller.connectionGeneration == generation,
+                      terminalRegistry.controller(for: controller.id) === controller else { return }
+                controller.status = (error is CancellationError || (error as? ConnectionError) == .cancelled) ? .disconnected : .failed
+                controller.lastError = controller.status == .disconnected ? "连接已取消；可手动重试。" : error.localizedDescription
             }
+            if controller.connectionGeneration == generation { controller.connectionTask = nil }
         }
     }
 

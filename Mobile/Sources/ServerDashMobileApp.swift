@@ -56,6 +56,12 @@ enum MobileDestination: String, CaseIterable, Identifiable {
     case settings
 
     var id: String { rawValue }
+    var compactDestination: MobileDestination {
+        switch self {
+        case .dashboard, .machines, .sessions: self
+        default: .settings
+        }
+    }
 
     var title: String {
         switch self {
@@ -87,7 +93,9 @@ enum MobileDestination: String, CaseIterable, Identifiable {
 struct MobileRootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var runtime: MobileRuntime
-    @State private var selection: MobileDestination? = .dashboard
+    private var selection: Binding<MobileDestination?> {
+        Binding(get: { runtime.destination }, set: { if let value = $0 { runtime.destination = value } })
+    }
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
     @Query private var identities: [IdentityRecord]
     @Query private var keys: [SSHKeyRecord]
@@ -105,7 +113,7 @@ struct MobileRootView: View {
         Group {
             if horizontalSizeClass == .regular {
                 NavigationSplitView {
-                    List(MobileDestination.allCases, selection: $selection) { destination in
+                    List(MobileDestination.allCases, selection: selection) { destination in
                         Label(destination.title, systemImage: destination.symbol)
                             .tag(destination)
                             .frame(minHeight: 44)
@@ -113,20 +121,20 @@ struct MobileRootView: View {
                     .navigationTitle("ServerDash")
                 } detail: {
                     NavigationStack {
-                        destinationView(selection ?? .dashboard)
-                    }
+                        destinationView(runtime.destination)
+                    }.id(runtime.destination)
                 }
                 .navigationSplitViewStyle(.balanced)
             } else {
-                TabView {
+                TabView(selection: Binding(get: { runtime.destination.compactDestination }, set: { runtime.destination = $0 })) {
                     NavigationStack { MobileDashboardView() }
-                        .tabItem { Label("仪表盘", systemImage: MobileDestination.dashboard.symbol) }
+                        .tabItem { Label("仪表盘", systemImage: MobileDestination.dashboard.symbol) }.tag(MobileDestination.dashboard)
                     NavigationStack { MobileMachinesView() }
-                        .tabItem { Label("机器", systemImage: MobileDestination.machines.symbol) }
+                        .tabItem { Label("机器", systemImage: MobileDestination.machines.symbol) }.tag(MobileDestination.machines)
                     NavigationStack { MobileSessionsView() }
-                        .tabItem { Label("会话", systemImage: MobileDestination.sessions.symbol) }
+                        .tabItem { Label("会话", systemImage: MobileDestination.sessions.symbol) }.tag(MobileDestination.sessions)
                     NavigationStack { MobileMoreView() }
-                        .tabItem { Label("更多", systemImage: "ellipsis.circle") }
+                        .tabItem { Label("更多", systemImage: "ellipsis.circle") }.tag(MobileDestination.settings)
                 }
             }
         }

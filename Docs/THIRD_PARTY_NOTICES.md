@@ -27,6 +27,14 @@ Patch provenance and verification commands are recorded in
 SwiftTerm 1.11.2 remains vendored under its existing license and notices in
 `Vendor/SwiftTerm`.
 
+The workspace adds a ServerDash patch to SwiftTerm: a public visible-row
+cell-decoration callback and background drawing on AppKit/UIKit, a read-only
+absolute command-cursor position for OSC 133 integration, and an open AppKit
+first-responder override for active-pane tracking. The patch does not change
+SSH, authentication, input encoding, buffer contents or copied text. Existing
+SwiftTerm search remains in use. Cross-platform regression tests are in
+`Tests/TerminalWorkspaceTests.swift`.
+
 ## Session archive dependency
 
 ServerDash vendors ZIPFoundation 0.9.20, upstream commit
@@ -66,3 +74,13 @@ SOFTWARE.
 
 Not affiliated with or endorsed by Apple Inc. Apple, macOS, and related marks
 belong to Apple Inc. No Apple assets are included.
+
+## SwiftTerm process isolation follow-up (unreleased)
+
+Local changes in `LocalProcess.swift` and `Mac/MacLocalTerminalView.swift`
+give each reconnect a fresh process delegate while retaining the terminal view.
+Retired macOS PTY processes receive scoped TERM, a 250 ms grace period and KILL
+escalation, and are reaped by their own process source. DispatchIO is stopped
+before descriptor cleanup, and late callbacks cannot target the new process.
+These changes retain SwiftTerm's original license and require the final
+process-lifecycle regression gate documented in `SESSION_NAVIGATION_QA.md`.

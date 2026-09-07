@@ -60,7 +60,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     let id: UUID
     let serverID: UUID
     let serverName: String
-    let config: ServerConnectionConfig
+    private(set) var config: ServerConnectionConfig
+    var connectionTask: Task<Void, Never>?
+    var connectionGeneration = UUID()
     let createdAt: Date
     let hostView: TerminalHostView
     private let attachProcess: Bool
@@ -104,7 +106,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
             appearanceProfile: appearance
         )
         hostView.onTerminated = { [weak self] code in
-            guard let self else { return }
+            guard let self, self.status == .connected else { return }
             self.status = code == 0 ? .disconnected : .failed
             self.lastError = code == 0 ? "会话已结束" : "SSH 进程退出，代码 \(code ?? -1)"
             EventLogStore.shared.append(
@@ -127,8 +129,14 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         status = .connecting
         lastError = nil
         guard attachProcess else { return }
-        hostView.startIfNeeded()
-        status = .connected
+        do {
+            try hostView.startIfNeeded()
+            status = .connected
+        } catch {
+            status = .failed
+            lastError = error.localizedDescription
+            return
+        }
         EventLogStore.shared.append(
             serverID: serverID,
             module: .terminal,
@@ -136,15 +144,15 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         )
     }
 
-    func reconnect() {
-        status = .connecting
-        lastError = "重连会建立新的 Shell，不会恢复远端前台进程。"
-        guard attachProcess else { return }
-        hostView.restart()
-        status = .connected
+    func updateConfig(_ config: ServerConnectionConfig) {
+        self.config = config
+        hostView.updateConfig(config)
     }
 
     func terminate() {
+        connectionGeneration = UUID()
+        connectionTask?.cancel()
+        connectionTask = nil
         if attachProcess {
             hostView.stop()
         }
@@ -192,6 +200,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
 @MainActor
 final class TerminalSessionRegistry: ObservableObject {
     @Published private(set) var controllers: [TerminalSessionController] = []
+    let workspace = TerminalWorkspace()
+    private let attachProcess: Bool
+    init(attachProcess: Bool = true) { self.attachProcess = attachProcess }
 
     var sessions: [TerminalSession] {
         controllers.map(\.session)
@@ -205,18 +216,21 @@ final class TerminalSessionRegistry: ObservableObject {
         for server: ServerRecord,
         forceNew: Bool,
         config: ServerConnectionConfig? = nil,
-        onHostKeyFailure: ((UUID) -> Void)? = nil
+        onHostKeyFailure: ((UUID) -> Void)? = nil,
+        startImmediately: Bool = true
     ) -> TerminalSessionController {
         let interval = PerformanceTrace.begin(.terminalOpen)
         defer { PerformanceTrace.end(interval) }
-        if !forceNew, let existing = controllers.first(where: { $0.serverID == server.id }) {
+        if !forceNew, let id = workspace.mostRecentTerminal(for: server.id), let existing = controller(for: id) {
             existing.onHostKeyFailure = onHostKeyFailure
+            workspace.select(pane: existing.id)
             return existing
         }
-        let controller = TerminalSessionController(server: server, config: config)
+        let controller = TerminalSessionController(server: server, config: config, attachProcess: attachProcess)
         controller.onHostKeyFailure = onHostKeyFailure
         controllers.append(controller)
-        controller.start()
+        workspace.add(sessionID: controller.id, serverID: server.id, title: server.displayName)
+        if startImmediately { controller.start() }
         return controller
     }
 
@@ -224,26 +238,34 @@ final class TerminalSessionRegistry: ObservableObject {
         guard let index = controllers.firstIndex(where: { $0.id == id }) else { return }
         controllers[index].terminate()
         controllers.remove(at: index)
+        workspace.remove(pane: id)
     }
 
     func closeAll(for serverID: UUID) {
-        for controller in controllers where controller.serverID == serverID {
-            controller.terminate()
-        }
-        controllers.removeAll { $0.serverID == serverID }
+        for controller in controllers where controller.serverID == serverID { close(controller.id) }
+        for tab in workspace.tabs where tab.serverID == serverID && tab.kind != .terminal { workspace.remove(tab: tab.id) }
     }
 
     func terminateAll() {
         controllers.forEach { $0.terminate() }
         controllers.removeAll()
+        for tab in workspace.tabs { workspace.remove(tab: tab.id) }
     }
 
     func registerForTesting(_ controller: TerminalSessionController) {
         controllers.append(controller)
+        workspace.add(sessionID: controller.id, serverID: controller.serverID, title: controller.serverName)
     }
 }
 
 final class ServerDashTerminalView: LocalProcessTerminalView {
+    var onFocus: (() -> Void)?
+    var onOutput: (() -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result { onFocus?() }
+        return result
+    }
     var onTerminated: ((Int32?) -> Void)?
     var onHostKeyFailure: (() -> Void)?
     var onFontShortcut: ((TerminalFontShortcut) -> Void)?
@@ -261,12 +283,14 @@ final class ServerDashTerminalView: LocalProcessTerminalView {
     }
 
     override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
+        guard source === process else { return }
         super.processTerminated(source, exitCode: exitCode)
         onTerminated?(exitCode)
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        onOutput?()
         if hostKeyFailureDetector.ingest(slice) {
             onHostKeyFailure?()
         }
@@ -363,7 +387,9 @@ struct TerminalHostKeyFailureDetector {
 final class TerminalHostView: NSView {
     private let terminalView = ServerDashTerminalView(frame: .zero)
     private let sessionID: UUID
-    private let config: ServerConnectionConfig
+    private var config: ServerConnectionConfig
+    let tools: TerminalTools
+    var onFocus: (() -> Void)?
     private var didStart = false
     private var commandObserver: NSObjectProtocol?
     private var appearanceProfile: TerminalAppearanceProfile
@@ -384,8 +410,12 @@ final class TerminalHostView: NSView {
     ) {
         self.sessionID = sessionID
         self.config = config
+        tools = TerminalTools(serverID: config.id)
         self.appearanceProfile = appearanceProfile
         super.init(frame: .zero)
+        tools.attach(terminalView)
+        terminalView.onOutput = { [weak self] in self?.tools.refreshPrompt() }
+        terminalView.onFocus = { [weak self] in self?.onFocus?() }
         wantsLayer = true
         terminalView.onTerminated = { [weak self] code in
             self?.onTerminated?(code)
@@ -429,6 +459,7 @@ final class TerminalHostView: NSView {
 
     override func layout() {
         super.layout()
+        guard bounds.width >= 40, bounds.height >= 20 else { return }
         let terminalFrame = NSRect(
             x: AppleDesign.Spacing.sm,
             y: AppleDesign.Spacing.xs,
@@ -445,9 +476,6 @@ final class TerminalHostView: NSView {
         guard window != nil else { return }
         needsLayout = true
         terminalView.needsDisplay = true
-        DispatchQueue.main.async { [weak self] in
-            self?.focusTerminal()
-        }
     }
 
     func focusTerminal() {
@@ -461,6 +489,8 @@ final class TerminalHostView: NSView {
         action.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
         terminalView.performFindPanelAction(action)
     }
+
+    func sendCommand(_ command: String) { terminalView.send(txt: command); focusTerminal() }
 
     func applyAppearance(_ profile: TerminalAppearanceProfile, dark: Bool) {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -517,50 +547,28 @@ final class TerminalHostView: NSView {
         terminalView.needsDisplay = true
     }
 
-    func startIfNeeded() {
+    func startIfNeeded() throws {
         guard !didStart else { return }
-        didStart = true
-        startSSH()
+        tools.resetCommandBoundary()
+        try startSSH()
+        didStart = terminalView.process.running
+        if !didStart { throw ConnectionError.commandFailed("无法启动 SSH 终端进程。") }
     }
 
-    func restart() {
-        stop()
-        didStart = true
-        startSSH()
-    }
+    func updateConfig(_ config: ServerConnectionConfig) { self.config = config }
 
     func stop() {
         if didStart {
-            terminalView.terminate()
+            terminalView.replaceProcess()
         }
         didStart = false
     }
 
-    private func startSSH() {
+    private func startSSH() throws {
         terminalView.resetHostKeyFailureDetection()
-        do {
-            let plan = try SystemOpenSSHConnectionProvider().launchPlan(
-                for: config,
-                purpose: .interactiveShell
-            )
-            let environment = plan.environment
-                .map { "\($0.key)=\($0.value)" }
-                .sorted()
-            terminalView.startProcess(
-                executable: plan.executable,
-                args: plan.arguments,
-                environment: environment,
-                execName: "ssh"
-            )
-        } catch {
-            EventLogStore.shared.append(
-                serverID: config.id,
-                module: .terminal,
-                level: "error",
-                message: "终端连接路线准备失败"
-            )
-            onTerminated?(-1)
-        }
+        let plan = try SystemOpenSSHConnectionProvider().launchPlan(for: config, purpose: .interactiveShell)
+        let environment = plan.environment.map { "\($0.key)=\($0.value)" }.sorted()
+        terminalView.startProcess(executable: plan.executable, args: plan.arguments, environment: environment, execName: "ssh")
     }
 
     private static func swiftTermColor(_ color: TerminalColor) -> SwiftTerm.Color {

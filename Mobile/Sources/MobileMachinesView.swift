@@ -189,13 +189,13 @@ struct MobileServerDetailView: View {
                 )
 
                 HStack(spacing: 12) {
-                    NavigationLink {
-                        MobileTerminalScreen(controller: runtime.openTerminal(config: config))
+                    Button {
+                        runtime.openSession(SessionOpenRequest(serverID: server.id), config: config)
                     } label: {
                         action("终端", symbol: "terminal")
                     }
-                    NavigationLink {
-                        MobileSFTPView(config: config)
+                    Button {
+                        runtime.openSFTP(config: config, initialPath: server.defaultSFTPPath)
                     } label: {
                         action("SFTP", symbol: "folder")
                     }

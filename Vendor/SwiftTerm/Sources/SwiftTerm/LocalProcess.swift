@@ -190,10 +190,10 @@ public class LocalProcess {
         
         if data.count == 0 {
             childfd = -1
-            if running {
-                childStopped()
-                // delegate.processTerminated (self, exitCode: nil)
-            }
+            #if !os(macOS)
+            if running { childStopped() }
+            #endif
+            // macOS process source owns exit notification and waitpid/reaping.
             return
         }
         var b: [UInt8] = Array.init(repeating: 0, count: data.count)
@@ -223,10 +223,15 @@ public class LocalProcess {
 
     func processTerminated ()
     {
+        guard running else { return }
         var n: Int32 = 0
         waitpid (shellPid, &n, WNOHANG)
-        delegate?.processTerminated(self, exitCode: n)
         childStopped()
+        io?.close(flags: .stop)
+        io = nil
+        childfd = -1
+        shellPid = 0
+        delegate?.processTerminated(self, exitCode: n)
     }
 
     /// Indicates if the child process is currently running
@@ -415,15 +420,18 @@ public class LocalProcess {
         // The cleanup handler ensures FDs are closed AFTER DispatchIO is done with them,
         // preventing "BUG IN CLIENT OF LIBDISPATCH: Unexpected EV_VANISHED" crash
         // This applies to both Subprocess and forkpty paths
-        io?.close()
+        io?.close(flags: .stop)
         io = nil
         childfd = -1
 
-        if shellPid != 0 {
-            kill(shellPid, SIGTERM)
-        }
-
+        let retiringPID = running ? shellPid : 0
         childStopped()
+        shellPid = 0
+        #if os(macOS)
+        if retiringPID > 0 { RetiringPTYProcess(pid: retiringPID).stop() }
+        #else
+        if retiringPID > 0 { kill(retiringPID, SIGTERM) }
+        #endif
     }
     
     var loggingDir: String? = nil
@@ -435,6 +443,45 @@ public class LocalProcess {
     public func setHostLogging (directory: String?)
     {
         loggingDir = directory
+    }
+}
+#endif
+
+#if os(macOS)
+/// Owns a retired child until it has exited AND been reaped. A new shell never
+/// shares this PID, source or escalation timer. Signals are scoped to its PTY group.
+private final class RetiringPTYProcess {
+    let pid: pid_t
+    private let queue = DispatchQueue(label: "SwiftTerm.retiring-process")
+    private var source: DispatchSourceProcess?
+    private var escalation: DispatchWorkItem?
+    init(pid: pid_t) { self.pid = pid }
+    func stop() {
+        queue.async { [self] in
+            let monitor = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
+            source = monitor
+            monitor.setEventHandler { [self] in
+                var status: Int32 = 0
+                _ = waitpid(pid, &status, WNOHANG)
+                escalation?.cancel()
+                escalation = nil
+                source?.setEventHandler(handler: nil)
+                source?.cancel()
+                source = nil
+            }
+            monitor.resume()
+            signal(SIGTERM)
+            let killTask = DispatchWorkItem { [weak self] in
+                guard let self, self.source != nil else { return }
+                self.signal(SIGKILL)
+            }
+            escalation = killTask
+            queue.asyncAfter(deadline: .now() + 0.25, execute: killTask)
+        }
+    }
+    private func signal(_ value: Int32) {
+        if getpgid(pid) == pid { _ = kill(-pid, value) }
+        else { _ = kill(pid, value) }
     }
 }
 #endif

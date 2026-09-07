@@ -1107,6 +1107,21 @@ extension TerminalView {
                 }
             }
 
+            // ServerDash visible-row overlays are drawn behind glyphs, with cell rather than
+            // string offsets so wide characters and composed Unicode remain aligned.
+            if let highlights = cellHighlights?(line) {
+                context.saveGState()
+                for highlight in highlights {
+                    let start = max(0, highlight.columns.lowerBound)
+                    let end = min(displayBuffer.cols, highlight.columns.upperBound)
+                    guard start < end else { continue }
+                    context.setFillColor(highlight.color)
+                    context.fill(CGRect(x: CGFloat(start) * cellDimension.width, y: lineOrigin.y,
+                                        width: CGFloat(end - start) * cellDimension.width, height: cellDimension.height))
+                }
+                context.restoreGState()
+            }
+
             if !lineInfo.boxDrawings.isEmpty {
                 drawBoxDrawings(lineInfo.boxDrawings, lineOrigin: lineOrigin, in: context)
             }

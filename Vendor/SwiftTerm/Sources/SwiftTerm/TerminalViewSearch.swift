@@ -7,8 +7,21 @@
 
 #if os(macOS) || os(iOS) || os(visionOS)
 import Foundation
+import CoreGraphics
+
+public struct TerminalCellHighlight {
+    public let columns: Range<Int>
+    public let color: CGColor
+    public init(columns: Range<Int>, color: CGColor) { self.columns = columns; self.color = color }
+}
 
 extension TerminalView {
+    /// ServerDash shell-integration coordinates, independent of the user's scroll position.
+    public var commandCursorPosition: Position? {
+        guard !terminal.isCurrentBufferAlternate else { return nil }
+        let cursor = terminal.getCursorLocation()
+        return Position(col: cursor.x, row: terminal.buffer.yBase + cursor.y)
+    }
     /// Finds the next match for `term`, selects it, and optionally scrolls it into view.
     /// - Parameters:
     ///   - term: The search term.

@@ -357,14 +357,7 @@ struct ServerDetailView: View {
             )
             Divider().opacity(0.55)
 
-            switch mode {
-            case .monitor:
-                ServerMonitorLayoutView(server: server, runtime: runtime)
-            case .terminal:
-                TerminalWorkspaceView(server: server)
-            case .sftp:
-                SFTPBrowserView(server: server)
-            }
+            ServerMonitorLayoutView(server: server, runtime: runtime)
         }
         .background(Color.appGround)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

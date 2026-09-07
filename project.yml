@@ -53,6 +53,7 @@ targets:
       - path: Tests
     dependencies:
       - target: ServerDash
+      - package: SwiftTerm
       - package: ZIPFoundation
     settings:
       base:
@@ -82,6 +83,9 @@ targets:
       - path: Sources/SessionTransfer.swift
       - path: Sources/SessionTransferAdapters.swift
       - path: Sources/SessionTransferViews.swift
+      - path: Sources/TerminalWorkspace.swift
+      - path: Sources/TerminalTools.swift
+      - path: Sources/TerminalToolsViews.swift
       - path: Resources
         buildPhase: resources
     dependencies:
@@ -115,8 +119,10 @@ targets:
     sources:
       - path: Mobile/Tests
       - path: Tests/SessionTransferTests.swift
+      - path: Tests/TerminalWorkspaceTests.swift
     dependencies:
       - target: ServerDashMobile
+      - package: SwiftTerm
       - package: ZIPFoundation
     settings:
       base:

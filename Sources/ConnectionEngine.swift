@@ -410,6 +410,7 @@ actor ConnectionProcessController {
 
     private struct ActiveProcess {
         let process: Process
+        var readers: [ProcessPipeReader] = []
         var summary: ProcessRunSummary
     }
 
@@ -530,34 +531,16 @@ actor ConnectionProcessController {
         try? inputPipe.fileHandleForWriting.close()
 
         let controller = self
-        let outputTask = Task.detached(priority: .utility) {
-            try Self.readCapped(
-                outputPipe.fileHandleForReading,
-                limit: request.maxOutputBytes,
-                onLimit: {
-                    Task {
-                        await controller.requestTermination(
-                            runID: runID,
-                            reason: .outputLimitExceeded
-                        )
-                    }
-                }
-            )
+        let onLimit: @Sendable () -> Void = {
+            Task { await controller.requestTermination(runID: runID, reason: .outputLimitExceeded) }
         }
-        let errorTask = Task.detached(priority: .utility) {
-            try Self.readCapped(
-                errorPipe.fileHandleForReading,
-                limit: min(request.maxOutputBytes, 128_000),
-                onLimit: {
-                    Task {
-                        await controller.requestTermination(
-                            runID: runID,
-                            reason: .outputLimitExceeded
-                        )
-                    }
-                }
-            )
-        }
+        let outputReader = ProcessPipeReader(outputPipe.fileHandleForReading, limit: request.maxOutputBytes, onLimit: onLimit)
+        let errorReader = ProcessPipeReader(errorPipe.fileHandleForReading, limit: min(request.maxOutputBytes, 128_000), onLimit: onLimit)
+        processes[runID]?.readers = [outputReader, errorReader]
+        // No parent writer may keep EOF pending after the child exits.
+        try? outputPipe.fileHandleForWriting.close()
+        try? errorPipe.fileHandleForWriting.close()
+        if Task.isCancelled { requestTermination(runID: runID, reason: .cancelled) }
 
         let timeoutTask = Task.detached(priority: .utility) { [weak self] in
             do {
@@ -569,7 +552,6 @@ actor ConnectionProcessController {
         }
 
         await waitForExit(process)
-        timeoutTask.cancel()
         if let cancellationInterval = cancellationIntervals.removeValue(forKey: runID) {
             PerformanceTrace.end(cancellationInterval)
         }
@@ -578,21 +560,20 @@ actor ConnectionProcessController {
         var errorData = Data()
         var readFailure: Error?
         do {
-            output = try await outputTask.value
+            output = try await outputReader.value()
         } catch {
             readFailure = error
         }
         do {
-            errorData = try await errorTask.value
+            errorData = try await errorReader.value()
         } catch {
             if readFailure == nil {
                 readFailure = error
             }
         }
 
-        try? outputPipe.fileHandleForReading.close()
-        try? errorPipe.fileHandleForReading.close()
 
+        timeoutTask.cancel()
         var terminationReason = processes[runID]?.summary.terminationReason ?? .exited
         if terminationReason == .running {
             terminationReason = .exited
@@ -658,6 +639,7 @@ actor ConnectionProcessController {
         if cancellationIntervals[runID] == nil {
             cancellationIntervals[runID] = PerformanceTrace.begin(.processCancelToExit)
         }
+        active.readers.forEach { $0.cancel() }
         send(signal: SIGTERM, to: active)
         guard escalationTasks[runID] == nil else { return }
         let grace = terminationGrace
@@ -704,27 +686,83 @@ actor ConnectionProcessController {
         }
     }
 
-    private static func readCapped(
-        _ handle: FileHandle,
-        limit: Int,
-        chunkSize: Int = 32_768,
-        onLimit: @escaping @Sendable () -> Void
-    ) throws -> Data {
-        let resolvedLimit = max(0, limit)
-        let resolvedChunkSize = min(65_536, max(16_384, chunkSize))
-        var data = Data()
-        data.reserveCapacity(min(resolvedLimit, resolvedChunkSize * 2))
+
+}
+
+/// Nonblocking, event-driven pipe draining. All state and the fd lifetime belong
+/// to one serial queue; cancellation never waits for a blocking FileHandle read.
+private final class ProcessPipeReader: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.serverdash.process.pipe", qos: .utility)
+    private let source: DispatchSourceRead
+    private let handle: FileHandle
+    private let limit: Int
+    private let onLimit: @Sendable () -> Void
+    private var bytes = Data()
+    private var result: Result<Data, Error>?
+    private var continuation: CheckedContinuation<Data, Error>?
+    private var fileClosed = false
+
+    init(_ handle: FileHandle, limit: Int, onLimit: @escaping @Sendable () -> Void) {
+        self.handle = handle
+        self.limit = max(0, limit)
+        self.onLimit = onLimit
+        let fd = handle.fileDescriptor
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+        source.setEventHandler { [weak self] in self?.drain() }
+        source.setCancelHandler { [self] in
+            try? handle.close()
+            fileClosed = true
+            source.setEventHandler(handler: nil)
+            source.setCancelHandler(handler: nil)
+            if let result, let continuation {
+                self.continuation = nil
+                continuation.resume(with: result)
+            }
+        }
+        source.resume()
+    }
+
+    func value() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                if fileClosed, let result { continuation.resume(with: result) }
+                else { self.continuation = continuation }
+            }
+        }
+    }
+
+    func cancel() { queue.async { [self] in finish(.failure(CancellationError())) } }
+
+    private func finish(_ value: Result<Data, Error>) {
+        guard result == nil else { return }
+        result = value
+        source.cancel()
+    }
+
+    private func drain() {
+        guard result == nil else { return }
+        var buffer = [UInt8](repeating: 0, count: 32_768)
         while true {
-            try Task.checkCancellation()
-            guard let chunk = try handle.read(upToCount: resolvedChunkSize), !chunk.isEmpty else {
-                return data
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count > 0 {
+                guard count <= limit - bytes.count else {
+                    finish(.failure(ConnectionError.outputLimitExceeded))
+                    onLimit()
+                    return
+                }
+                bytes.append(contentsOf: buffer.prefix(count))
+            } else if count == 0 {
+                finish(.success(bytes))
+                return
+            } else if errno == EINTR {
+                continue
+            } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                return
+            } else {
+                finish(.failure(ConnectionError.commandFailed("无法读取子进程输出。")))
+                return
             }
-            let remaining = max(0, resolvedLimit - data.count)
-            guard chunk.count <= remaining else {
-                onLimit()
-                throw ConnectionError.outputLimitExceeded
-            }
-            data.append(chunk)
         }
     }
 }

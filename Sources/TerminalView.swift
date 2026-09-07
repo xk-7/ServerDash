@@ -11,6 +11,9 @@ struct TerminalShortcutActions {
     let appearance: () -> Void
     let inspector: () -> Void
     let switchTab: (Int) -> Void
+    var splitRight: () -> Void = {}
+    var splitBelow: () -> Void = {}
+    var closePane: () -> Void = {}
 }
 
 private struct TerminalShortcutActionsKey: FocusedValueKey {
@@ -39,6 +42,19 @@ struct TerminalCommands: Commands {
             Button("新建 SSH 标签页") { perform { $0.newTab() } }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(actions == nil)
+            Divider()
+            Button("垂直分屏（右侧）") { perform { $0.splitRight() } }
+                .keyboardShortcut("d", modifiers: [.control, .shift])
+                .disabled(actions?.hasSession != true)
+            Button("水平分屏（下方）") { perform { $0.splitBelow() } }
+                .keyboardShortcut("e", modifiers: [.control, .shift])
+                .disabled(actions?.hasSession != true)
+            Button("关闭活跃面板") { perform { $0.closePane() } }
+                .keyboardShortcut("w", modifiers: [.control, .shift])
+                .disabled(actions?.hasSession != true)
+            Button("搜索当前终端") { perform { $0.find() } }
+                .keyboardShortcut("f", modifiers: .control)
+                .disabled(actions?.hasSession != true)
             Divider()
             Button("增大字号") { perform { $0.font(.increase) } }
                 .keyboardShortcut("+", modifiers: .command)
@@ -72,10 +88,9 @@ struct TerminalCommands: Commands {
 
 struct TerminalWorkspaceView: View {
     @EnvironmentObject private var appState: AppState
-    let server: ServerRecord
 
     var body: some View {
-        TerminalWorkspaceContent(server: server, registry: appState.terminalRegistry)
+        TerminalWorkspaceContent(registry: appState.terminalRegistry, workspace: appState.terminalRegistry.workspace)
     }
 }
 
@@ -85,20 +100,23 @@ private struct TerminalWorkspaceContent: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \CommandSnippetRecord.title) private var snippets: [CommandSnippetRecord]
+    @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
     @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
     @SceneStorage("terminal.inspector.visible") private var showingInspector = false
     @SceneStorage("terminal.inspector.tab") private var inspectorTab = "status"
 
-    let server: ServerRecord
+    @State private var showingServerPicker = false
+    @State private var pendingClose: [WorkspaceTab] = []
     @ObservedObject var registry: TerminalSessionRegistry
+    @ObservedObject var workspace: TerminalWorkspace
 
     private var selectedSession: TerminalSession? {
         selectedController?.session
     }
 
     private var selectedController: TerminalSessionController? {
-        guard let id = appState.selectedTerminalID else { return nil }
+        guard workspace.selectedTab?.kind == .terminal, let id = workspace.activePane else { return nil }
         return registry.controller(for: id)
     }
 
@@ -106,69 +124,83 @@ private struct TerminalWorkspaceContent: View {
         guard !showingAppearance, snippetPendingExecution == nil else { return nil }
         return TerminalShortcutActions(
             hasSession: selectedController != nil,
-            canSwitchTabs: selectedController != nil && registry.controllers.count > 1,
-            newTab: { appState.newTerminal(for: server) },
+            canSwitchTabs: workspace.tabs.count > 1,
+            newTab: { if let activeServer { appState.newTerminal(for: activeServer) } else { showingServerPicker = true } },
             font: { selectedController?.performFontShortcut($0) },
-            find: { selectedController?.hostView.showFindPanel() },
+            find: { selectedController?.hostView.tools.searchVisible.toggle() },
             appearance: { showingAppearance = true },
             inspector: { showingInspector.toggle() },
-            switchTab: switchTab
+            switchTab: switchTab,
+            splitRight: { if let activeServer { split(.right, server: activeServer) } },
+            splitBelow: { if let activeServer { split(.below, server: activeServer) } },
+            closePane: { if let selectedSession { appState.closeTerminal(selectedSession, context: modelContext) } }
         )
     }
 
     private func switchTab(by offset: Int) {
-        let sessions = registry.sessions
-        guard sessions.count > 1,
-              let index = sessions.firstIndex(where: { $0.id == appState.selectedTerminalID }) else { return }
-        let next = (index + offset + sessions.count) % sessions.count
-        appState.selectTerminal(sessions[next])
+        workspace.advance(offset)
+        if let tab = workspace.selectedTab { select(tab) }
+    }
+
+    private var activeServer: ServerRecord? { servers.first { $0.id == (selectedController?.serverID ?? workspace.selectedTab?.serverID) } }
+    private func split(_ axis: TerminalSplitAxis, server: ServerRecord) {
+        if let id = workspace.activePane { appState.splitTerminal(for: server, pane: id, axis: axis) }
+    }
+    private func select(_ tab: WorkspaceTab) {
+        workspace.select(tab: tab.id)
+        if let controller = registry.controller(for: tab.activePane) {
+            appState.selectTerminal(controller.session)
+            controller.hostView.focusTerminal()
+        }
+    }
+    private func close(_ tab: WorkspaceTab) { requestClose([tab]) }
+    private func requestClose(_ tabs: [WorkspaceTab]) {
+        if tabs.contains(where: { tab in tab.layout.panes.contains { appState.fileControllers[$0]?.hasActiveTransfer == true } }) {
+            pendingClose = tabs
+        } else { appState.closeWorkspaceTabs(tabs) }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: AppleDesign.Spacing.xs) {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: AppleDesign.Spacing.xxs) {
-                            ForEach(registry.controllers) { controller in
-                                TerminalTab(
-                                    controller: controller,
-                                    title: tabTitle(for: controller),
-                                    isSelected: controller.id == appState.selectedTerminalID,
-                                    onSelect: {
-                                        appState.selectTerminal(controller.session)
-                                        controller.hostView.focusTerminal()
-                                    },
-                                    onClose: {
-                                        appState.closeTerminal(controller.session, context: modelContext)
-                                    }
-                                )
-                                .id(controller.id)
-                            }
-                        }
-                        .padding(.top, AppleDesign.Spacing.xxs)
-                    }
-                    .onChange(of: appState.selectedTerminalID, initial: true) { _, id in
-                        if let id {
-                            withAnimation(reduceMotion ? nil : AppleDesign.quick) {
-                                proxy.scrollTo(id, anchor: .center)
-                            }
-                        }
-                    }
-                }
+                WorkspaceTabStrip(workspace: workspace, onSelect: select, onClose: close, onCloseMultiple: requestClose)
 
                 Divider()
                     .frame(height: 20)
 
-                Button {
-                    appState.newTerminal(for: server)
+                Button("选择机器") { showingServerPicker = true }
+                Menu {
+                    Button("整理为网格（最多 4×4）") { workspace.arrangeGrid() }
+                        .disabled(workspace.selectedTab?.kind != .terminal)
+                    if let selectedController {
+                        if (workspace.selectedTab?.layout.panes.count ?? 0) > 1 {
+                            Button(workspace.zoomedPane == nil ? "放大活跃面板" : "还原分屏") {
+                                workspace.toggleZoom(pane: selectedController.id)
+                                selectedController.hostView.focusTerminal()
+                            }
+                        }
+                        Button("关闭活跃面板", role: .destructive) {
+                            appState.closeTerminal(selectedController.session, context: modelContext)
+                        }
+                    }
+                    Divider()
+                    ForEach(servers) { target in
+                        Menu(target.displayName) {
+                            Button("SSH 新标签") { appState.newTerminal(for: target) }
+                            Button("SFTP 新标签") { appState.openSFTP(for: target) }
+                            Button("监控新标签") { workspace.add(serverID: target.id, title: target.displayName, kind: .monitor) }
+                            Divider()
+                            Button("右侧分屏") { split(.right, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
+                            Button("下方分屏") { split(.below, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
+                        }
+                    }
                 } label: {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 32, height: 32)
-                .help("为 \(server.displayName) 新建 SSH 标签页（⌘T）")
-                .accessibilityLabel("新建 SSH 标签页")
+                .help("新建标签（⌘T）、分屏与面板操作")
+                .accessibilityLabel("新建标签与面板操作")
                 if let selectedController {
                     Menu {
                         Button("终端外观…", systemImage: "paintpalette") {
@@ -194,7 +226,7 @@ private struct TerminalWorkspaceContent: View {
                     .help("终端外观")
                     .accessibilityLabel("终端外观与字号")
                     Button {
-                        selectedController.hostView.showFindPanel()
+                        selectedController.hostView.tools.searchVisible.toggle()
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
@@ -244,37 +276,56 @@ private struct TerminalWorkspaceContent: View {
                 .fill(Color.appHairline.opacity(0.55))
                 .frame(height: 1)
 
-            if let selectedController {
-                TerminalSessionPane(
-                    controller: selectedController,
-                    onReconnect: { appState.reconnectTerminal(selectedController.session) }
-                )
-            } else {
-                VStack(spacing: 0) {
-                    ServerLocationMapView(server: server)
-                        .frame(height: 260)
-                        .padding(AppleDesign.Spacing.lg)
-                    Divider()
-                    ContentUnavailableView {
-                        Label("没有打开的终端", systemImage: "terminal")
-                    } description: {
-                        Text("地图显示服务器公网出口的大致位置。创建标签页以连接 \(server.displayName)。")
-                    } actions: {
-                        Button("新建 SSH 终端") {
-                            appState.newTerminal(for: server)
+            ZStack {
+                ForEach(workspace.tabs.filter { $0.kind != .terminal && $0.id == workspace.selectedTabID }) { tab in
+                    if let target = servers.first(where: { $0.id == tab.serverID }) {
+                        Group {
+                            if tab.kind == .sftp { if let controller = appState.fileControllers[tab.activePane] { SFTPBrowserView(controller: controller) } }
+                            else { ServerMonitorLayoutView(server: target, runtime: appState.runtime(for: target)) }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .opacity(workspace.selectedTabID == tab.id ? 1 : 0)
+                        .allowsHitTesting(workspace.selectedTabID == tab.id)
+                        .accessibilityHidden(workspace.selectedTabID != tab.id)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            if let tab = workspace.selectedTab {
+                if tab.kind == .terminal {
+                    TerminalSplitLayout(node: workspace.renderedLayout ?? tab.layout, resize: { workspace.resize(divider: $0, ratio: $1) }) { id in
+                        if let controller = registry.controller(for: id) {
+                            TerminalSessionPane(controller: controller, isActive: id == workspace.activePane, onReconnect: { appState.reconnectTerminal(controller.session) })
+                            .overlay { Rectangle().stroke(id == workspace.activePane ? Color.accentColor : .clear, lineWidth: 1).allowsHitTesting(false) }
+                            .onAppear {
+                                controller.hostView.onFocus = { [weak controller, weak appState] in
+                                    if let controller { appState?.selectTerminal(controller.session) }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("没有打开的会话", systemImage: "terminal")
+                } description: {
+                    Text("选择机器打开终端；新建标签或分屏可建立独立连接。")
+                } actions: {
+                    Button("选择机器") { showingServerPicker = true }.buttonStyle(.borderedProminent)
+                }
+            }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .confirmationDialog("取消传输并关闭所选标签？", isPresented: Binding(get: { !pendingClose.isEmpty }, set: { if !$0 { pendingClose = [] } })) {
+            Button("取消传输并关闭", role: .destructive) { appState.closeWorkspaceTabs(pendingClose); pendingClose = [] }
+            Button("保留会话", role: .cancel) { pendingClose = [] }
+        } message: { Text("进行中的传输将取消，需要从头重新传输。") }
+        .sheet(isPresented: $showingServerPicker) {
+            SessionServerPicker(servers: servers) { appState.openTerminal(for: $0) }
+        }
         .inspector(isPresented: $showingInspector) {
-            if let selectedController {
+            if let selectedController, let activeServer {
                 TerminalInspectorView(
-                    server: server, controller: selectedController,
-                    runtime: appState.runtime(for: server), snippets: snippets,
+                    server: activeServer, controller: selectedController,
+                    runtime: appState.runtime(for: activeServer), snippets: snippets,
                     refreshInterval: appState.refreshInterval,
                     selectedTab: $inspectorTab,
                     onInsert: { requestSnippet($0, into: selectedController.id, execute: false) },
@@ -584,6 +635,7 @@ struct TerminalInspectorView: View {
 
 private struct TerminalSessionPane: View {
     @ObservedObject var controller: TerminalSessionController
+    var isActive = true
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("hideIPInformation") private var hideIPInformation = false
     let onReconnect: () -> Void
@@ -604,6 +656,10 @@ private struct TerminalSessionPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if isActive {
+                TerminalToolsBar(tools: controller.hostView.tools, connected: controller.status == .connected,
+                                 send: controller.hostView.sendCommand)
+            }
             PersistentTerminalView(controller: controller)
                 // The controller owns the persistent NSView; a different session must mount its own view.
                 .id(controller.id)

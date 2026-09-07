@@ -125,10 +125,12 @@ final class MobileHostTrustBroker: ObservableObject {
 
 @MainActor
 final class MobileRuntime: ObservableObject {
+    @Published var destination: MobileDestination = .dashboard
     @Published private(set) var snapshots: [UUID: ServerSnapshot] = [:]
     @Published private(set) var statuses: [UUID: ServerConnectionStatus] = [:]
     @Published private(set) var errors: [UUID: String] = [:]
     @Published private(set) var terminalControllers: [UUID: MobileTerminalController] = [:]
+    let terminalWorkspace = TerminalWorkspace()
     @Published private(set) var isBackgrounded = false
     @Published private(set) var refreshingServerIDs: Set<UUID> = []
 
@@ -313,13 +315,30 @@ final class MobileRuntime: ObservableObject {
 
     func reconcileServers(_ servers: [ServerRecord]) {
         let existing = Set(servers.map(\.id))
-        let known = Set(statuses.keys).union(snapshots.keys).union(requestIDs.keys).union(terminalControllers.keys)
+        let known = Set(statuses.keys).union(snapshots.keys).union(requestIDs.keys).union(terminalWorkspace.tabs.map(\.serverID))
         for id in known.subtracting(existing) { removeServer(serverID: id) }
         for server in servers where !server.enableDashboardMonitor { cancelMonitor(serverID: server.id) }
     }
 
-    func openTerminal(config: ServerConnectionConfig) -> MobileTerminalController {
-        if let existing = terminalControllers[config.id] {
+    @discardableResult
+    func openSession(_ request: SessionOpenRequest, config: ServerConnectionConfig) -> MobileTerminalController? {
+        guard request.serverID == config.id else { return nil }
+        if case .split(let pane, _) = request.policy, !terminalWorkspace.canSplit(pane) { return nil }
+        destination = .sessions
+        let controller = openTerminal(config: config, forceNew: request.policy != .reuseRecent)
+        if case .split(let pane, let axis) = request.policy,
+           !terminalWorkspace.split(pane, inserting: controller.id, axis: axis) {
+            closeTerminal(sessionID: controller.id)
+            return nil
+        }
+        // The controller owns the task, independent of whether the pane is on screen.
+        controller.beginIfNeeded()
+        return controller
+    }
+
+    func openTerminal(config: ServerConnectionConfig, forceNew: Bool = false) -> MobileTerminalController {
+        if !forceNew, let id = terminalWorkspace.mostRecentTerminal(for: config.id), let existing = terminalControllers[id] {
+            terminalWorkspace.select(pane: existing.id)
             return existing
         }
         let controller = MobileTerminalController(
@@ -327,13 +346,45 @@ final class MobileRuntime: ObservableObject {
             engine: engine,
             trustBroker: trustBroker
         )
-        terminalControllers[config.id] = controller
+        terminalControllers[controller.id] = controller
+        terminalWorkspace.add(sessionID: controller.id, serverID: config.id, title: config.name)
         return controller
     }
 
+    @Published private(set) var fileControllers: [UUID: MobileSFTPController] = [:]
+
+    func openSFTP(config: ServerConnectionConfig, initialPath: String = ".") {
+        destination = .sessions
+        let id = UUID()
+        let controller = MobileSFTPController(config: config, engine: engine, broker: trustBroker, initialPath: initialPath)
+        fileControllers[id] = controller
+        terminalWorkspace.add(sessionID: id, serverID: config.id, title: config.name, kind: .sftp)
+        controller.beginIfNeeded()
+    }
+
+    func closeWorkspaceTabs(_ tabs: [WorkspaceTab]) {
+        for tab in tabs {
+            for id in tab.layout.panes {
+                if let controller = fileControllers.removeValue(forKey: id) { Task { await controller.stop() } }
+                closeTerminal(sessionID: id)
+            }
+            terminalWorkspace.remove(tab: tab.id)
+        }
+    }
+
     func closeTerminal(serverID: UUID) {
-        guard let controller = terminalControllers.removeValue(forKey: serverID) else { return }
-        Task { await controller.close() }
+        for (id, controller) in fileControllers where controller.config.id == serverID {
+            fileControllers[id] = nil
+            Task { await controller.stop() }
+        }
+        for controller in terminalControllers.values where controller.config.id == serverID { closeTerminal(sessionID: controller.id) }
+        for tab in terminalWorkspace.tabs where tab.serverID == serverID && tab.kind != .terminal { terminalWorkspace.remove(tab: tab.id) }
+    }
+
+    func closeTerminal(sessionID: UUID) {
+        guard let controller = terminalControllers.removeValue(forKey: sessionID) else { return }
+        terminalWorkspace.remove(pane: sessionID)
+        Task { await controller.dispose() }
     }
 
     func suspendForBackground() {
@@ -341,6 +392,7 @@ final class MobileRuntime: ObservableObject {
         isBackgrounded = true
         for serverID in Array(requestIDs.keys) { cancelMonitor(serverID: serverID) }
         trustBroker.rejectAll()
+        for controller in fileControllers.values { Task { await controller.stop(background: true) } }
         for controller in terminalControllers.values {
             Task { await controller.interruptForBackground() }
         }
@@ -355,18 +407,24 @@ final class MobileRuntime: ObservableObject {
 @MainActor
 final class MobileTerminalController: ObservableObject, Identifiable {
     let id = UUID()
-    let config: ServerConnectionConfig
+    private(set) var config: ServerConnectionConfig
+    private var disposed = false
+    lazy var surface = MobileTerminalSurface(controller: self)
+    lazy var tools = TerminalTools(serverID: config.id)
+    private var hasStarted = false
+    private var initialConnectionTask: Task<Void, Never>?
+    private var generation = UUID()
+    private var dimensions = RemoteShellDimensions.standard
+    private var writeTask: Task<Void, Never>?
 
     @Published private(set) var status: TerminalConnectionStatus = .connecting
     @Published private(set) var lastError: String?
-    @Published private(set) var outputRevision = 0
 
     private let engine: any RemoteConnectionEngine
     private let trustBroker: MobileHostTrustBroker
     private var session: (any RemoteSession)?
     private var shell: (any RemoteShellSession)?
     private var readerTask: Task<Void, Never>?
-    private var pendingOutput: [Data] = []
 
     init(
         config: ServerConnectionConfig,
@@ -378,8 +436,41 @@ final class MobileTerminalController: ObservableObject, Identifiable {
         self.trustBroker = trustBroker
     }
 
-    func connect(dimensions: RemoteShellDimensions = .standard) async {
-        await close()
+    func beginIfNeeded() {
+        guard !hasStarted, !disposed else { return }
+        hasStarted = true
+        initialConnectionTask = Task { [weak self] in await self?.connect() }
+    }
+
+    func reconnect(config: ServerConnectionConfig) {
+        guard !disposed else { return }
+        self.config = config
+        initialConnectionTask?.cancel()
+        initialConnectionTask = Task { [weak self] in await self?.connect() }
+    }
+
+    func startIfNeeded() async {
+        guard !hasStarted, !disposed else { return }
+        hasStarted = true
+        // The session owns initial connection work. Unmounting a tab must not cancel its handshake.
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.connect()
+        }
+        initialConnectionTask = task
+        await task.value
+        initialConnectionTask = nil
+    }
+
+    func connect(dimensions: RemoteShellDimensions? = nil) async {
+        guard !disposed, !Task.isCancelled else { return }
+        hasStarted = true
+        let request = UUID()
+        generation = request
+        await detach()
+        guard generation == request else { return }
+        if let dimensions { self.dimensions = dimensions }
+        tools.resetCommandBoundary()
         status = .connecting
         lastError = nil
         do {
@@ -388,43 +479,50 @@ final class MobileTerminalController: ObservableObject, Identifiable {
             let session = try await engine.connect(config) { presentation in
                 try await broker.evaluate(presentation)
             }
-            let shell = try await session.openShell(dimensions: dimensions)
+            guard generation == request, !Task.isCancelled else { await session.close(); return }
+            let shell: any RemoteShellSession
+            do { shell = try await session.openShell(dimensions: self.dimensions) }
+            catch { await session.close(); throw error }
+            guard generation == request, !Task.isCancelled else { await shell.close(); await session.close(); return }
             self.session = session
             self.shell = shell
             status = .connected
             readerTask = Task { [weak self] in
                 do {
                     for try await data in shell.events {
-                        guard !Task.isCancelled else { return }
-                        self?.pendingOutput.append(data)
-                        self?.outputRevision &+= 1
+                        guard !Task.isCancelled, self?.generation == request else { return }
+                        self?.surface.terminal.feed(byteArray: Array(data)[...])
+                        self?.tools.refreshPrompt()
                     }
-                    if self?.status == .connected {
+                    if self?.generation == request, self?.status == .connected {
                         self?.status = .disconnected
                     }
                 } catch is CancellationError {
                 } catch {
-                    self?.status = .failed
-                    self?.lastError = error.localizedDescription
+                    if self?.generation == request {
+                        self?.status = .failed
+                        self?.lastError = error.localizedDescription
+                    }
                 }
+                if self?.generation == request { await self?.detach() }
             }
         } catch {
+            guard generation == request else { return }
             status = .failed
             lastError = error.localizedDescription
         }
     }
 
-    func drainOutput() -> [Data] {
-        defer { pendingOutput.removeAll(keepingCapacity: true) }
-        return pendingOutput
-    }
-
     func send(_ data: Data) {
         guard let shell else { return }
-        Task {
+        let request = generation, previous = writeTask
+        writeTask = Task {
+            await previous?.value
+            guard !Task.isCancelled, generation == request else { return }
             do {
                 try await shell.write(data)
             } catch {
+                guard generation == request else { return }
                 self.lastError = error.localizedDescription
                 self.status = .failed
             }
@@ -432,24 +530,50 @@ final class MobileTerminalController: ObservableObject, Identifiable {
     }
 
     func resize(_ dimensions: RemoteShellDimensions) {
+        self.dimensions = dimensions
         guard let shell else { return }
         Task { try? await shell.resize(dimensions) }
     }
 
     func interruptForBackground() async {
         guard status == .connecting || status == .connected else { return }
-        await close()
+        initialConnectionTask?.cancel()
+        let request = UUID()
+        generation = request
+        hasStarted = true
+        await detach()
+        guard generation == request else { return }
         status = .interrupted
         lastError = "iOS 已暂停后台 SSH；请返回终端后重新连接。"
     }
 
     func close() async {
+        initialConnectionTask?.cancel()
+        let request = UUID()
+        generation = request
+        hasStarted = true
+        await detach()
+        guard generation == request else { return }
+        if status != .interrupted { status = .disconnected }
+    }
+
+    func dispose() async {
+        disposed = true
+        surface.terminal.onFocus = nil
+        surface.terminal.onShortcut = nil
+        surface.terminal.updateUiClosed()
+        await close()
+    }
+
+    private func detach() async {
+        writeTask?.cancel()
+        writeTask = nil
         readerTask?.cancel()
         readerTask = nil
-        if let shell { await shell.close() }
-        if let session { await session.close() }
+        let oldShell = shell, oldSession = session
         shell = nil
         session = nil
-        if status != .interrupted { status = .disconnected }
+        if let oldShell { await oldShell.close() }
+        if let oldSession { await oldSession.close() }
     }
 }
