@@ -14,9 +14,9 @@ struct SessionOpenRequest: Equatable {
 
 enum TerminalSplitAxis: String, Codable, Sendable { case right, below }
 enum WorkspaceTabKind: String, Codable, CaseIterable, Sendable {
-    case terminal, sftp, monitor
-    var title: String { switch self { case .terminal: "SSH"; case .sftp: "SFTP"; case .monitor: "监控" } }
-    var icon: String { switch self { case .terminal: "terminal"; case .sftp: "folder"; case .monitor: "chart.xyaxis.line" } }
+    case terminal, sftp, monitor, rdp
+    var title: String { switch self { case .terminal: "SSH"; case .sftp: "SFTP"; case .monitor: "监控"; case .rdp: "RDP" } }
+    var icon: String { switch self { case .terminal: "terminal"; case .sftp: "folder"; case .monitor: "chart.xyaxis.line"; case .rdp: "desktopcomputer" } }
 }
 
 /// A tree, not a grid: each divider owns a stable ratio and each leaf owns one session.
@@ -85,6 +85,10 @@ final class TerminalWorkspace: ObservableObject {
     @Published private(set) var zoomedPane: UUID?
     private var paneServers: [UUID: UUID] = [:]
     private var recentPanes: [UUID] = []
+    private var recentTabs: [UUID] = []
+    func mostRecentRDP(for serverID: UUID) -> WorkspaceTab? {
+        recentTabs.lazy.compactMap { id in self.tabs.first { $0.id == id && $0.kind == .rdp && $0.serverID == serverID } }.first
+    }
     func mostRecentTerminal(for serverID: UUID) -> UUID? {
         recentPanes.first { paneServers[$0] == serverID }
     }
@@ -133,11 +137,14 @@ final class TerminalWorkspace: ObservableObject {
     }
     func select(tab id: UUID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        recentTabs.removeAll { $0 == id }; recentTabs.insert(id, at: 0)
         if selectedTabID != id { zoomedPane = nil; selectedTabID = id }
         recordUse(tab.activePane)
     }
     func select(pane id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.layout.panes.contains(id) }) else { return }
+        let tabID = tabs[index].id
+        recentTabs.removeAll { $0 == tabID }; recentTabs.insert(tabID, at: 0)
         recordUse(id)
         if tabs[index].activePane != id { tabs[index].activePane = id }
         if zoomedPane != nil, zoomedPane != id { zoomedPane = id }
@@ -173,6 +180,7 @@ final class TerminalWorkspace: ObservableObject {
     }
     func remove(tab id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        recentTabs.removeAll { $0 == id }
         forget(tabs[index].layout.panes)
         tabs.remove(at: index)
         if selectedTabID == id {

@@ -39,7 +39,7 @@ struct TerminalCommands: Commands {
 
     var body: some Commands {
         CommandMenu("终端") {
-            Button("新建 SSH 标签页") { perform { $0.newTab() } }
+            Button("新建会话标签页") { perform { $0.newTab() } }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(actions == nil)
             Divider()
@@ -101,6 +101,7 @@ private struct TerminalWorkspaceContent: View {
     @EnvironmentObject private var appState: AppState
     @Query(sort: \CommandSnippetRecord.title) private var snippets: [CommandSnippetRecord]
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
+    @Query(sort: \RDPConnectionRecord.name) private var rdpMachines: [RDPConnectionRecord]
     @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
     @SceneStorage("terminal.inspector.visible") private var showingInspector = false
@@ -127,7 +128,11 @@ private struct TerminalWorkspaceContent: View {
         return TerminalShortcutActions(
             hasSession: selectedController != nil,
             canSwitchTabs: workspace.tabs.count > 1,
-            newTab: { if let activeServer { appState.newTerminal(for: activeServer) } else { showingServerPicker = true } },
+            newTab: {
+                if workspace.selectedTab?.kind == .rdp, let record = rdpMachines.first(where: { $0.id == workspace.selectedTab?.serverID }) {
+                    appState.openRDP(record, newTab: true)
+                } else if let activeServer { appState.newTerminal(for: activeServer) } else { showingServerPicker = true }
+            },
             font: { selectedController?.performFontShortcut($0) },
             find: { selectedController?.hostView.tools.searchVisible.toggle() },
             appearance: { showingAppearance = true },
@@ -144,7 +149,10 @@ private struct TerminalWorkspaceContent: View {
         if let tab = workspace.selectedTab { select(tab) }
     }
 
-    private var activeServer: ServerRecord? { servers.first { $0.id == (selectedController?.serverID ?? workspace.selectedTab?.serverID) } }
+    private var activeServer: ServerRecord? {
+        guard workspace.selectedTab?.kind != .rdp else { return nil }
+        return servers.first { $0.id == (selectedController?.serverID ?? workspace.selectedTab?.serverID) }
+    }
     private func split(_ axis: TerminalSplitAxis, server: ServerRecord) {
         if let id = workspace.activePane { appState.splitTerminal(for: server, pane: id, axis: axis) }
     }
@@ -157,7 +165,7 @@ private struct TerminalWorkspaceContent: View {
     }
     private func close(_ tab: WorkspaceTab) { requestClose([tab]) }
     private func requestClose(_ tabs: [WorkspaceTab]) {
-        if tabs.contains(where: { tab in tab.layout.panes.contains { appState.fileControllers[$0]?.hasActiveTransfer == true } }) {
+        if tabs.contains(where: { tab in tab.layout.panes.contains { appState.fileControllers[$0]?.hasActiveTransfer == true || appState.rdpControllers[$0]?.hasActiveTransfer == true } }) {
             pendingClose = tabs
         } else { appState.closeWorkspaceTabs(tabs) }
     }
@@ -173,9 +181,8 @@ private struct TerminalWorkspaceContent: View {
 
                 Button("选择机器") { showingServerPicker = true }
                 Menu {
-                    Button("整理为网格（最多 4×4）") { workspace.arrangeGrid() }
-                        .disabled(workspace.selectedTab?.kind != .terminal)
                     if let selectedController {
+                        Button("整理为网格（最多 4×4）") { workspace.arrangeGrid() }
                         if (workspace.selectedTab?.layout.panes.count ?? 0) > 1 {
                             Button(workspace.zoomedPane == nil ? "放大活跃面板" : "还原分屏") {
                                 workspace.toggleZoom(pane: selectedController.id)
@@ -187,14 +194,19 @@ private struct TerminalWorkspaceContent: View {
                         }
                     }
                     Divider()
+                    ForEach(rdpMachines) { target in
+                        Button("RDP · \(target.displayName)", systemImage: "desktopcomputer") { appState.openRDP(target, newTab: true) }
+                    }
                     ForEach(servers) { target in
                         Menu(target.displayName) {
                             Button("SSH 新标签") { appState.newTerminal(for: target) }
                             Button("SFTP 新标签") { appState.openSFTP(for: target) }
                             Button("监控新标签") { workspace.add(serverID: target.id, title: target.displayName, kind: .monitor) }
-                            Divider()
-                            Button("右侧分屏") { split(.right, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
-                            Button("下方分屏") { split(.below, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
+                            if workspace.selectedTab?.kind == .terminal {
+                                Divider()
+                                Button("右侧分屏") { split(.right, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
+                                Button("下方分屏") { split(.below, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
+                            }
                         }
                     }
                 } label: {
@@ -258,13 +270,15 @@ private struct TerminalWorkspaceContent: View {
                     .help("插入代码片段")
                     .accessibilityLabel("代码片段")
                 }
-                Button {
-                    inspectorTab = "ai"; showingInspector = true
-                } label: {
-                    Image(systemName: "sparkles")
+                if selectedController != nil {
+                    Button {
+                        inspectorTab = "ai"; showingInspector = true
+                    } label: {
+                        Image(systemName: "sparkles")
+                    }
+                    .buttonStyle(.borderless).frame(width: 32, height: 32)
+                    .help("打开 AI 助手").accessibilityLabel("打开 AI 助手")
                 }
-                .buttonStyle(.borderless).frame(width: 32, height: 32)
-                .help("打开 AI 助手").accessibilityLabel("打开 AI 助手")
                 Button {
                     showingInspector.toggle()
                 } label: {
@@ -273,7 +287,7 @@ private struct TerminalWorkspaceContent: View {
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 32, height: 32)
-                .help("显示 AI、状态与代码片段（⌘⌥I）")
+                .help(workspace.selectedTab?.kind == .rdp ? "显示 RDP 状态" : "显示 AI、状态与代码片段（⌘⌥I）")
                 .accessibilityLabel(showingInspector ? "隐藏终端检查器" : "显示终端检查器")
             }
             .controlSize(.regular)
@@ -286,8 +300,11 @@ private struct TerminalWorkspaceContent: View {
                 .frame(height: 1)
 
             ZStack {
+                if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
+                    RDPDesktopPane(controller: controller).id(controller.id)
+                }
                 ForEach(workspace.tabs.filter { $0.kind != .terminal && $0.id == workspace.selectedTabID }) { tab in
-                    if let target = servers.first(where: { $0.id == tab.serverID }) {
+                    if tab.kind != .rdp, let target = servers.first(where: { $0.id == tab.serverID }) {
                         Group {
                             if tab.kind == .sftp { if let controller = appState.fileControllers[tab.activePane] { SFTPBrowserView(controller: controller) } }
                             else { ServerMonitorLayoutView(server: target, runtime: appState.runtime(for: target)) }
@@ -328,10 +345,18 @@ private struct TerminalWorkspaceContent: View {
             Button("保留会话", role: .cancel) { pendingClose = [] }
         } message: { Text("进行中的传输将取消，需要从头重新传输。") }
         .sheet(isPresented: $showingServerPicker) {
-            SessionServerPicker(servers: servers) { appState.openTerminal(for: $0) }
+            RDPSessionPicker(servers: servers, rdpMachines: rdpMachines,
+                onSSH: { appState.openTerminal(for: $0) }, onRDP: { appState.openRDP($0) })
         }
         .inspector(isPresented: $showingInspector) {
-            if let selectedController, let activeServer {
+            if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("RDP 状态", systemImage: "desktopcomputer").font(.headline)
+                    Text(controller.configuration.name)
+                    Text("NLA/CredSSP · TLS 1.2+")
+                    Text("远程桌面不提供 SSH AI、命令片段或终端录制。")
+                }.padding().inspectorColumnWidth(min: 280, ideal: 320, max: 400)
+            } else if let selectedController, let activeServer {
                 TerminalInspectorView(
                     server: activeServer, controller: selectedController,
                     runtime: appState.runtime(for: activeServer), snippets: snippets,

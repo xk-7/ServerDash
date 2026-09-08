@@ -10,13 +10,16 @@
 		03F2C9D87EEF91EB67A14869 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA3D23AC51B51EA56248DE7F /* Models.swift */; };
 		04307D5E2F9EF3313EC93B49 /* TrustedHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F07DD8B9A1DEB2284D8A85B /* TrustedHosts.swift */; };
 		0514A7F1D10C4AAC28A9C614 /* ConnectionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */; };
+		0539460E0924052B348BBC1E /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 74A8C9C138CB51DC85E3205D /* Carbon.framework */; };
 		0B53C768D1C73AFCE328A891 /* SessionTransferAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84C18F14529B79AC72BFE6C /* SessionTransferAdapters.swift */; };
 		0C8C732B5BF9E36736B37F56 /* themes.json in Resources */ = {isa = PBXBuildFile; fileRef = B3FD877C201A30AA5ED80CBC /* themes.json */; };
 		0C95646D8A167F5BD9E02937 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
 		102FAC76A74E85319F8D9E3D /* RemoteConnectionContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788A40AAE53965A03CA17693 /* RemoteConnectionContractTests.swift */; };
+		10FBD04F85EFB49909D8A898 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 732A06F8DECF6756FE9AA2D8 /* MetalKit.framework */; };
 		128724D3D69B69FDB6A53EFC /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7B9A7128821971D27B4E3F /* Persistence.swift */; };
 		1A9DDC1ECF155D9C314AB9DA /* TerminalWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044ACF9048C24197D32E1C1F /* TerminalWorkspace.swift */; };
 		1DD6167D45D75A6CA479734F /* SFTPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943DE456AB8EBE7128B9AF0E /* SFTPService.swift */; };
+		211930D0A68D0130E314F488 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E675A39B0515887894D4CEDF /* Security.framework */; };
 		212C7E2A794E9B4A130301E5 /* ServerDashApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */; };
 		238745A74AC12D25A894ADF4 /* SFTPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943DE456AB8EBE7128B9AF0E /* SFTPService.swift */; };
 		24762C6AA30A0B13E451406E /* RecordingPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA4FEA0225E7354D67785595 /* RecordingPlayback.swift */; };
@@ -24,6 +27,7 @@
 		275E0A98FA85262D626D2071 /* SessionTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6799CCA26301904D11052EBA /* SessionTransfer.swift */; };
 		2905A618664D7D33C2CC875E /* MonitorDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABAF8D2D559E4E9913860862 /* MonitorDetailViews.swift */; };
 		2B10618EA7A302B318BA5719 /* ResourceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DBF7489718D78F03CFD571B /* ResourceViews.swift */; };
+		2B73275DB61BD850F060AEAB /* self-signed.pem in Resources */ = {isa = PBXBuildFile; fileRef = C5A08E9F4FAADDC4B34214E9 /* self-signed.pem */; };
 		2BFC78C52C15C7E62BE1E533 /* MobileDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB50C1D56853BEFCF4D0BEF3 /* MobileDashboardView.swift */; };
 		2C5125E79643C8C644726583 /* ServerMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E69BF1FDC095C8CA263A7E /* ServerMonitorView.swift */; };
 		2E2F246254EA8D6E4774E4BF /* TerminalToolsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED575547C74EBA0B07883934 /* TerminalToolsViews.swift */; };
@@ -31,19 +35,25 @@
 		2FED97A6D70245600F86E9C2 /* FoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09BE650CB059896F0CEFF8D2 /* FoundationTests.swift */; };
 		3249071CF63DC3907FD21E57 /* SessionTransferAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84C18F14529B79AC72BFE6C /* SessionTransferAdapters.swift */; };
 		32BD194CEC38B2F0C10A5D3C /* DashboardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72AFCD45B23730D303190D42 /* DashboardViews.swift */; };
+		33A78284A4C95CBEC4B1D219 /* libiconv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 78C4114F78B8DF7360ED91BE /* libiconv.tbd */; };
 		352961429662FB28ADEB7E2B /* MobileSFTPView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C96309249086793018F225F /* MobileSFTPView.swift */; };
+		3ED607FFEDFF306003FE83B5 /* FreeRDP-WinPR-LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 8F140F522378E6CB10D809AD /* FreeRDP-WinPR-LICENSE */; };
 		3F49CD8D3E26FEE90022B46F /* MonitoringHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */; };
+		3FE7AE4A1683D6DA437844A4 /* RDPDesktopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D07009E23A6B4853DAEC5310 /* RDPDesktopView.swift */; };
 		42A3B1EA12DE009C08D483F5 /* MobileResourcesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D64E3A954F3D57AEEDF9DC6 /* MobileResourcesViews.swift */; };
+		496D95432BCBBD1802F67C68 /* SDRDPDrive.m in Sources */ = {isa = PBXBuildFile; fileRef = EF4EC42BA41F0214F837F806 /* SDRDPDrive.m */; };
 		4BB25D17D57E99D1400875D2 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
 		4D56CED4D65D6CEDC0725E01 /* TerminalTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2579C848F637AF5CE5FB1934 /* TerminalTools.swift */; };
 		4E36DA5D3CD4BD6ADA9B8D67 /* MobileCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CFE70EF86407C9418107EE /* MobileCompatibility.swift */; };
 		522AF81A2580A69ACA86DF11 /* AIAssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659F4C0B2DD0598AE5F53192 /* AIAssistantTests.swift */; };
+		524F6CF9FAA79D5D5C494F1E /* cpufeatures-NOTICE in Resources */ = {isa = PBXBuildFile; fileRef = C9D9C70CE2F90AA15B9FC388 /* cpufeatures-NOTICE */; };
 		5A59C813DEF4AAA9A34F856D /* TerminalWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044ACF9048C24197D32E1C1F /* TerminalWorkspace.swift */; };
 		5B200D9D7285DE7BC76FAF62 /* ProfessionalConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */; };
 		5D1ECA6BAC4A15B7BCBA8603 /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BA641DDE28754C1E7F14AA /* Services.swift */; };
 		5E24FACEE8C72F0CA902D64D /* TerminalTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2579C848F637AF5CE5FB1934 /* TerminalTools.swift */; };
 		5E73E1B1026586F912AABECE /* RecordingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37DFE6F809A7AB41F2393A65 /* RecordingViews.swift */; };
 		5FBE0D9DE5D2BE5BF4322280 /* MonitoringHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28CB56C032111EE4D021A5A5 /* MonitoringHistory.swift */; };
+		6104C2400D9714B569AED565 /* SDRDPDirectory.m in Sources */ = {isa = PBXBuildFile; fileRef = 32FD286DF2D4AE0EA84588C1 /* SDRDPDirectory.m */; };
 		626393443C800D657021FC1F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA3D23AC51B51EA56248DE7F /* Models.swift */; };
 		629396E81B7F994F4AF6DF15 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */; };
 		63562B2CB987BEF23019E9B2 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4938275841C70334CC6EC61C /* AIModels.swift */; };
@@ -54,6 +64,7 @@
 		684CCF714F344DA86E6DDE0B /* MonitorLayoutStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 429FD61E1936AAB5EC5860C9 /* MonitorLayoutStoreTests.swift */; };
 		6CB96BC56DAF0013B427057F /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BA641DDE28754C1E7F14AA /* Services.swift */; };
 		6F88E9F3E181A4BB69546BBE /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE7A846E41C1811B95FF217 /* TerminalView.swift */; };
+		7532F226A90C28F34F30A40D /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 986E939883D94F272BACCCAD /* AVFoundation.framework */; };
 		756FF0CB6E1DBA94517F211D /* TrustedHostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4D01D3F221186769CB54C4 /* TrustedHostsView.swift */; };
 		781FE38C87594E82B1747363 /* MobileTerminalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793C40E2AC376B9E66951A2D /* MobileTerminalViews.swift */; };
 		786E5460DCF8005C8691F884 /* SidebarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */; };
@@ -62,16 +73,20 @@
 		7EBF9323797F21EDF9389BF2 /* ProfessionalConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */; };
 		803CC3401F8F7E10A3E1CA48 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = AA46F43239D4FA31925075E0 /* NIOSSH */; };
 		80FA26DF28CFAD70B969F321 /* CitadelRemoteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7640E5C8D07051AC352AE4B6 /* CitadelRemoteConnection.swift */; };
+		8187029F98BA72B83E138D08 /* RDPConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2107259D0ABD91CF073B73A0 /* RDPConnection.swift */; };
+		823663D576F41ABF57DDAAB1 /* RDPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998C312449EDD8E6FE5DB791 /* RDPTests.swift */; };
 		84935DD5450868CD0715D626 /* MobileSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC28BB9D0E9E88D414D22F89 /* MobileSettingsView.swift */; };
 		858DD08AB44FFD6239827F1F /* MobileTrustLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBFF726785965F2AE20CB92 /* MobileTrustLifecycleTests.swift */; };
 		87458EA809B16E0AFF24B760 /* RecordingFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81275B3E207BA4B0BC138698 /* RecordingFormat.swift */; };
 		8862FBFFF8FCB548419A8F73 /* DisplayFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB4D429C12E8558788B4533 /* DisplayFormat.swift */; };
 		88D89F88B5EF58F6C6BFE5D5 /* TerminalSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */; };
+		8A22D637A2F653379B561B50 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 9E510A86D21DC34CA5CF6CCE /* libz.tbd */; };
 		8E8077147BFA5B278F1BF2D8 /* AIProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 591FF81D314B8BB8687742AE /* AIProviderTests.swift */; };
 		901E02342A4F9A02B5B480DC /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 70B6B824137C0C8BE8DDACBC /* ZIPFoundation */; };
 		90BC550556157E01A255199B /* DisplayFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB4D429C12E8558788B4533 /* DisplayFormat.swift */; };
 		917D5D1111BC58E0BDBE869D /* MonitoringHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8977A7C4041AE3769BA6797 /* MonitoringHistoryView.swift */; };
 		92EECC31CD4873FA64B045E1 /* MonitorLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A3251FDD3D3B5EF5C4D9C16 /* MonitorLayout.swift */; };
+		94E096A828AA4EE270440149 /* RDPModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416E27C802516BD32B140263 /* RDPModels.swift */; };
 		964723CD4FF4F524BA4E7253 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = CF2D87D501E49D0CF0146CAA /* SwiftTerm */; };
 		96D5243F43F41C3978C7BA37 /* TerminalAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5922649DA8CDEBB3C7A963F5 /* TerminalAppearance.swift */; };
 		96F2EF85FAFBE1A40421CB3B /* MobileFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029595E88FA8270DB9B567A7 /* MobileFoundationTests.swift */; };
@@ -79,18 +94,22 @@
 		98975C1A363FED85E59FA30A /* EditorAndSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */; };
 		9A3A6D3247E5F06480D0D33D /* SessionTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AAFA5678E5B901A677C53A8 /* SessionTransferTests.swift */; };
 		9AB76B8335AFE9FE81BF7D78 /* SFTPListingParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */; };
+		9B1880F857531EDF8BAE845D /* RDPViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C05CB196E605F36FF299FE19 /* RDPViews.swift */; };
 		A06758132146DBCFCFB84B54 /* ProfessionalConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */; };
 		A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */; };
 		AADDFE9AF2318C0561DD2F16 /* RecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89EC7D51D0C23C05C379049A /* RecordingTests.swift */; };
 		B0A1873ABCFDB642FB08089B /* DesignGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */; };
 		B152A8EB774592B5A9FF269A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E316E9C6F6836AA6547B6942 /* Assets.xcassets */; };
 		B49477888AB091C7730B40F4 /* MonitorLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A3251FDD3D3B5EF5C4D9C16 /* MonitorLayout.swift */; };
+		BA2CAF20BFC71BBEBEA3B1E3 /* ServerDashRDP.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */; };
+		BACC71C6D175B7E33C7EFA0A /* RDPSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D91E27B832EFE05AA546F3 /* RDPSecurity.swift */; };
 		BAE8B974A04A77E4530DA1E7 /* TerminalWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */; };
 		C0E74D88BC523BE29BE48325 /* LICENSES.md in Resources */ = {isa = PBXBuildFile; fileRef = 52A7F90E5D1EBBC61944D38A /* LICENSES.md */; };
 		C404D5DA72EBDDBEA231ED08 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 49A9C58D06480F064871D0E3 /* SwiftTerm */; };
 		C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = B31B612E337EB371ED8FE01C /* SwiftTerm */; };
 		C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */; };
 		C6A8D452937B19ED2D734BB4 /* AIConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA8450851728A2571A0B595 /* AIConversationStore.swift */; };
+		C6CFA4CD077B53B3FF5E4263 /* SystemConfiguration.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FBD57098CAEAA854B44ABBB8 /* SystemConfiguration.framework */; };
 		C7FE7E6F6410B4D6BC49E7C1 /* ProfessionalConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */; };
 		C95E5418CF1AC02801571D74 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 29E2FE17013CA0CE6C3D49F5 /* ZIPFoundation */; };
 		CB2C227EA367B1DF03DD3B26 /* TerminalWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */; };
@@ -100,11 +119,14 @@
 		CF6813CD37ACDC631AAB05A6 /* MobileMachinesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE60D4240E4D237FB043D36 /* MobileMachinesView.swift */; };
 		D10B3A1E51B241CB738ECD91 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 7E1172A00C83A6643BA518C9 /* SwiftTerm */; };
 		D1322B02393D953EF47B0428 /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0CAFE89439CF85C159C42F /* AIProviders.swift */; };
+		D15E5FCD054E95DE3066D7BF /* SDRDPClient.m in Sources */ = {isa = PBXBuildFile; fileRef = 59DBB4521CB49D3AD2E59693 /* SDRDPClient.m */; };
 		D22602BBCE11D41A341CCAEA /* MobileMonitoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF28CDCD49A1BB59CBED9C36 /* MobileMonitoringTests.swift */; };
 		D5753998C729737254C87A77 /* CitadelAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC4699A6676D0A98E30AA649 /* CitadelAdapterTests.swift */; };
+		D939317C2FC7FC33FF1ADD68 /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 95241F1C72E5830D6DFCD8D8 /* libc++.tbd */; };
 		D99D7A6BA127C07D541E62E6 /* PortForwarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DFF908A3A8D318995EC034 /* PortForwarding.swift */; };
 		D9C13650C00BBACB6154146B /* TerminalAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */; };
 		DA03823ED55969BDB609C053 /* TerminalToolsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED575547C74EBA0B07883934 /* TerminalToolsViews.swift */; };
+		DBB6D50E09953077151BDDDA /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 79D6B83942E1EAC2FE02CD76 /* README.md */; };
 		DC537BF8A738012B96641B04 /* ServerLocationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */; };
 		DEF5530AFE2E007C4C168326 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 80FE03CAEBE62B769020413B /* ZIPFoundation */; };
 		E18C6B55CF197822BB11B3E5 /* SessionTransferViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D631EF7AAC344FFBC9D7FA /* SessionTransferViews.swift */; };
@@ -115,13 +137,18 @@
 		E73294DAF16C948592F30749 /* AIProviderAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701B411D7D8928252EC76CA1 /* AIProviderAdapter.swift */; };
 		E76782694612DD8B7041AFE1 /* TrustedHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F07DD8B9A1DEB2284D8A85B /* TrustedHosts.swift */; };
 		EB4839F84B60B255E2D68A86 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBCD7321B546E993FC42494 /* ContentView.swift */; };
+		ECF72E4C4525C27BB52B9979 /* OpenSSL-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1C6DED281D30C82CE3E9ACA6 /* OpenSSL-LICENSE.txt */; };
 		EEC0A120B9976B4AE9E22CA9 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */; };
 		F021D26D8F32D3D73CFAA922 /* themes.json in Resources */ = {isa = PBXBuildFile; fileRef = B3FD877C201A30AA5ED80CBC /* themes.json */; };
+		F167EDE9B3D69A0D11D2F3EA /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E49F0C0AD62F3AB3124FE21D /* CoreAudio.framework */; };
 		F18CEDA9A7E02F64369F0B0E /* RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D22C250E0FC322B0965101 /* RecordingStore.swift */; };
 		F36D8A946BB74E17BDC42226 /* AIViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EFCAB99B9533CAFDF2D9ED /* AIViews.swift */; };
+		F383DD1A468D0860604F544B /* RDPClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C504CB4A64B4D9D33BF4AE39 /* RDPClipboard.swift */; };
 		F59BB85EA8589084A1E1AD95 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = CA63ABB51C81C06F62256CA4 /* ZIPFoundation */; };
 		F6ACE78D064CA0A2F3DC7B78 /* ServerDashMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1266F10821FE9CAFA6B83E42 /* ServerDashMobileApp.swift */; };
 		F78CB9A2EEACF35A4CC05A5D /* SessionTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AAFA5678E5B901A677C53A8 /* SessionTransferTests.swift */; };
+		FC05F66A20D647AAEB43D9D3 /* RDPModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416E27C802516BD32B140263 /* RDPModels.swift */; };
+		FD41B5677D6BEB36BF835EE2 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53E324974ECF388F5D29D187 /* AudioToolbox.framework */; };
 		FDFF97A00305812E2727EE58 /* Citadel in Frameworks */ = {isa = PBXBuildFile; productRef = 496876A2B16B26B8216B2B61 /* Citadel */; };
 /* End PBXBuildFile section */
 
@@ -149,6 +176,8 @@
 		1266F10821FE9CAFA6B83E42 /* ServerDashMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashMobileApp.swift; sourceTree = "<group>"; };
 		198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringResponseParserTests.swift; sourceTree = "<group>"; };
 		19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		1C6DED281D30C82CE3E9ACA6 /* OpenSSL-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OpenSSL-LICENSE.txt"; sourceTree = "<group>"; };
+		2107259D0ABD91CF073B73A0 /* RDPConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPConnection.swift; sourceTree = "<group>"; };
 		2135C1DFA4DD05EE66E1B7BE /* ServerDashMobile.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ServerDashMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2579C848F637AF5CE5FB1934 /* TerminalTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalTools.swift; sourceTree = "<group>"; };
 		28C06E89908346AD04C27796 /* Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift; sourceTree = "<group>"; };
@@ -156,10 +185,12 @@
 		2C0CAFE89439CF85C159C42F /* AIProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviders.swift; sourceTree = "<group>"; };
 		2F07DD8B9A1DEB2284D8A85B /* TrustedHosts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedHosts.swift; sourceTree = "<group>"; };
 		2F15C4AA65F5856F88252649 /* ServerDashTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ServerDashTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		32FD286DF2D4AE0EA84588C1 /* SDRDPDirectory.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SDRDPDirectory.m; sourceTree = "<group>"; };
 		37DFE6F809A7AB41F2393A65 /* RecordingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingViews.swift; sourceTree = "<group>"; };
 		393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringHistoryTests.swift; sourceTree = "<group>"; };
 		3D64E3A954F3D57AEEDF9DC6 /* MobileResourcesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileResourcesViews.swift; sourceTree = "<group>"; };
 		416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPView.swift; sourceTree = "<group>"; };
+		416E27C802516BD32B140263 /* RDPModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPModels.swift; sourceTree = "<group>"; };
 		429FD61E1936AAB5EC5860C9 /* MonitorLayoutStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorLayoutStoreTests.swift; sourceTree = "<group>"; };
 		450F63708D3343F645EA1658 /* MobileSSHIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSSHIntegrationTests.swift; sourceTree = "<group>"; };
 		45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPListingParserTests.swift; sourceTree = "<group>"; };
@@ -168,10 +199,13 @@
 		4938275841C70334CC6EC61C /* AIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModels.swift; sourceTree = "<group>"; };
 		4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashApp.swift; sourceTree = "<group>"; };
 		52A7F90E5D1EBBC61944D38A /* LICENSES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSES.md; sourceTree = "<group>"; };
+		53E324974ECF388F5D29D187 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		552061E634B9FC53278770DA /* Citadel */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Citadel; path = Vendor/Citadel; sourceTree = SOURCE_ROOT; };
 		591FF81D314B8BB8687742AE /* AIProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderTests.swift; sourceTree = "<group>"; };
 		5922649DA8CDEBB3C7A963F5 /* TerminalAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearance.swift; sourceTree = "<group>"; };
+		59DBB4521CB49D3AD2E59693 /* SDRDPClient.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SDRDPClient.m; sourceTree = "<group>"; };
 		5B428436A02C28484585B06A /* ServerDash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ServerDash.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5C09421B485CA64924EF2FDA /* SDRDPDirectory.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SDRDPDirectory.h; sourceTree = "<group>"; };
 		5C7B9A7128821971D27B4E3F /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
 		5CA8450851728A2571A0B595 /* AIConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConversationStore.swift; sourceTree = "<group>"; };
 		5DBF7489718D78F03CFD571B /* ResourceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceViews.swift; sourceTree = "<group>"; };
@@ -181,16 +215,21 @@
 		6799CCA26301904D11052EBA /* SessionTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransfer.swift; sourceTree = "<group>"; };
 		69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnectionsView.swift; sourceTree = "<group>"; };
 		69DFF908A3A8D318995EC034 /* PortForwarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwarding.swift; sourceTree = "<group>"; };
+		6D8B4CE6BA3CE8A22BAA9165 /* SDRDPClient.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SDRDPClient.h; sourceTree = "<group>"; };
 		6FE1E7D6FFE095FB47F50E5D /* AIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIClient.swift; sourceTree = "<group>"; };
 		701B411D7D8928252EC76CA1 /* AIProviderAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderAdapter.swift; sourceTree = "<group>"; };
 		72AFCD45B23730D303190D42 /* DashboardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViews.swift; sourceTree = "<group>"; };
+		732A06F8DECF6756FE9AA2D8 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		735EFA378239958E015D2E5F /* TerminalAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearanceTests.swift; sourceTree = "<group>"; };
 		749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignGallery.swift; sourceTree = "<group>"; };
+		74A8C9C138CB51DC85E3205D /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
 		7640E5C8D07051AC352AE4B6 /* CitadelRemoteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CitadelRemoteConnection.swift; sourceTree = "<group>"; };
 		7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceModelTests.swift; sourceTree = "<group>"; };
 		787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceTests.swift; sourceTree = "<group>"; };
 		788A40AAE53965A03CA17693 /* RemoteConnectionContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnectionContractTests.swift; sourceTree = "<group>"; };
+		78C4114F78B8DF7360ED91BE /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
 		793C40E2AC376B9E66951A2D /* MobileTerminalViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTerminalViews.swift; sourceTree = "<group>"; };
+		79D6B83942E1EAC2FE02CD76 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		7A3251FDD3D3B5EF5C4D9C16 /* MonitorLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorLayout.swift; sourceTree = "<group>"; };
 		7AAFA5678E5B901A677C53A8 /* SessionTransferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransferTests.swift; sourceTree = "<group>"; };
 		7B84A7CD97572085B52C03BD /* ServerDashMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ServerDashMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -198,13 +237,19 @@
 		8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorAndSettingsViews.swift; sourceTree = "<group>"; };
 		89EC7D51D0C23C05C379049A /* RecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTests.swift; sourceTree = "<group>"; };
 		8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEngine.swift; sourceTree = "<group>"; };
+		8F140F522378E6CB10D809AD /* FreeRDP-WinPR-LICENSE */ = {isa = PBXFileReference; path = "FreeRDP-WinPR-LICENSE"; sourceTree = "<group>"; };
 		91EFCAB99B9533CAFDF2D9ED /* AIViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIViews.swift; sourceTree = "<group>"; };
 		943DE456AB8EBE7128B9AF0E /* SFTPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPService.swift; sourceTree = "<group>"; };
+		95241F1C72E5830D6DFCD8D8 /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		96A03B9CC41965EBB77F02A9 /* MobileRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRuntime.swift; sourceTree = "<group>"; };
+		986E939883D94F272BACCCAD /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		998C312449EDD8E6FE5DB791 /* RDPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPTests.swift; sourceTree = "<group>"; };
 		99D22C250E0FC322B0965101 /* RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStore.swift; sourceTree = "<group>"; };
 		9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerLocationView.swift; sourceTree = "<group>"; };
 		9C96309249086793018F225F /* MobileSFTPView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSFTPView.swift; sourceTree = "<group>"; };
+		9E510A86D21DC34CA5CF6CCE /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 		A2842B41AFC38BF899197783 /* SSHConfigImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfigImport.swift; sourceTree = "<group>"; };
+		A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ServerDashRDP.xcframework; path = .build/rdp/ServerDashRDP.xcframework; sourceTree = "<group>"; };
 		A8D631EF7AAC344FFBC9D7FA /* SessionTransferViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransferViews.swift; sourceTree = "<group>"; };
 		AAE7A846E41C1811B95FF217 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		ABAF8D2D559E4E9913860862 /* MonitorDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorDetailViews.swift; sourceTree = "<group>"; };
@@ -216,13 +261,21 @@
 		BB4D01D3F221186769CB54C4 /* TrustedHostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedHostsView.swift; sourceTree = "<group>"; };
 		BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearanceViews.swift; sourceTree = "<group>"; };
 		BC28BB9D0E9E88D414D22F89 /* MobileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSettingsView.swift; sourceTree = "<group>"; };
+		C05CB196E605F36FF299FE19 /* RDPViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPViews.swift; sourceTree = "<group>"; };
+		C504CB4A64B4D9D33BF4AE39 /* RDPClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPClipboard.swift; sourceTree = "<group>"; };
+		C5A08E9F4FAADDC4B34214E9 /* self-signed.pem */ = {isa = PBXFileReference; path = "self-signed.pem"; sourceTree = "<group>"; };
 		C7CFE70EF86407C9418107EE /* MobileCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileCompatibility.swift; sourceTree = "<group>"; };
+		C9D9C70CE2F90AA15B9FC388 /* cpufeatures-NOTICE */ = {isa = PBXFileReference; path = "cpufeatures-NOTICE"; sourceTree = "<group>"; };
 		CA3D23AC51B51EA56248DE7F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CDC9EAAE3C61DFAD5E81F985 /* SidebarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViews.swift; sourceTree = "<group>"; };
+		D07009E23A6B4853DAEC5310 /* RDPDesktopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPDesktopView.swift; sourceTree = "<group>"; };
 		D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnections.swift; sourceTree = "<group>"; };
 		DA4FEA0225E7354D67785595 /* RecordingPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayback.swift; sourceTree = "<group>"; };
 		E0D26040F23F5DC88D6DF1C8 /* SwiftTerm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftTerm; path = Vendor/SwiftTerm; sourceTree = SOURCE_ROOT; };
 		E316E9C6F6836AA6547B6942 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E49F0C0AD62F3AB3124FE21D /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		E675A39B0515887894D4CEDF /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		E6D91E27B832EFE05AA546F3 /* RDPSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RDPSecurity.swift; sourceTree = "<group>"; };
 		E8977A7C4041AE3769BA6797 /* MonitoringHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringHistoryView.swift; sourceTree = "<group>"; };
 		E9E69BF1FDC095C8CA263A7E /* ServerMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerMonitorView.swift; sourceTree = "<group>"; };
 		EB50C1D56853BEFCF4D0BEF3 /* MobileDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileDashboardView.swift; sourceTree = "<group>"; };
@@ -231,8 +284,10 @@
 		EDB4D429C12E8558788B4533 /* DisplayFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayFormat.swift; sourceTree = "<group>"; };
 		EEB9BA1FAC400EDD1F7E4F8B /* OpenSSHRemoteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenSSHRemoteConnection.swift; sourceTree = "<group>"; };
 		EF28CDCD49A1BB59CBED9C36 /* MobileMonitoringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileMonitoringTests.swift; sourceTree = "<group>"; };
+		EF4EC42BA41F0214F837F806 /* SDRDPDrive.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SDRDPDrive.m; sourceTree = "<group>"; };
 		F74225E5B629E05722E511CB /* RemoteConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteConnection.swift; sourceTree = "<group>"; };
 		F84C18F14529B79AC72BFE6C /* SessionTransferAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransferAdapters.swift; sourceTree = "<group>"; };
+		FBD57098CAEAA854B44ABBB8 /* SystemConfiguration.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SystemConfiguration.framework; path = System/Library/Frameworks/SystemConfiguration.framework; sourceTree = SDKROOT; };
 		FCE60D4240E4D237FB043D36 /* MobileMachinesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileMachinesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -252,6 +307,17 @@
 			files = (
 				C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */,
 				DEF5530AFE2E007C4C168326 /* ZIPFoundation in Frameworks */,
+				BA2CAF20BFC71BBEBEA3B1E3 /* ServerDashRDP.xcframework in Frameworks */,
+				10FBD04F85EFB49909D8A898 /* MetalKit.framework in Frameworks */,
+				0539460E0924052B348BBC1E /* Carbon.framework in Frameworks */,
+				FD41B5677D6BEB36BF835EE2 /* AudioToolbox.framework in Frameworks */,
+				7532F226A90C28F34F30A40D /* AVFoundation.framework in Frameworks */,
+				F167EDE9B3D69A0D11D2F3EA /* CoreAudio.framework in Frameworks */,
+				C6CFA4CD077B53B3FF5E4263 /* SystemConfiguration.framework in Frameworks */,
+				211930D0A68D0130E314F488 /* Security.framework in Frameworks */,
+				D939317C2FC7FC33FF1ADD68 /* libc++.tbd in Frameworks */,
+				8A22D637A2F653379B561B50 /* libz.tbd in Frameworks */,
+				33A78284A4C95CBEC4B1D219 /* libiconv.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -318,6 +384,12 @@
 				69DFF908A3A8D318995EC034 /* PortForwarding.swift */,
 				D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */,
 				69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */,
+				C504CB4A64B4D9D33BF4AE39 /* RDPClipboard.swift */,
+				2107259D0ABD91CF073B73A0 /* RDPConnection.swift */,
+				D07009E23A6B4853DAEC5310 /* RDPDesktopView.swift */,
+				416E27C802516BD32B140263 /* RDPModels.swift */,
+				E6D91E27B832EFE05AA546F3 /* RDPSecurity.swift */,
+				C05CB196E605F36FF299FE19 /* RDPViews.swift */,
 				81275B3E207BA4B0BC138698 /* RecordingFormat.swift */,
 				DA4FEA0225E7354D67785595 /* RecordingPlayback.swift */,
 				99D22C250E0FC322B0965101 /* RecordingStore.swift */,
@@ -348,6 +420,14 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		5DF5A93F9CD96C795F0602B9 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				E6B748C3E1F326B4E279335B /* RDP */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
 		61A8AE96A01D2CD37FAE994F /* Tests */ = {
 			isa = PBXGroup;
 			children = (
@@ -365,12 +445,15 @@
 		64DD5C1F2C165F5A0D0E4827 = {
 			isa = PBXGroup;
 			children = (
+				C0EF30FCE82B53199EA7BED7 /* Native */,
 				7EF26727CD6FD474A97EC258 /* Packages */,
+				EBBAB1658774AFFFBFD90F01 /* RDP */,
 				AD76B8613C37CD474F58D03B /* Resources */,
 				1656222CBBF9ABFA7A9E8685 /* Sources */,
 				7CC3CF5ADB7EBD7BA9C76798 /* Sources */,
 				E8B635DD8A46136DF2AA141D /* Tests */,
 				61A8AE96A01D2CD37FAE994F /* Tests */,
+				F1A58F8A30DAE1D797D58FDA /* Frameworks */,
 				1445BD40A4DF5AF3B34952B9 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -412,9 +495,30 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		C0EF30FCE82B53199EA7BED7 /* Native */ = {
+			isa = PBXGroup;
+			children = (
+				6D8B4CE6BA3CE8A22BAA9165 /* SDRDPClient.h */,
+				59DBB4521CB49D3AD2E59693 /* SDRDPClient.m */,
+				5C09421B485CA64924EF2FDA /* SDRDPDirectory.h */,
+				32FD286DF2D4AE0EA84588C1 /* SDRDPDirectory.m */,
+				EF4EC42BA41F0214F837F806 /* SDRDPDrive.m */,
+			);
+			path = Native;
+			sourceTree = "<group>";
+		};
+		E6B748C3E1F326B4E279335B /* RDP */ = {
+			isa = PBXGroup;
+			children = (
+				C5A08E9F4FAADDC4B34214E9 /* self-signed.pem */,
+			);
+			path = RDP;
+			sourceTree = "<group>";
+		};
 		E8B635DD8A46136DF2AA141D /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				5DF5A93F9CD96C795F0602B9 /* Fixtures */,
 				659F4C0B2DD0598AE5F53192 /* AIAssistantTests.swift */,
 				591FF81D314B8BB8687742AE /* AIProviderTests.swift */,
 				09BE650CB059896F0CEFF8D2 /* FoundationTests.swift */,
@@ -422,6 +526,7 @@
 				198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */,
 				429FD61E1936AAB5EC5860C9 /* MonitorLayoutStoreTests.swift */,
 				AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */,
+				998C312449EDD8E6FE5DB791 /* RDPTests.swift */,
 				89EC7D51D0C23C05C379049A /* RecordingTests.swift */,
 				7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */,
 				7AAFA5678E5B901A677C53A8 /* SessionTransferTests.swift */,
@@ -430,6 +535,36 @@
 				787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */,
 			);
 			path = Tests;
+			sourceTree = "<group>";
+		};
+		EBBAB1658774AFFFBFD90F01 /* RDP */ = {
+			isa = PBXGroup;
+			children = (
+				C9D9C70CE2F90AA15B9FC388 /* cpufeatures-NOTICE */,
+				8F140F522378E6CB10D809AD /* FreeRDP-WinPR-LICENSE */,
+				1C6DED281D30C82CE3E9ACA6 /* OpenSSL-LICENSE.txt */,
+				79D6B83942E1EAC2FE02CD76 /* README.md */,
+			);
+			name = RDP;
+			path = Vendor/RDP;
+			sourceTree = "<group>";
+		};
+		F1A58F8A30DAE1D797D58FDA /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				53E324974ECF388F5D29D187 /* AudioToolbox.framework */,
+				986E939883D94F272BACCCAD /* AVFoundation.framework */,
+				74A8C9C138CB51DC85E3205D /* Carbon.framework */,
+				E49F0C0AD62F3AB3124FE21D /* CoreAudio.framework */,
+				95241F1C72E5830D6DFCD8D8 /* libc++.tbd */,
+				78C4114F78B8DF7360ED91BE /* libiconv.tbd */,
+				9E510A86D21DC34CA5CF6CCE /* libz.tbd */,
+				732A06F8DECF6756FE9AA2D8 /* MetalKit.framework */,
+				E675A39B0515887894D4CEDF /* Security.framework */,
+				A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */,
+				FBD57098CAEAA854B44ABBB8 /* SystemConfiguration.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		FC1304C1F65ACD28CB47464C /* TerminalThemes */ = {
@@ -470,6 +605,7 @@
 			buildConfigurationList = 854719EB471296C6255B0B9A /* Build configuration list for PBXNativeTarget "ServerDashTests" */;
 			buildPhases = (
 				68C78E48AD7EDF169BA2E3F8 /* Sources */,
+				BC128E8DC0DB3F450DA7F19F /* Resources */,
 				5C1B7FEF2F4E69B3E1A00FC8 /* Frameworks */,
 			);
 			buildRules = (
@@ -584,8 +720,20 @@
 			buildActionMask = 2147483647;
 			files = (
 				B152A8EB774592B5A9FF269A /* Assets.xcassets in Resources */,
+				3ED607FFEDFF306003FE83B5 /* FreeRDP-WinPR-LICENSE in Resources */,
 				C0E74D88BC523BE29BE48325 /* LICENSES.md in Resources */,
+				ECF72E4C4525C27BB52B9979 /* OpenSSL-LICENSE.txt in Resources */,
+				DBB6D50E09953077151BDDDA /* README.md in Resources */,
+				524F6CF9FAA79D5D5C494F1E /* cpufeatures-NOTICE in Resources */,
 				F021D26D8F32D3D73CFAA922 /* themes.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BC128E8DC0DB3F450DA7F19F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2B73275DB61BD850F060AEAB /* self-signed.pem in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -621,12 +769,21 @@
 				D99D7A6BA127C07D541E62E6 /* PortForwarding.swift in Sources */,
 				C7FE7E6F6410B4D6BC49E7C1 /* ProfessionalConnections.swift in Sources */,
 				5B200D9D7285DE7BC76FAF62 /* ProfessionalConnectionsView.swift in Sources */,
+				F383DD1A468D0860604F544B /* RDPClipboard.swift in Sources */,
+				8187029F98BA72B83E138D08 /* RDPConnection.swift in Sources */,
+				3FE7AE4A1683D6DA437844A4 /* RDPDesktopView.swift in Sources */,
+				FC05F66A20D647AAEB43D9D3 /* RDPModels.swift in Sources */,
+				BACC71C6D175B7E33C7EFA0A /* RDPSecurity.swift in Sources */,
+				9B1880F857531EDF8BAE845D /* RDPViews.swift in Sources */,
 				87458EA809B16E0AFF24B760 /* RecordingFormat.swift in Sources */,
 				24762C6AA30A0B13E451406E /* RecordingPlayback.swift in Sources */,
 				F18CEDA9A7E02F64369F0B0E /* RecordingStore.swift in Sources */,
 				5E73E1B1026586F912AABECE /* RecordingViews.swift in Sources */,
 				CC7674E94FF258B0698E192F /* RemoteConnection.swift in Sources */,
 				2B10618EA7A302B318BA5719 /* ResourceViews.swift in Sources */,
+				D15E5FCD054E95DE3066D7BF /* SDRDPClient.m in Sources */,
+				6104C2400D9714B569AED565 /* SDRDPDirectory.m in Sources */,
+				496D95432BCBBD1802F67C68 /* SDRDPDrive.m in Sources */,
 				1DD6167D45D75A6CA479734F /* SFTPService.swift in Sources */,
 				C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */,
 				255213F397E2ED879AC43A6D /* SSHConfigImport.swift in Sources */,
@@ -676,6 +833,7 @@
 				3F49CD8D3E26FEE90022B46F /* MonitoringHistoryTests.swift in Sources */,
 				E198FF02DF752866C68B7687 /* MonitoringResponseParserTests.swift in Sources */,
 				A06758132146DBCFCFB84B54 /* ProfessionalConnectionTests.swift in Sources */,
+				823663D576F41ABF57DDAAB1 /* RDPTests.swift in Sources */,
 				AADDFE9AF2318C0561DD2F16 /* RecordingTests.swift in Sources */,
 				A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */,
 				9AB76B8335AFE9FE81BF7D78 /* SFTPListingParserTests.swift in Sources */,
@@ -707,6 +865,7 @@
 				E427570FB5051530B613815B /* MonitoringHistory.swift in Sources */,
 				CC8C2D7C57F4D1CE973DDD3E /* Persistence.swift in Sources */,
 				7EBF9323797F21EDF9389BF2 /* ProfessionalConnections.swift in Sources */,
+				94E096A828AA4EE270440149 /* RDPModels.swift in Sources */,
 				66BDF55CB7BA97437267E430 /* RemoteConnection.swift in Sources */,
 				238745A74AC12D25A894ADF4 /* SFTPService.swift in Sources */,
 				F6ACE78D064CA0A2F3DC7B78 /* ServerDashMobileApp.swift in Sources */,
@@ -856,7 +1015,17 @@
 				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".build/rdp\"",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/.build/rdp/universal/Headers/freerdp3",
+					"$(SRCROOT)/.build/rdp/universal/Headers/winpr3",
+					"$(SRCROOT)/.build/rdp/universal/Headers",
+				);
 				INFOPLIST_KEY_CFBundleDisplayName = ServerDash;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -869,6 +1038,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app;
 				PRODUCT_NAME = ServerDash;
 				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = Native/SDRDPClient.h;
 				SWIFT_VERSION = 5.9;
 			};
 			name = Debug;
@@ -938,7 +1108,17 @@
 				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"\".build/rdp\"",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/.build/rdp/universal/Headers/freerdp3",
+					"$(SRCROOT)/.build/rdp/universal/Headers/winpr3",
+					"$(SRCROOT)/.build/rdp/universal/Headers",
+				);
 				INFOPLIST_KEY_CFBundleDisplayName = ServerDash;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -951,6 +1131,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app;
 				PRODUCT_NAME = ServerDash;
 				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = Native/SDRDPClient.h;
 				SWIFT_VERSION = 5.9;
 			};
 			name = Release;

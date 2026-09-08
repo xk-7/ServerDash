@@ -924,6 +924,38 @@ final class AppState: ObservableObject {
     }
 
     @Published private(set) var fileControllers: [UUID: MacSFTPController] = [:]
+    @Published private(set) var rdpControllers: [UUID: RDPSessionController] = [:]
+    @Published var rdpError: String?
+
+    func openRDP(_ record: RDPConnectionRecord, newTab: Bool = false, password: String? = nil) {
+        let workspace = terminalRegistry.workspace
+        if !newTab, let existing = workspace.mostRecentRDP(for: record.id), rdpControllers[existing.activePane] != nil {
+            route = .section(.terminal); workspace.select(tab: existing.id); return
+        }
+        do {
+            let configuration = try record.configuration()
+            let container = record.modelContext?.container
+            let machineID = record.id
+            let controller = RDPSessionController(configuration: configuration, password: password,
+                configurationProvider: {
+                    guard let container else { return try record.configuration() }
+                    let reader = ModelContext(container)
+                    guard let latest = try reader.fetch(FetchDescriptor<RDPConnectionRecord>(predicate: #Predicate { $0.id == machineID })).first else {
+                        throw RDPValidationError.invalidAddress
+                    }
+                    return try latest.configuration()
+                })
+            rdpControllers[controller.id] = controller
+            workspace.add(sessionID: controller.id, serverID: record.id, title: record.displayName, kind: .rdp)
+            route = .section(.terminal)
+            controller.connect()
+        } catch { rdpError = error.localizedDescription }
+    }
+
+    func removeRDP(_ machineID: UUID) {
+        let tabs = terminalRegistry.workspace.tabs.filter { $0.kind == .rdp && $0.serverID == machineID }
+        closeWorkspaceTabs(tabs)
+    }
 
     func openSFTP(for server: ServerRecord) {
         route = .section(.terminal)
@@ -937,6 +969,7 @@ final class AppState: ObservableObject {
     func closeWorkspaceTabs(_ tabs: [WorkspaceTab]) {
         for tab in tabs {
             for id in tab.layout.panes {
+                rdpControllers.removeValue(forKey: id)?.close()
                 fileControllers.removeValue(forKey: id)?.close()
                 if let controller = terminalRegistry.controller(for: id) { closeTerminal(controller.session) }
             }
@@ -1016,6 +1049,8 @@ final class AppState: ObservableObject {
     }
 
     func shutdown() {
+        rdpControllers.values.forEach { $0.close() }
+        rdpControllers.removeAll()
         connectivityMonitor.cancel()
         fileControllers.values.forEach { $0.close() }
         fileControllers.removeAll()

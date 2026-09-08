@@ -12,6 +12,7 @@ has passed.
 | [ADR-0003: Monitoring runtime commitment](ADR-0003-monitoring-runtime-commitment.md) | Accepted | S04, later alert work |
 | [ADR-0004: Remote platform and Docker provider scope](ADR-0004-remote-platform-and-docker-provider-scope.md) | Accepted | capability work after the foundation stages |
 | [ADR-0005: Native iOS/iPadOS app and dual SSH engines](ADR-0005-native-ios-and-dual-ssh-engine.md) | Accepted | mobile target, connection abstraction, lifecycle, security |
+| [ADR-0006: Isolated macOS RDP](ADR-0006-macos-rdp-isolation.md) | Accepted for development; release gates open | RDP engine, V4 model, workspace and security |
 | [ServerDash 1.0 scope and non-goals](../PRODUCT_SCOPE_1.0.md) | Frozen | S01-S06 and later product planning |
 
 ## Decision identifiers covered by S00

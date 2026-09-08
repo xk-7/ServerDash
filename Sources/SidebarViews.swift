@@ -30,7 +30,7 @@ struct AppSidebar: View {
                         .tag(SidebarDestination.dashboard)
                     Label("机器", systemImage: "server.rack")
                         .tag(SidebarDestination.machines)
-                    Label("终端会话", systemImage: "terminal")
+                    Label("会话", systemImage: "rectangle.stack")
                         .badge(terminalCount)
                         .tag(SidebarDestination.terminal)
                 }
@@ -102,6 +102,8 @@ struct AppSidebar: View {
 
 struct ServerBrowserControls: View {
     let servers: [ServerRecord]
+    var additionalGroups: [String] = []
+    var additionalTags: [String] = []
     @Binding var search: String
     @Binding var group: String
     @Binding var tag: String
@@ -109,13 +111,13 @@ struct ServerBrowserControls: View {
     @Binding var monitoringRawValue: String
 
     private var groups: [String] {
-        Set(servers.map(\.groupName).filter { !$0.isEmpty }).sorted {
+        Set((servers.map(\.groupName) + additionalGroups).filter { !$0.isEmpty }).sorted {
             $0.localizedStandardCompare($1) == .orderedAscending
         }
     }
 
     private var tags: [String] {
-        Set(servers.flatMap(\.tags)).sorted {
+        Set(servers.flatMap(\.tags) + additionalTags).sorted {
             $0.localizedStandardCompare($1) == .orderedAscending
         }
     }
@@ -215,13 +217,17 @@ enum MachineViewMode: String, CaseIterable, Identifiable {
 
 struct MachineManagementView: View {
     @EnvironmentObject private var appState: AppState
+    @AppStorage("hideIPInformation") private var hideIPInformation = false
     @AppStorage("machineViewMode") private var viewModeRawValue = MachineViewMode.grid.rawValue
     @SceneStorage("machines.filter.group") private var selectedGroup = ""
     @SceneStorage("machines.filter.tag") private var selectedTag = ""
     @SceneStorage("machines.sort") private var sortRawValue = ServerBrowserSort.name.rawValue
     @SceneStorage("machines.filter.monitoring") private var monitoringRawValue = ServerMonitorFilter.all.rawValue
+    @SceneStorage("machines.filter.protocol") private var protocolFilter = "all"
 
     let servers: [ServerRecord]
+    var rdpMachines: [RDPConnectionRecord] = []
+    var onSelectRDP: (RDPConnectionRecord) -> Void = { _ in }
     @Binding var searchText: String
     @Binding var scrollAnchor: UUID?
     let onSelect: (ServerRecord) -> Void
@@ -268,20 +274,20 @@ struct MachineManagementView: View {
     }
 
     var body: some View {
-        let visibleServers = query.apply(to: servers)
+        let entries = UnifiedMachineEntry.browse(ssh: servers, rdp: rdpMachines, query: query, protocolFilter: protocolFilter)
         VStack(spacing: 0) {
             VStack(spacing: AppleDesign.Spacing.md) {
                 AppleWorkspaceHeader(
                     title: "机器", subtitle: "管理连接，随时进入你的服务器。", symbol: "server.rack"
                 ) {
-                    Button("导入", systemImage: "square.and.arrow.down", action: onImport)
-                    Button("导出", systemImage: "square.and.arrow.up", action: onExport)
+                    Button("导入 SSH", systemImage: "square.and.arrow.down", action: onImport)
+                    Button("导出 SSH", systemImage: "square.and.arrow.up", action: onExport)
                         .disabled(servers.isEmpty)
                     Button("添加服务器", systemImage: "plus", action: onAdd)
                         .buttonStyle(.borderedProminent)
                 }
                 HStack(spacing: AppleDesign.Spacing.md) {
-                    Text("\(DisplayFormat.integer(visibleServers.count)) / \(DisplayFormat.integer(servers.count)) 台服务器")
+                    Text("\(DisplayFormat.integer(entries.count)) / \(DisplayFormat.integer(servers.count + rdpMachines.count)) 台机器")
                         .font(.callout).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Picker("显示方式", selection: viewModeBinding) {
@@ -298,9 +304,15 @@ struct MachineManagementView: View {
                     .accessibilityLabel("机器显示方式")
                 }
                 ServerBrowserControls(
-                    servers: servers, search: $searchText, group: $selectedGroup,
+                    servers: servers, additionalGroups: rdpMachines.map(\.groupName), additionalTags: rdpMachines.flatMap(\.tags), search: $searchText, group: $selectedGroup,
                     tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
                 )
+                HStack {
+                    Picker("协议", selection: $protocolFilter) {
+                        Text("全部").tag("all"); Text("SSH").tag("ssh"); Text("RDP").tag("rdp")
+                    }.pickerStyle(.segmented).frame(width: 240)
+                    Spacer()
+                }
             }
             .padding(AppleDesign.Spacing.lg)
             .frame(maxWidth: AppleDesign.Layout.contentWidth)
@@ -308,7 +320,7 @@ struct MachineManagementView: View {
 
             Divider().opacity(0.5)
 
-            if visibleServers.isEmpty {
+            if entries.isEmpty {
                 ContentUnavailableView {
                     Label(
                         query.hasFilters ? "没有匹配的机器" : "还没有机器",
@@ -334,15 +346,18 @@ struct MachineManagementView: View {
                         columns: columns,
                         spacing: viewMode == .grid ? AppleDesign.Spacing.md : 0
                     ) {
-                        ForEach(visibleServers) { server in
+                        ForEach(entries) { entry in
                             VStack(spacing: 0) {
-                                machineButton(server)
-                                if viewMode == .list, server.id != visibleServers.last?.id {
+                                switch entry {
+                                case .ssh(let server): machineButton(server)
+                                case .rdp(let record): rdpMachineButton(record)
+                                }
+                                if viewMode == .list, entry.id != entries.last?.id {
                                     Divider()
                                         .padding(.horizontal, AppleDesign.Spacing.md)
                                 }
                             }
-                            .id(server.id)
+                            .id(entry.id.id)
                         }
                     }
                     .scrollTargetLayout()
@@ -359,7 +374,7 @@ struct MachineManagementView: View {
                 .scrollPosition(id: scrollPosition, anchor: .top)
             }
         }
-        .onChange(of: visibleServers.map(\.id)) { _, ids in
+        .onChange(of: entries.map { $0.id.id }) { _, ids in
             if let scrollAnchor, !ids.contains(scrollAnchor) { self.scrollAnchor = ids.first }
         }
     }
@@ -369,16 +384,32 @@ struct MachineManagementView: View {
         selectedGroup = ""
         selectedTag = ""
         monitoringRawValue = ServerMonitorFilter.all.rawValue
+        protocolFilter = "all"
+    }
+
+    private func rdpMachineButton(_ record: RDPConnectionRecord) -> some View {
+        Button { onSelectRDP(record) } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack { Label(record.displayName, systemImage: "desktopcomputer").font(.headline); Spacer(); Text("RDP").font(.caption.bold()).foregroundStyle(.blue) }
+                Text("\(record.username)@\(hideIPInformation ? "[IP]" : record.host):\(record.port)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack { Text(record.groupName.isEmpty ? "未分组" : record.groupName); Spacer(); Text("Windows 远程桌面") }.font(.caption).foregroundStyle(.secondary)
+            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain).accessibilityHint("打开 RDP 机器详情")
+            .contextMenu { Button("连接远程桌面") { appState.openRDP(record) }; Button("新建 RDP 标签") { appState.openRDP(record, newTab: true) } }
     }
 
     private func machineButton(_ server: ServerRecord) -> some View {
         Button {
             onSelect(server)
         } label: {
-            if viewMode == .grid {
-                MachineGridCard(server: server, runtime: appState.runtime(for: server))
-            } else {
-                MachineListRow(server: server, runtime: appState.runtime(for: server))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("SSH").font(.caption.bold()).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 8)
+                if viewMode == .grid {
+                    MachineGridCard(server: server, runtime: appState.runtime(for: server))
+                } else {
+                    MachineListRow(server: server, runtime: appState.runtime(for: server))
+                }
             }
         }
         .buttonStyle(.plain)

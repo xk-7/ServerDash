@@ -8,6 +8,16 @@ This document is the product boundary for the 1.0 internal-test line. Inclusion
 means a capability may ship only after its owning stage passes; it does not claim
 that the current repository has already met that stage's acceptance criteria.
 
+## RDP development amendment — 2026-09-08
+
+macOS-only embedded RDP development is now in scope, using a separate V4 model
+and desktop session kind. It does not extend the already published v1.0.0 binary
+or make a Windows compatibility claim. Mobile adopts only the shared schema;
+RDP, multi-display hardware, clipboard/audio interoperability and performance
+must pass their own acceptance gates before release. See [RDP scope](RDP.md)
+and [remaining acceptance work](RDP_QA.md). Printers, smart cards, gateway,
+RemoteApp, RDP recording and AI desktop context remain outside this iteration.
+
 ## Core release scope
 
 - One native macOS business workspace plus one universal native iPhone/iPad app

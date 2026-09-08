@@ -1,5 +1,15 @@
 # Third-Party Notices
 
+## macOS RDP dependencies
+
+FreeRDP/WinPR 3.31.0 and OpenSSL 3.5.8 are built from hash-pinned official source
+archives into a local arm64/x86_64 static XCFramework. Both use Apache-2.0.
+Full license texts and the bundled CPU-feature notice are in `Vendor/RDP` and
+included in the macOS app's resources. The mobile app does not link them.
+Source commits, archive hashes, security upgrade from 3.30.0, build options and
+the custom bridge/drive/clipboard boundary are documented in
+[`Vendor/RDP/README.md`](../Vendor/RDP/README.md).
+
 ## Mobile SSH dependencies
 
 ServerDash vendors the following source packages for the native iPhone/iPad SSH

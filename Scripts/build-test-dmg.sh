@@ -19,6 +19,9 @@ done
 
 echo "Generating Xcode project..."
 cd "${ROOT_DIR}"
+if [[ ! -d "${ROOT_DIR}/.build/rdp/ServerDashRDP.xcframework" ]]; then
+    bash "${ROOT_DIR}/Scripts/build-rdp-dependencies.sh"
+fi
 xcodegen generate
 
 echo "Building unsigned universal Release app..."

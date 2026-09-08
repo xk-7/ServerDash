@@ -24,11 +24,30 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+      - path: Native
+        excludes:
+          - Tests
+      - path: Vendor/RDP
+        buildPhase: resources
+        excludes:
+          - dependencies.sha256
       - path: Resources
         buildPhase: resources
     dependencies:
       - package: SwiftTerm
       - package: ZIPFoundation
+      - framework: .build/rdp/ServerDashRDP.xcframework
+        embed: false
+      - sdk: MetalKit.framework
+      - sdk: Carbon.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreAudio.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: Security.framework
+      - sdk: libc++.tbd
+      - sdk: libz.tbd
+      - sdk: libiconv.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app
@@ -37,6 +56,12 @@ targets:
         CURRENT_PROJECT_VERSION: 5
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.9"
+        SWIFT_OBJC_BRIDGING_HEADER: Native/SDRDPClient.h
+        HEADER_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/.build/rdp/universal/Headers/freerdp3
+          - $(SRCROOT)/.build/rdp/universal/Headers/winpr3
+          - $(SRCROOT)/.build/rdp/universal/Headers
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: ServerDash
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
@@ -68,6 +93,7 @@ targets:
     sources:
       - path: Mobile/Sources
       - path: Sources/Models.swift
+      - path: Sources/RDPModels.swift
       - path: Sources/Persistence.swift
       - path: Sources/ProfessionalConnections.swift
       - path: Sources/Diagnostics.swift

@@ -33,6 +33,9 @@ if [[ ! -f "${SOURCE_RELEASE_NOTICE}" ]]; then
 fi
 
 cd "${ROOT_DIR}"
+if [[ ! -d "${ROOT_DIR}/.build/rdp/ServerDashRDP.xcframework" ]]; then
+    bash "${ROOT_DIR}/Scripts/build-rdp-dependencies.sh"
+fi
 xcodegen generate
 
 if [[ "${REUSE_BUILD:-0}" == "1" ]]; then

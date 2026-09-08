@@ -1,4 +1,5 @@
 import Foundation
+import CoreData
 import SwiftData
 import SwiftUI
 
@@ -46,24 +47,31 @@ enum PersistenceSchemaV3: VersionedSchema {
     ]
 }
 
+enum PersistenceSchemaV4: VersionedSchema {
+    static let versionIdentifier = Schema.Version(4, 0, 0)
+    static let models: [any PersistentModel.Type] = PersistenceSchemaV3.models + [RDPConnectionRecord.self]
+}
+
 enum ServerDashMigrationPlan: SchemaMigrationPlan {
     static let schemas: [any VersionedSchema.Type] = [
         PersistenceSchemaV1.self,
         PersistenceSchemaV2.self,
-        PersistenceSchemaV3.self
+        PersistenceSchemaV3.self,
+        PersistenceSchemaV4.self
     ]
     static let stages: [MigrationStage] = [
         .lightweight(fromVersion: PersistenceSchemaV1.self, toVersion: PersistenceSchemaV2.self),
-        .lightweight(fromVersion: PersistenceSchemaV2.self, toVersion: PersistenceSchemaV3.self)
+        .lightweight(fromVersion: PersistenceSchemaV2.self, toVersion: PersistenceSchemaV3.self),
+        .lightweight(fromVersion: PersistenceSchemaV3.self, toVersion: PersistenceSchemaV4.self)
     ]
 }
 
 enum PersistenceController {
     static let schemaVersionKey = "serverDashSchemaVersion"
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     static var schema: Schema {
-        Schema(versionedSchema: PersistenceSchemaV3.self)
+        Schema(versionedSchema: PersistenceSchemaV4.self)
     }
 
     static func makeContainer(migrateLegacyStore: Bool = true) throws -> ModelContainer {
@@ -77,6 +85,9 @@ enum PersistenceController {
         let storeURL = activeStoreURL(applicationSupportRoot: root)
         if migrateLegacyStore {
             try copyLegacyStoreIfNeeded(applicationSupportRoot: root, destination: storeURL)
+        }
+        if FileManager.default.fileExists(atPath: storeURL.path), needsV4Backup(storeURL: storeURL) {
+            _ = try backupExistingStore()
         }
         let configuration = ModelConfiguration(
             "ServerDash",
@@ -103,12 +114,20 @@ enum PersistenceController {
         )
     }
 
+    static func needsV4Backup(storeURL: URL) -> Bool {
+        // Preferences can be restored independently of the database; inspect the actual store.
+        guard let metadata = try? NSPersistentStoreCoordinator.metadataForPersistentStore(ofType: NSSQLiteStoreType,
+            at: storeURL, options: [NSReadOnlyPersistentStoreOption: true]),
+              let hashes = metadata[NSStoreModelVersionHashesKey] as? [String: Data] else { return true }
+        return !hashes.keys.contains("RDPConnectionRecord")
+    }
+
     static func backupExistingStore() throws -> URL? {
         let root = applicationSupportDirectory()
         guard let source = existingStoreURL(applicationSupportRoot: root) else { return nil }
         let backup = root
             .appendingPathComponent("ServerDash/Backups", isDirectory: true)
-            .appendingPathComponent(String(Int(Date().timeIntervalSince1970)), isDirectory: true)
+            .appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(
             at: backup,
             withIntermediateDirectories: true,
@@ -214,7 +233,11 @@ final class PersistenceSession: ObservableObject {
         let interval = PerformanceTrace.begin(.databaseOpen)
         defer { PerformanceTrace.end(interval) }
         do {
-            container = try PersistenceController.makeContainer()
+            // Hosted tests must not migrate the user's database or start monitoring real saved hosts.
+            let testHost = NSClassFromString("XCTestCase") != nil ||
+                ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+                ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
+            container = try testHost ? PersistenceController.makeInMemoryContainer() : PersistenceController.makeContainer()
             openError = nil
         } catch {
             container = nil

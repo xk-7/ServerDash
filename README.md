@@ -6,6 +6,14 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 
 ## Features
 
+### RDP remote desktop (macOS, in development)
+
+- RDP machines live alongside SSH machines, with protocol filtering and dedicated desktop session tabs.
+- Embedded FreeRDP/WinPR 3.31.0 and OpenSSL 3.5.8; NLA/CredSSP and TLS 1.2+ only, certificate fingerprint confirmation and optional local Keychain password storage.
+- Resolution/color requests, fullscreen/multi-display configuration, keyboard modes, opt-in clipboard/directory redirection and audio configuration are implemented for controlled testing.
+- **Windows login, audio, file exchange, real multi-display operation and performance remain unverified.** This is not a completed RDP release. See [usage and current limits](Docs/RDP.md) and [acceptance record](Docs/RDP_QA.md).
+- iPhone/iPad do not gain RDP in this iteration. RDP does not enter SSH monitoring, identity, recording, AI or export flows.
+
 ### AI assistant (macOS)
 
 - Open **Sessions → ✨ → AI** for a right-side Ops assistant, alongside the existing status and snippet inspector. **AI → Open general conversation** opens an independent window without terminal context.
@@ -26,7 +34,7 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 
 ### Multi-tab terminal workspace
 
-- Shared macOS/iPhone/iPad SSH tabs with no fixed tab-count limit; memory and server limits still apply. The **+** menu also opens SFTP and monitoring tabs. RDP, VNC and online AI completion are not implemented.
+- Shared macOS/iPhone/iPad SSH tabs with no fixed tab-count limit; memory and server limits still apply. The **+** menu also opens SFTP and monitoring tabs. macOS adds RDP tabs in development; VNC and online AI completion are not implemented.
 - Drag to reorder, use tab context menus to close current/other/all tabs, and scroll fixed-width tabs with previous/next controls.
 - **Ctrl+Tab / Ctrl+Shift+Tab** switch tabs. **Ctrl+Shift+D** splits right, **Ctrl+Shift+E** splits below, and **Ctrl+Shift+W** closes the active pane. Mobile shortcuts require a hardware keyboard.
 - Each SSH pane owns its connection and scrollback. Choose another server from **+ → server → split**; maximum 16 panes per tab. Drag dividers, arrange as a grid up to 4×4, or maximize one pane without disconnecting the others.
@@ -143,6 +151,7 @@ Export flow:
 | --- | --- | --- |
 | Dashboard and Linux monitoring | Yes | Yes; foreground refresh |
 | Multiple remote terminals | Yes | Yes; interrupted in background |
+| RDP remote desktop | Development implementation; Windows validation pending | No |
 | SFTP browse/upload/download/rename/move/delete | Yes | Yes; Files import/export |
 | Password and imported private-key authentication | Yes | Yes |
 | Multi-client session import/export | Files, directories, ZIP, and explicit local discovery | Files import/export |
@@ -164,7 +173,7 @@ Export flow:
 ### Data and Diagnostics
 
 - SwiftData persistence for servers, identities, SSH key references, connection routes, forwarding rules, snippets, trusted hosts, terminal history, monitoring samples, aggregates, and Data Gaps.
-- Versioned V1/V2/V3 schemas with V1-to-V2 and V2-to-V3 migration stages, plus retry, backup, and rebuild options when the database cannot be opened.
+- Versioned V1/V2/V3/V4 schemas; V4 only adds a separate RDP entity. Existing databases are backed up before upgrade. Migration failures do not automatically clear or rebuild the database.
 - OSLog categories for App, Data, SSH, Monitoring, Terminal, and SFTP.
 - Per-server event logs and previewable, copyable, redacted SSH diagnostics.
 - IP hiding applies to the UI, Markdown exports, and diagnostics. The frozen 1.0 privacy contract makes remote location lookup opt-in; its current UI/default enforcement is tracked as pre-release work.
@@ -198,6 +207,15 @@ The internal-test product and architecture constraints are recorded in the [arch
 Latest stable release: [ServerDash 1.0.0](https://github.com/xk-7/ServerDash/releases/tag/v1.0.0) (build 5). See the [release announcement](Docs/RELEASE_NOTES_1.0.0.md) for installation and artifact details. The macOS artifact is ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run
+
+Before the first macOS build, build the pinned native dependency locally:
+
+```bash
+bash Scripts/build-rdp-dependencies.sh
+```
+
+This requires network access for hash-verified official archives and builds both Mac architectures.
+The iOS targets do not link these libraries. [Dependency provenance and licenses](Vendor/RDP/README.md).
 
 ```bash
 xcodegen generate
@@ -281,6 +299,8 @@ Vendor/SwiftTerm/           Pinned and extended SwiftTerm 1.11.2
 Vendor/Citadel/             Locally pinned Citadel 0.12.1
 Vendor/swift-nio-ssh/       Locally pinned NIOSSH 0.3.6 plus security backport
 Vendor/ZIPFoundation/       Pinned ZIPFoundation 0.9.20
+Vendor/RDP/                 FreeRDP/WinPR/OpenSSL hashes, provenance, licenses
+Native/                     macOS RDP bridge and restricted directory service
 project.yml                 XcodeGen project definition
 ```
 
@@ -295,4 +315,4 @@ project.yml                 XcodeGen project definition
 
 ## Distribution and Scope
 
-The macOS app launches OpenSSH/SFTP subprocesses, so App Sandbox remains disabled. The iOS/iPadOS app uses its own sandbox container and an independent SwiftData V3 database; it does not migrate or synchronize Mac data. Mobile connections are foreground-scoped: monitoring reconnects after foregrounding, while terminals and interrupted transfers require explicit user restart and do not promise process recovery or transfer resume. CloudKit, TestFlight, StoreKit, widgets, Live Activities, paid tiers, guaranteed 24×7 alerts, and Mosh remain outside the current scope. See [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md).
+The macOS app launches OpenSSH/SFTP subprocesses, so App Sandbox remains disabled. The iOS/iPadOS app uses its own sandbox container and an independent SwiftData V4 database; it does not migrate or synchronize Mac data. V4 adds shared RDP metadata only; mobile has no RDP UI or engine. Mobile connections are foreground-scoped: monitoring reconnects after foregrounding, while terminals and interrupted transfers require explicit user restart and do not promise process recovery or transfer resume. CloudKit, TestFlight, StoreKit, widgets, Live Activities, paid tiers, guaranteed 24×7 alerts, and Mosh remain outside the current scope. See [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md).

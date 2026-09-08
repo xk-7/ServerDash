@@ -112,8 +112,10 @@ final class AIWorkspace: ObservableObject {
         self.settings.observeSecurityChanges { [weak self] provider in
             guard let self else { return }
             for chat in self.conversations where chat.destination?.provider == provider {
-                self.stop(chat.id); self.owners[chat.id]?.state?.revoke()
-                self.owners[chat.id]?.state?.selectedText = nil
+                self.stop(chat.id)
+                if let state = self.owners[chat.id]?.state, state.conversationID == chat.id {
+                    state.revoke(); state.selectedText = nil
+                }
             }
         }
     }
@@ -153,6 +155,7 @@ final class AIWorkspace: ObservableObject {
         if conversation(state.conversationID) == nil || state.conversationID.map({ isOwnedByAnotherPane($0, paneID: controller.id) }) == true {
             state.conversationID = create(mode: .ops, serverID: controller.serverID, name: controller.serverName)
         }
+        owners = owners.filter { $0.value.paneID != controller.id || $0.key == state.conversationID }
         if let id = state.conversationID { owners[id] = Owner(paneID: controller.id, state: state) }
         state.onInvalidate = { [weak self, weak state] in
             if let id = state?.conversationID { self?.stop(id) }

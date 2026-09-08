@@ -24,7 +24,7 @@ enum SidebarDestination: String, Identifiable, Hashable {
         case .snippets: "代码片段"
         case .trustedHosts: "可信主机"
         case .connections: "连接与隧道"
-        case .terminal: "终端"
+        case .terminal: "会话"
         case .recordings: "录制"
         }
     }
@@ -59,10 +59,12 @@ private struct HostTrustAlertModifier: ViewModifier {
 
 enum MainContentRoute: Equatable {
     case section(SidebarDestination)
+    case rdp(UUID)
     case server(id: UUID, origin: SidebarDestination, mode: DetailMode)
 
     var sidebarDestination: SidebarDestination {
         switch self {
+        case .rdp: .machines
         case .section(let destination):
             destination
         case .server(_, let origin, _):
@@ -90,6 +92,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var appState: AppState
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
+    @Query(sort: \RDPConnectionRecord.name) private var rdpMachines: [RDPConnectionRecord]
     @Query(sort: \IdentityRecord.name) private var identities: [IdentityRecord]
     @Query(sort: \SSHKeyRecord.name) private var sshKeys: [SSHKeyRecord]
     @Query(sort: \ConnectionRouteRecord.updatedAt) private var connectionRoutes: [ConnectionRouteRecord]
@@ -97,6 +100,8 @@ struct ContentView: View {
 
     @State private var searchText = ""
     @State private var showingNewServer = false
+    @State private var showingNewRDP = false
+    @State private var showingMachineType = false
     @State private var showingSessionImport = false
     @State private var showingSessionExport = false
     @State private var editingServer: ServerRecord?
@@ -150,7 +155,7 @@ struct ContentView: View {
         NavigationSplitView {
             AppSidebar(
                 selection: sidebarDestination,
-                terminalCount: appState.terminalSessions.count,
+                terminalCount: appState.terminalRegistry.workspace.tabs.count,
                 onNavigate: navigate,
                 onSettings: { openSettings() }
             )
@@ -186,7 +191,7 @@ struct ContentView: View {
                 .disabled(servers.isEmpty)
 
                 Button {
-                    showingNewServer = true
+                    showingMachineType = true
                 } label: {
                     Label("添加服务器", systemImage: "plus")
                 }
@@ -198,6 +203,19 @@ struct ContentView: View {
 
     private var presentationView: some View {
         navigationView
+        .alert("RDP 远程桌面", isPresented: Binding(get: { appState.rdpError != nil }, set: { if !$0 { appState.rdpError = nil } })) {
+            Button("好") { appState.rdpError = nil }
+        } message: { Text(appState.rdpError ?? "") }
+        .confirmationDialog("添加机器", isPresented: $showingMachineType) {
+            Button("SSH 服务器") { showingNewServer = true }
+            Button("RDP 远程桌面") { showingNewRDP = true }
+        }
+        .sheet(isPresented: $showingNewRDP) {
+            RDPEditorView(record: nil) { record, connect, password in
+                route = .rdp(record.id)
+                if connect { appState.openRDP(record, password: password) }
+            }
+        }
         .sheet(isPresented: $showingNewServer) {
             ServerEditorView(server: nil) { server in
                 openServerDetail(
@@ -292,7 +310,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if let selectedServer,
+        if case .rdp(let id) = route, let machine = rdpMachines.first(where: { $0.id == id }) {
+            RDPMachineDetail(record: machine, onBack: { route = .section(.machines) })
+        } else if let selectedServer,
            case .server(_, let origin, _) = route {
             ServerDetailView(
                 server: selectedServer,
@@ -326,6 +346,8 @@ struct ContentView: View {
             case .machines:
                 MachineManagementView(
                     servers: servers,
+                    rdpMachines: rdpMachines,
+                    onSelectRDP: { route = .rdp($0.id) },
                     searchText: $searchText,
                     scrollAnchor: $machineScrollAnchor,
                     onSelect: { server in
@@ -335,7 +357,7 @@ struct ContentView: View {
                             mode: .monitor
                         )
                     },
-                    onAdd: { showingNewServer = true },
+                    onAdd: { showingMachineType = true },
                     onImport: { showingSessionImport = true },
                     onExport: { showingSessionExport = true },
                     onEdit: { editingServer = $0 },

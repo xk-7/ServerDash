@@ -45,6 +45,7 @@ struct ServerDashApp: App {
             ) { _ in
                 appState.terminalRegistry.controllers.forEach { $0.recording.stop(reason: "sleep") }
                 AIWorkspace.shared.stopAll()
+                appState.rdpControllers.values.forEach { $0.sleep() }
                 appState.setMonitoringSleeping(true)
             }
             .onReceive(
@@ -53,6 +54,7 @@ struct ServerDashApp: App {
                 )
             ) { _ in
                 appState.setMonitoringSleeping(false)
+                appState.rdpControllers.values.forEach { $0.wake() }
             }
             .onReceive(
                 NotificationCenter.default.publisher(
