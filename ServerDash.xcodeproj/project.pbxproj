@@ -37,6 +37,7 @@
 		4BB25D17D57E99D1400875D2 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
 		4D56CED4D65D6CEDC0725E01 /* TerminalTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2579C848F637AF5CE5FB1934 /* TerminalTools.swift */; };
 		4E36DA5D3CD4BD6ADA9B8D67 /* MobileCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CFE70EF86407C9418107EE /* MobileCompatibility.swift */; };
+		522AF81A2580A69ACA86DF11 /* AIAssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659F4C0B2DD0598AE5F53192 /* AIAssistantTests.swift */; };
 		5A59C813DEF4AAA9A34F856D /* TerminalWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 044ACF9048C24197D32E1C1F /* TerminalWorkspace.swift */; };
 		5B200D9D7285DE7BC76FAF62 /* ProfessionalConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */; };
 		5D1ECA6BAC4A15B7BCBA8603 /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BA641DDE28754C1E7F14AA /* Services.swift */; };
@@ -45,6 +46,7 @@
 		5FBE0D9DE5D2BE5BF4322280 /* MonitoringHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28CB56C032111EE4D021A5A5 /* MonitoringHistory.swift */; };
 		626393443C800D657021FC1F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA3D23AC51B51EA56248DE7F /* Models.swift */; };
 		629396E81B7F994F4AF6DF15 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */; };
+		63562B2CB987BEF23019E9B2 /* AIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4938275841C70334CC6EC61C /* AIModels.swift */; };
 		647B6E8FACECB3F59DFD1C20 /* SessionTransferViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D631EF7AAC344FFBC9D7FA /* SessionTransferViews.swift */; };
 		65A87AE1E95E01A15A5A6E49 /* SessionTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6799CCA26301904D11052EBA /* SessionTransfer.swift */; };
 		66BDF55CB7BA97437267E430 /* RemoteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74225E5B629E05722E511CB /* RemoteConnection.swift */; };
@@ -87,6 +89,7 @@
 		C404D5DA72EBDDBEA231ED08 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 49A9C58D06480F064871D0E3 /* SwiftTerm */; };
 		C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = B31B612E337EB371ED8FE01C /* SwiftTerm */; };
 		C624E5A873EFCE0225B2F22F /* SFTPView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */; };
+		C6A8D452937B19ED2D734BB4 /* AIConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA8450851728A2571A0B595 /* AIConversationStore.swift */; };
 		C7FE7E6F6410B4D6BC49E7C1 /* ProfessionalConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */; };
 		C95E5418CF1AC02801571D74 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 29E2FE17013CA0CE6C3D49F5 /* ZIPFoundation */; };
 		CB2C227EA367B1DF03DD3B26 /* TerminalWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */; };
@@ -106,11 +109,13 @@
 		E198FF02DF752866C68B7687 /* MonitoringResponseParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */; };
 		E427570FB5051530B613815B /* MonitoringHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28CB56C032111EE4D021A5A5 /* MonitoringHistory.swift */; };
 		E4E05E912A7AE3EFE7DFDF28 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473A692AB3CAE4975F0BC3EE /* AppState.swift */; };
+		E5840A40C0252BB241CF6B66 /* AIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FE1E7D6FFE095FB47F50E5D /* AIClient.swift */; };
 		E76782694612DD8B7041AFE1 /* TrustedHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F07DD8B9A1DEB2284D8A85B /* TrustedHosts.swift */; };
 		EB4839F84B60B255E2D68A86 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBCD7321B546E993FC42494 /* ContentView.swift */; };
 		EEC0A120B9976B4AE9E22CA9 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E1136D4D76B5E5F2B8A29C /* DesignSystem.swift */; };
 		F021D26D8F32D3D73CFAA922 /* themes.json in Resources */ = {isa = PBXBuildFile; fileRef = B3FD877C201A30AA5ED80CBC /* themes.json */; };
 		F18CEDA9A7E02F64369F0B0E /* RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D22C250E0FC322B0965101 /* RecordingStore.swift */; };
+		F36D8A946BB74E17BDC42226 /* AIViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EFCAB99B9533CAFDF2D9ED /* AIViews.swift */; };
 		F59BB85EA8589084A1E1AD95 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = CA63ABB51C81C06F62256CA4 /* ZIPFoundation */; };
 		F6ACE78D064CA0A2F3DC7B78 /* ServerDashMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1266F10821FE9CAFA6B83E42 /* ServerDashMobileApp.swift */; };
 		F78CB9A2EEACF35A4CC05A5D /* SessionTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AAFA5678E5B901A677C53A8 /* SessionTransferTests.swift */; };
@@ -156,18 +161,22 @@
 		45D37D64D57E276367308FDA /* SFTPListingParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPListingParserTests.swift; sourceTree = "<group>"; };
 		473A692AB3CAE4975F0BC3EE /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		47E2ED3DCB797AB5267364EC /* ZIPFoundation */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ZIPFoundation; path = Vendor/ZIPFoundation; sourceTree = SOURCE_ROOT; };
+		4938275841C70334CC6EC61C /* AIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModels.swift; sourceTree = "<group>"; };
 		4D2210C40CFA7EB205CC071D /* ServerDashApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashApp.swift; sourceTree = "<group>"; };
 		52A7F90E5D1EBBC61944D38A /* LICENSES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSES.md; sourceTree = "<group>"; };
 		552061E634B9FC53278770DA /* Citadel */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Citadel; path = Vendor/Citadel; sourceTree = SOURCE_ROOT; };
 		5922649DA8CDEBB3C7A963F5 /* TerminalAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearance.swift; sourceTree = "<group>"; };
 		5B428436A02C28484585B06A /* ServerDash.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ServerDash.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5C7B9A7128821971D27B4E3F /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		5CA8450851728A2571A0B595 /* AIConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIConversationStore.swift; sourceTree = "<group>"; };
 		5DBF7489718D78F03CFD571B /* ResourceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceViews.swift; sourceTree = "<group>"; };
 		60BA641DDE28754C1E7F14AA /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
 		62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessions.swift; sourceTree = "<group>"; };
+		659F4C0B2DD0598AE5F53192 /* AIAssistantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantTests.swift; sourceTree = "<group>"; };
 		6799CCA26301904D11052EBA /* SessionTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransfer.swift; sourceTree = "<group>"; };
 		69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnectionsView.swift; sourceTree = "<group>"; };
 		69DFF908A3A8D318995EC034 /* PortForwarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwarding.swift; sourceTree = "<group>"; };
+		6FE1E7D6FFE095FB47F50E5D /* AIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIClient.swift; sourceTree = "<group>"; };
 		72AFCD45B23730D303190D42 /* DashboardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViews.swift; sourceTree = "<group>"; };
 		735EFA378239958E015D2E5F /* TerminalAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalAppearanceTests.swift; sourceTree = "<group>"; };
 		749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignGallery.swift; sourceTree = "<group>"; };
@@ -183,6 +192,7 @@
 		8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorAndSettingsViews.swift; sourceTree = "<group>"; };
 		89EC7D51D0C23C05C379049A /* RecordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingTests.swift; sourceTree = "<group>"; };
 		8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEngine.swift; sourceTree = "<group>"; };
+		91EFCAB99B9533CAFDF2D9ED /* AIViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIViews.swift; sourceTree = "<group>"; };
 		943DE456AB8EBE7128B9AF0E /* SFTPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPService.swift; sourceTree = "<group>"; };
 		96A03B9CC41965EBB77F02A9 /* MobileRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRuntime.swift; sourceTree = "<group>"; };
 		99D22C250E0FC322B0965101 /* RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStore.swift; sourceTree = "<group>"; };
@@ -276,6 +286,10 @@
 		1656222CBBF9ABFA7A9E8685 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				6FE1E7D6FFE095FB47F50E5D /* AIClient.swift */,
+				5CA8450851728A2571A0B595 /* AIConversationStore.swift */,
+				4938275841C70334CC6EC61C /* AIModels.swift */,
+				91EFCAB99B9533CAFDF2D9ED /* AIViews.swift */,
 				473A692AB3CAE4975F0BC3EE /* AppState.swift */,
 				E316E9C6F6836AA6547B6942 /* Assets.xcassets */,
 				8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */,
@@ -393,6 +407,7 @@
 		E8B635DD8A46136DF2AA141D /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				659F4C0B2DD0598AE5F53192 /* AIAssistantTests.swift */,
 				09BE650CB059896F0CEFF8D2 /* FoundationTests.swift */,
 				393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */,
 				198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */,
@@ -572,6 +587,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E5840A40C0252BB241CF6B66 /* AIClient.swift in Sources */,
+				C6A8D452937B19ED2D734BB4 /* AIConversationStore.swift in Sources */,
+				63562B2CB987BEF23019E9B2 /* AIModels.swift in Sources */,
+				F36D8A946BB74E17BDC42226 /* AIViews.swift in Sources */,
 				E4E05E912A7AE3EFE7DFDF28 /* AppState.swift in Sources */,
 				0514A7F1D10C4AAC28A9C614 /* ConnectionEngine.swift in Sources */,
 				EB4839F84B60B255E2D68A86 /* ContentView.swift in Sources */,
@@ -639,6 +658,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				522AF81A2580A69ACA86DF11 /* AIAssistantTests.swift in Sources */,
 				2FED97A6D70245600F86E9C2 /* FoundationTests.swift in Sources */,
 				684CCF714F344DA86E6DDE0B /* MonitorLayoutStoreTests.swift in Sources */,
 				3F49CD8D3E26FEE90022B46F /* MonitoringHistoryTests.swift in Sources */,

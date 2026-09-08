@@ -6,6 +6,15 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 
 ## Features
 
+### AI assistant (macOS)
+
+- Open **Sessions → ✨ → AI** for a right-side Ops assistant, alongside the existing status and snippet inspector. **AI → Open general conversation** opens an independent window without terminal context.
+- Configure an OpenAI-compatible Chat Completions base URL, model and API key in **Settings → AI Assistant**. Replies stream live; generate shell commands, explain parameters, analyze logs or write Bash/Python/Ansible scripts.
+- Terminal context requires permission per SSH connection and is captured only when sending. Right-click a terminal selection to prepare **Send to AI** or **AI Explain**, then review and send. Attachments are bounded and are not saved with chats; visible output and AI replies can still contain secrets.
+- Keep up to 50 local conversations, search their names, copy/delete messages and clear conversations. The configurable request history defaults to the latest 20 messages. No automatic deletion, cloud sync or background terminal upload.
+- Single-line shell suggestions can fill the command bar or execute after explicit target/command confirmation. Finished replies are bound to their original pane and connection; scripts can be copied, but are not automatically executed. API keys use a dedicated device-only Keychain item.
+- macOS only; iPhone/iPad and offline command completion are unchanged. See [setup, privacy and limitations](Docs/AI_ASSISTANT.md) and [verification status](Docs/AI_ASSISTANT_QA.md).
+
 ### Session recording (macOS)
 
 - Record each connected SSH pane independently from the existing terminal toolbar; tab/page changes keep recording. Stop saves automatically to `~/Documents/ServerDash/recordings`, configurable in Settings → Recording.

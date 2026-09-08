@@ -553,6 +553,8 @@ struct SettingsView: View {
                 }
             RecordingSettingsView()
                 .tabItem { Label("录制", systemImage: "record.circle") }
+            AISettingsView()
+                .tabItem { Label("AI 助手", systemImage: "sparkles") }
         }
         .preferredColorScheme(appAppearance.colorScheme)
         .frame(width: 920, height: 720)

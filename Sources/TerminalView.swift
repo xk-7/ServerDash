@@ -104,7 +104,8 @@ private struct TerminalWorkspaceContent: View {
     @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
     @SceneStorage("terminal.inspector.visible") private var showingInspector = false
-    @SceneStorage("terminal.inspector.tab") private var inspectorTab = "status"
+    @State private var inspectorTab = "status"
+    @Environment(\.openWindow) private var openWindow
 
     @State private var showingServerPicker = false
     @State private var pendingClose: [WorkspaceTab] = []
@@ -258,6 +259,13 @@ private struct TerminalWorkspaceContent: View {
                     .accessibilityLabel("代码片段")
                 }
                 Button {
+                    inspectorTab = "ai"; showingInspector = true
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+                .buttonStyle(.borderless).frame(width: 32, height: 32)
+                .help("打开 AI 助手").accessibilityLabel("打开 AI 助手")
+                Button {
                     showingInspector.toggle()
                 } label: {
                     Image(systemName: "sidebar.right")
@@ -265,8 +273,7 @@ private struct TerminalWorkspaceContent: View {
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 32, height: 32)
-                .disabled(selectedController == nil)
-                .help("显示状态与代码片段（⌘⌥I）")
+                .help("显示 AI、状态与代码片段（⌘⌥I）")
                 .accessibilityLabel(showingInspector ? "隐藏终端检查器" : "显示终端检查器")
             }
             .controlSize(.regular)
@@ -331,10 +338,24 @@ private struct TerminalWorkspaceContent: View {
                     refreshInterval: appState.refreshInterval,
                     selectedTab: $inspectorTab,
                     onInsert: { requestSnippet($0, into: selectedController.id, execute: false) },
-                    onRun: { requestSnippet($0, into: selectedController.id, execute: true) }
+                    onRun: { requestSnippet($0, into: selectedController.id, execute: true) },
+                    isActivePane: { workspace.selectedTab?.kind == .terminal && workspace.activePane == selectedController.id }
                 )
-                .inspectorColumnWidth(min: 280, ideal: 300, max: 360)
+                .inspectorColumnWidth(min: 340, ideal: 390, max: 600)
+            } else {
+                ContentUnavailableView {
+                    Label("AI 助手", systemImage: "sparkles")
+                } description: {
+                    Text("选择 SSH 面板使用运维模式，或打开独立通用对话。")
+                } actions: {
+                    Button("打开通用对话") { openWindow(id: "ai-general") }
+                }.inspectorColumnWidth(min: 340, ideal: 390, max: 600)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .terminalShowAI)) { notification in
+            guard let id = notification.object as? UUID, let controller = registry.controller(for: id) else { return }
+            appState.selectTerminal(controller.session)
+            inspectorTab = "ai"; showingInspector = true
         }
         .focusedSceneValue(\.terminalShortcuts, shortcutActions)
         .confirmationDialog(
@@ -446,6 +467,7 @@ struct TerminalInspectorView: View {
     @Binding var selectedTab: String
     let onInsert: (CommandSnippetRecord) -> Void
     let onRun: (CommandSnippetRecord) -> Void
+    var isActivePane: () -> Bool = { true }
     @State private var search = ""
     @State private var copiedSnippetID: UUID?
 
@@ -466,18 +488,22 @@ struct TerminalInspectorView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Picker("检查器内容", selection: $selectedTab) {
                     Text("状态").tag("status")
+                    Text("AI").tag("ai")
                     Text("代码片段").tag("snippets")
                 }
                 .pickerStyle(.segmented).labelsHidden()
             }
             .padding(AppleDesign.Spacing.md)
             Divider()
-            ScrollView {
+            if selectedTab == "ai" {
+                AIAssistantPanel(controller: controller, isActive: isActivePane)
+            } else { ScrollView {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
                     if selectedTab == "snippets" { snippetContent } else { statusContent }
                 }
                 .padding(AppleDesign.Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
             }
         }
         .background(Color.appGround)

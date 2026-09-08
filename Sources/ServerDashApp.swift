@@ -44,6 +44,7 @@ struct ServerDashApp: App {
                 )
             ) { _ in
                 appState.terminalRegistry.controllers.forEach { $0.recording.stop(reason: "sleep") }
+                AIWorkspace.shared.stopAll()
                 appState.setMonitoringSleeping(true)
             }
             .onReceive(
@@ -59,6 +60,9 @@ struct ServerDashApp: App {
                 )
             ) { _ in
                 appState.refreshMonitoringPowerMode()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                AIWorkspace.shared.stopAll()
             }
             .preferredColorScheme(appAppearance.colorScheme)
             .frame(minWidth: 900, minHeight: 620)
@@ -90,7 +94,12 @@ struct ServerDashApp: App {
                     }
                 }
             }
+            AIAssistantCommands()
         }
+
+        Window("AI 通用对话", id: "ai-general") {
+            AIGeneralWindow().preferredColorScheme(appAppearance.colorScheme)
+        }.defaultSize(width: 640, height: 760)
 
         Settings {
             SettingsView()
@@ -101,5 +110,14 @@ struct ServerDashApp: App {
 
     private var appAppearance: AppAppearance {
         AppAppearance(rawValue: appAppearanceRawValue) ?? .system
+    }
+}
+
+private struct AIAssistantCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    var body: some Commands {
+        CommandMenu("AI") {
+            Button("打开通用对话") { openWindow(id: "ai-general") }
+        }
     }
 }

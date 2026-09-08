@@ -62,14 +62,17 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     let serverName: String
     private(set) var config: ServerConnectionConfig
     var connectionTask: Task<Void, Never>?
-    var connectionGeneration = UUID()
+    var connectionGeneration = UUID() { didSet { ai.invalidate() } }
     let createdAt: Date
     let hostView: TerminalHostView
+    let ai = AIPaneState()
     let recording: TerminalRecordingController
     private let attachProcess: Bool
     private let initialAppearanceProfile: TerminalAppearanceProfile
 
-    @Published var status: TerminalConnectionStatus = .connecting
+    @Published var status: TerminalConnectionStatus = .connecting {
+        didSet { if status != .connected { ai.invalidate() } }
+    }
     @Published var lastError: String?
     @Published var appearanceProfile: TerminalAppearanceProfile
     var onHostKeyFailure: ((UUID) -> Void)?
@@ -130,6 +133,13 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         hostView.onRecordingOutput = { [weak self] in self?.recording.output($0) }
         hostView.onRecordingDisplayChanged = { [weak self] in self?.recording.displayChanged() }
         hostView.shouldCaptureOutput = { [weak self] in self?.recording.isRecording == true }
+        hostView.onAISelection = { [weak self] text, explain in
+            guard let self else { return }
+            self.ai.selectedText = AITerminalContext.bounded(text)
+            self.ai.draft = explain ? "请解释选中命令的各个参数、作用与注意事项。" : "请分析选中的终端输出，给出排查步骤与建议。"
+            self.hostView.onFocus?()
+            NotificationCenter.default.post(name: .terminalShowAI, object: self.id)
+        }
     }
 
     func start() {
@@ -273,6 +283,23 @@ final class TerminalSessionRegistry: ObservableObject {
 }
 
 final class ServerDashTerminalView: LocalProcessTerminalView {
+    var onAISelection: ((String, Bool) -> Void)?
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)?.copy() as? NSMenu ?? NSMenu()
+        menu.autoenablesItems = false
+        if menu.items.isEmpty {
+            let copy = NSMenuItem(title: "复制", action: #selector(copy(_:)), keyEquivalent: "")
+            copy.target = self; copy.isEnabled = selectionActive; menu.addItem(copy)
+        }
+        menu.addItem(.separator())
+        for (title, action) in [("发送给 AI…", #selector(analyzeSelection)), ("AI 解释…", #selector(explainSelection))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self; item.isEnabled = selectionActive; menu.addItem(item)
+        }
+        return menu
+    }
+    @objc private func analyzeSelection() { if let text = getSelection() { onAISelection?(text, false) } }
+    @objc private func explainSelection() { if let text = getSelection() { onAISelection?(text, true) } }
     var onFocus: (() -> Void)?
     var onOutput: (() -> Void)?
     var onRecordingOutput: ((Data) -> Void)?
@@ -406,6 +433,15 @@ final class TerminalHostView: NSView {
     private let sessionID: UUID
     private var config: ServerConnectionConfig
     let tools: TerminalTools
+    var onAISelection: ((String, Bool) -> Void)?
+    func aiVisibleText() -> String {
+        // Capture parsed visible cells only, never scan scrollback or raw input.
+        let screen = terminalView.getTerminal().displaySnapshot(followOutput: false)
+        let text = screen.lines.prefix(200).map { line in
+            line.cells.filter { $0.width != 0 }.map(\.text).joined().trimmingCharacters(in: .whitespaces)
+        }.joined(separator: "\n")
+        return AITerminalContext.bounded(text)
+    }
     var onFocus: (() -> Void)?
     private var didStart = false
     private var commandObserver: NSObjectProtocol?
@@ -442,6 +478,7 @@ final class TerminalHostView: NSView {
         self.appearanceProfile = appearanceProfile
         super.init(frame: .zero)
         tools.attach(terminalView)
+        terminalView.onAISelection = { [weak self] text, explain in self?.onAISelection?(text, explain) }
         terminalView.onOutput = { [weak self] in self?.tools.refreshPrompt() }
         terminalView.onRecordingOutput = { [weak self] in self?.onRecordingOutput?($0) }
         terminalView.shouldCaptureOutput = { [weak self] in self?.shouldCaptureOutput?() == true }
