@@ -44,18 +44,25 @@ struct AIChatView: View {
     @State private var confirmingClear = false
     @State private var deletingMessage: UUID?
     @State private var followsOutput = true
+    @State private var showingModels = false
 
     private var conversationID: UUID? {
         mode == .ops ? pane.conversationID : workspace.generalConversationID
     }
     private var chat: AIConversation? { workspace.conversation(conversationID) }
     private var busy: Bool { conversationID.map { workspace.running.contains($0) } ?? false }
+    private var activeProfile: AIProviderProfile {
+        var profile = settings.profile(chat?.destination?.provider ?? settings.defaultProvider)
+        if let model = chat?.destination?.model { profile.model = model }
+        return profile
+    }
+    private var destinationChanged: Bool { chat?.destination.map { !$0.matches(activeProfile) } ?? false }
     private var draft: Binding<String> {
         mode == .ops ? $pane.draft : $workspace.generalDraft
     }
     private var authorized: Bool {
         guard let controller, mode == .ops else { return false }
-        return pane.isAuthorized(generation: controller.connectionGeneration, settings: settings.revision)
+        return !destinationChanged && pane.isAuthorized(generation: controller.connectionGeneration, settings: activeProfile.authorizationRevision)
     }
 
     var body: some View {
@@ -79,14 +86,19 @@ struct AIChatView: View {
             if let controller { workspace.prepare(controller) }
         }
         .onChange(of: workspace.loaded) { _, loaded in if loaded, let controller { workspace.prepare(controller) } }
-        .onChange(of: settings.revision) { _, _ in pane.revoke(); if let id = conversationID { workspace.stop(id) } }
+        .onChange(of: activeProfile.authorizationRevision) { _, _ in pane.invalidate(); showingConsent = false }
         .onChange(of: pane.authorizedGeneration) { _, _ in pendingCommand = nil }
-        .onChange(of: conversationID) { _, _ in pendingCommand = nil }
+        .onChange(of: conversationID) { _, _ in pendingCommand = nil; showingConsent = false }
         .sheet(isPresented: $showingSettings) {
             VStack(spacing: 0) {
                 HStack { Text("AI 设置").font(.headline); Spacer(); Button("完成") { showingSettings = false } }.padding()
-                AISettingsView()
-            }.frame(width: 650, height: 570)
+                AISettingsView(settings: settings)
+            }.frame(width: 680, height: 720)
+        }
+        .sheet(isPresented: $showingModels) {
+            AIModelPicker(profile: activeProfile, settings: settings, key: { try settings.key(for: activeProfile) }) { model in
+                if let id = conversationID { workspace.selectModel(model, in: id) }
+            }
         }
         .sheet(isPresented: $showingConversations) {
             AIConversationBrowser(mode: mode, serverID: controller?.serverID, paneID: controller?.id) { id in
@@ -106,11 +118,11 @@ struct AIChatView: View {
         }
         .alert("允许向 AI 服务附带终端上下文？", isPresented: $showingConsent) {
             Button("允许此连接") {
-                if let controller { pane.authorize(generation: controller.connectionGeneration, settings: settings.revision) }
+                if let controller, !destinationChanged { pane.authorize(generation: controller.connectionGeneration, settings: activeProfile.authorizationRevision) }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("仅在点击发送时，将“\(controller?.serverName ?? "")”的服务器地址、用户名及当前可见输出发送至 \(settings.configuration.baseURL)。不会读取原始按键、隐藏密码、Keychain 或整段历史，但可见内容仍可能包含秘密。附件本身不随对话存储；AI 回复可能复述内容。重连或修改 API 设置后需重新授权。")
+            Text("仅在点击发送时，将“\(controller?.serverName ?? "")”的服务器地址、用户名及当前可见输出发送至 \(activeProfile.provider.title)：\(activeProfile.baseURL)。不会读取原始按键、隐藏密码、Keychain 或整段历史，但可见内容仍可能包含秘密。附件本身不随对话存储；AI 回复可能复述内容。重连、切换提供商或修改地址／凭据后需重新授权。")
         }
         .confirmationDialog("执行 AI 建议的命令？", isPresented: Binding(get: { pendingCommand != nil }, set: { if !$0 { pendingCommand = nil } })) {
             Button("确认执行") { executePending() }
@@ -151,8 +163,24 @@ struct AIChatView: View {
                     Text("不读取终端上下文").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if !settings.configuration.model.isEmpty {
-                Text(settings.configuration.model).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            HStack {
+                Menu {
+                    ForEach(AIProviderID.allCases) { provider in
+                        Button(provider.title) { selectProvider(provider) }
+                    }
+                } label: { Text(activeProfile.provider.title).lineLimit(1) }
+                    .accessibilityLabel("切换 AI 提供商，新建对话")
+                Button { ensureConversation(); showingModels = true } label: {
+                    Text(activeProfile.model.isEmpty ? "选择模型…" : activeProfile.model).lineLimit(1).truncationMode(.middle)
+                }.buttonStyle(.borderless).accessibilityLabel("选择 AI 模型")
+            }.font(.caption).disabled(!workspace.loaded)
+            Text("发送至：\(chat?.destination?.baseURL ?? activeProfile.baseURL)")
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+            if destinationChanged {
+                Label("地址已修改，请新建对话。旧历史不会转发。", systemImage: "lock.shield")
+                    .font(.caption2).foregroundStyle(Color.appWarning)
+                Button("为新地址新建对话") { newConversation(profile: settings.profile(activeProfile.provider)) }
+                    .font(.caption).buttonStyle(.bordered)
             }
         }.padding(12)
     }
@@ -197,6 +225,9 @@ struct AIChatView: View {
                 Button { copy(message.text) } label: { Image(systemName: "doc.on.doc") }.accessibilityLabel("复制消息")
                 Button { deletingMessage = message.id } label: { Image(systemName: "trash") }.accessibilityLabel("删除消息")
             }.buttonStyle(.borderless)
+            if let provider = message.provider, let model = message.model {
+                Text("\(provider.title) · \(model)").font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            }
             // Plain text intentionally avoids remote images, HTML and active model-generated links.
             if message.role == .user || message.text.isEmpty {
                 Text(message.text.isEmpty ? "正在生成…" : message.text).font(.callout).textSelection(.enabled)
@@ -241,7 +272,7 @@ struct AIChatView: View {
             if mode == .ops {
                 HStack {
                     Toggle("附带可见终端", isOn: Binding(get: { authorized }, set: { if $0 { showingConsent = true } else { pane.revoke() } }))
-                        .toggleStyle(.checkbox).disabled(controller?.status != .connected)
+                        .toggleStyle(.checkbox).disabled(controller?.status != .connected || destinationChanged)
                     Spacer()
                     Button("预览") { contextPreview = terminalAttachment(includeScreen: true).text }
                         .disabled(controller == nil).buttonStyle(.borderless)
@@ -268,23 +299,37 @@ struct AIChatView: View {
                     Button("停止") { if let id = conversationID { workspace.stop(id) } }
                 } else {
                     Button("发送") { send() }.buttonStyle(.borderedProminent)
-                        .disabled(!workspace.loaded || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!workspace.loaded || destinationChanged || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             Text("聊天保存在本机；发送内容交由所配置的 AI 服务处理。请勿提交秘密。").font(.caption2).foregroundStyle(.secondary)
         }.padding(12)
     }
 
-    private func newConversation() {
+    private func newConversation(profile: AIProviderProfile? = nil) {
         if mode == .ops, let controller {
-            if let id = workspace.create(mode: .ops, serverID: controller.serverID, name: controller.serverName) {
+            if let id = workspace.create(mode: .ops, serverID: controller.serverID, name: controller.serverName, profile: profile) {
                 pane.invalidate(); pane.conversationID = id; pane.draft = ""; workspace.prepare(controller)
             }
-        } else if let id = workspace.create(mode: .general) { workspace.generalConversationID = id; workspace.generalDraft = "" }
+        } else if let id = workspace.create(mode: .general, profile: profile) {
+            if let old = conversationID { workspace.stop(old) }
+            pane.invalidate(); workspace.generalConversationID = id; workspace.generalDraft = ""
+        }
+    }
+    private func ensureConversation() { if chat == nil { newConversation() } }
+    private func selectProvider(_ provider: AIProviderID) {
+        guard let old = conversationID else { newConversation(profile: settings.profile(provider)); return }
+        guard let id = workspace.selectProvider(provider, in: old), id != old else { return }
+        pane.invalidate(); draft.wrappedValue = ""
+        if mode == .ops {
+            pane.conversationID = id
+            if let controller { workspace.prepare(controller) }
+        } else { workspace.generalConversationID = id }
     }
     private func send() {
         guard mode == .general || isActive() else { return }
-        if (try? settings.configuration.endpoint()) == nil { showingSettings = true; return }
+        guard !destinationChanged else { return }
+        if (try? activeProfile.validate()) == nil { showingSettings = true; return }
         if chat == nil {
             let savedDraft = draft.wrappedValue
             newConversation()
@@ -293,7 +338,7 @@ struct AIChatView: View {
         guard let id = conversationID else { return }
         let context = mode == .ops && (authorized || pane.selectedText != nil) ? terminalAttachment(includeScreen: authorized) : nil
         let target = controller.map { AICommandTarget(paneID: $0.id, generation: $0.connectionGeneration, serverName: $0.serverName) }
-        if workspace.send(id: id, prompt: draft.wrappedValue, configuration: settings.configuration, context: context, target: target) {
+        if workspace.send(id: id, prompt: draft.wrappedValue, profile: activeProfile, context: context, target: target) {
             draft.wrappedValue = ""; pane.selectedText = nil
         }
     }
@@ -359,58 +404,187 @@ private struct AIConversationBrowser: View {
 }
 
 struct AISettingsView: View {
-    @ObservedObject private var settings = AISettings.shared
-    @State private var configuration = AIConfiguration()
+    @ObservedObject var settings = AISettings.shared
+    @State private var profile = AIProviderProfile(provider: .openAI)
     @State private var key = ""
     @State private var removeKey = false
+    @State private var makeDefault = false
+    @State private var pendingProvider: AIProviderID?
+    @State private var showingModels = false
     @State private var status: String?
     @State private var testing = false
     @State private var testTask: Task<Void, Never>?
+    @State private var testID = UUID()
+    private var dirty: Bool {
+        profile != settings.profile(profile.provider) || !key.isEmpty || removeKey || (makeDefault && profile.provider != settings.defaultProvider)
+    }
     var body: some View {
         Form {
-            Section("OpenAI 兼容服务") {
-                TextField("API 基础地址", text: $configuration.baseURL)
-                    .help("例如 https://api.openai.com/v1，自动追加 /chat/completions")
-                TextField("模型 ID", text: $configuration.model)
+            if let notice = settings.notice {
+                Section { Text(notice).font(.caption); Button("重试迁移") { settings.retryMigration(); load(settings.defaultProvider) } }
+            }
+            Section("模型提供商") {
+                Picker("提供商", selection: Binding(get: { profile.provider }, set: { provider in
+                    if dirty { pendingProvider = provider } else { load(provider) }
+                })) { ForEach(AIProviderID.allCases) { Text($0.title).tag($0) } }
+                TextField("API 基础地址", text: $profile.baseURL)
+                Text(profile.provider.help).font(.caption).foregroundStyle(.secondary)
                 SecureField("新的 API Key（留空保留）", text: $key)
-                Toggle("删除已保存的 API Key（用于免密本机服务）", isOn: $removeKey)
-                Stepper("上下文消息：\(configuration.contextMessages) 条", value: $configuration.contextMessages, in: 2...100, step: 2)
-                Text("填写支持 Chat Completions 流式输出的模型和基础地址，不含 /chat/completions。仅 HTTPS 或本机回环 HTTP；不会跟随重定向。并非所有“兼容”服务都支持相同参数。").font(.caption).foregroundStyle(.secondary)
+                Toggle("删除此提供商已保存的 Key", isOn: $removeKey)
+                if !settings.profile(profile.provider).destination.matches(profile) {
+                    Text("地址已变更：请重新填写 Key。继续使用需新建对话，不转发旧历史。").font(.caption).foregroundStyle(Color.appWarning)
+                }
+                HStack {
+                    TextField("模型 ID", text: $profile.model)
+                    Button("选择模型…") { showingModels = true }
+                }
+                Toggle("设为新对话的默认提供商", isOn: $makeDefault)
+                Text("每家一套配置；已有对话保持自己的提供商与模型。内置登录通道暂未提供。").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("高级参数") {
+                Toggle("Temperature 使用模型默认", isOn: Binding(get: { profile.options.temperature == nil }, set: { profile.options.temperature = $0 ? nil : min(0.2, profile.temperatureMaximum ?? 0) }))
+                    .disabled(profile.temperatureMaximum == nil && profile.options.temperature == nil)
+                if profile.temperatureMaximum == nil {
+                    Text("此模型不提供 Temperature 覆盖；若已有自定义值，请切回模型默认。").font(.caption).foregroundStyle(.secondary)
+                }
+                if profile.options.temperature != nil {
+                    TextField("Temperature（0–\(profile.temperatureMaximum ?? 0, specifier: "%.1f")）", value: $profile.options.temperature, format: .number)
+                }
+                Toggle("Max Tokens 使用服务默认", isOn: Binding(get: { profile.options.maxTokens == nil }, set: { profile.options.maxTokens = $0 ? nil : 4096 }))
+                    .disabled(profile.provider == .anthropic)
+                if profile.options.maxTokens != nil {
+                    TextField("Max Tokens（正整数）", value: $profile.options.maxTokens, format: .number.grouping(.never))
+                }
+                Stepper("历史消息上限：\(profile.options.historyMessages) 条", value: $profile.options.historyMessages, in: 1...50)
+                Text("默认 20 条历史，不含系统提示及当前问题；按协议与大小限制裁剪。Temperature 0 也不保证结果完全确定。Token 上限可能包含推理消耗。").font(.caption).foregroundStyle(.secondary)
             }
             Section("隐私与执行") {
-                Text("API Key 仅保存在本机 Keychain，不写入聊天、日志或会话导出。服务器上下文需逐连接授权；通用对话不读取终端。自动附件不落盘，但用户消息及 AI 回复可能包含敏感内容。")
-                Text("单次发送最多 32 KiB 输入、16 KiB 终端附件；历史默认最近 20 条并有请求大小上限。最多 50 个对话，不会自动删除旧对话。AI 不会自主连接服务器或执行命令。")
+                Text("Key 按提供商和地址保存在本机 Keychain，不进入聊天或日志。仅 HTTPS 或本机回环 HTTP，不跟随重定向。终端上下文逐连接、逐发送目的地授权；AI 不会自动执行命令。")
             }.font(.caption).foregroundStyle(.secondary)
             Section {
                 HStack {
-                    Button("保存设置") {
-                        do {
-                            try settings.save(configuration, key: removeKey ? "" : (key.isEmpty ? nil : key))
-                            key = ""; removeKey = false; status = "已保存，终端上下文授权已重置。"
-                        } catch { status = AIError.safeDescription(error) }
-                    }.buttonStyle(.borderedProminent).disabled(testing)
-                    Button(testing ? "停止测试" : "测试连接") { if testing { testTask?.cancel() } else { testConnection() } }
+                    Button("保存设置") { _ = save() }.buttonStyle(.borderedProminent).disabled(testing)
+                    Button(testing ? "停止测试" : "测试连接") { if testing { cancelTest(); status = "已停止测试。" } else { testConnection() } }
                     if testing { ProgressView().controlSize(.small) }
                 }
                 Text("测试会发送一条不含终端内容的“回复 OK”消息，可能产生服务费用。").font(.caption).foregroundStyle(.secondary)
                 if let status { Text(status).font(.caption).textSelection(.enabled) }
             }
         }.formStyle(.grouped)
-            .onAppear { configuration = settings.configuration }
-            .onDisappear { testTask?.cancel(); key = "" }
+            .onAppear { load(settings.defaultProvider) }
+            .onDisappear { cancelTest(); key = "" }
+            .onChange(of: profile) { old, new in
+                cancelTest()
+                if old.baseURL != new.baseURL { key = ""; removeKey = false }
+            }
+            .onChange(of: key) { _, _ in cancelTest() }
+            .onChange(of: removeKey) { _, _ in cancelTest() }
+            .sheet(isPresented: $showingModels) {
+                AIModelPicker(profile: profile, settings: settings, key: draftKey,
+                              mayCache: key.isEmpty && !removeKey && settings.profile(profile.provider).destination.matches(profile)) { profile.model = $0 }
+            }
+            .confirmationDialog("保存当前提供商的修改？", isPresented: Binding(get: { pendingProvider != nil }, set: { if !$0 { pendingProvider = nil } })) {
+                Button("保存并切换") { if let next = pendingProvider, save() { load(next) }; pendingProvider = nil }
+                Button("放弃修改并切换", role: .destructive) { if let next = pendingProvider { load(next) }; pendingProvider = nil }
+                Button("取消", role: .cancel) { pendingProvider = nil }
+            }
     }
-    private func testConnection() {
-        testing = true; status = nil
+    private func load(_ provider: AIProviderID) {
+        cancelTest(); profile = settings.profile(provider); key = ""; removeKey = false
+        makeDefault = settings.defaultProvider == provider; status = nil
+    }
+    private func draftKey() throws -> String {
+        if removeKey { return "" }
+        if !key.isEmpty { return key }
+        guard settings.profile(profile.provider).destination.matches(profile) else { return "" }
+        return try settings.key(for: settings.profile(profile.provider))
+    }
+    private func save() -> Bool {
         do {
-            let token = removeKey ? "" : (key.isEmpty ? try AIKeychain.read() : key)
-            let request = try AIRequestBuilder.request(configuration: configuration, key: token, messages: [.init(role: "user", content: "请只回复 OK。")])
+            try settings.save(profile, key: removeKey ? "" : (key.isEmpty ? nil : key), makeDefault: makeDefault)
+            load(profile.provider); status = "已保存。参数从下一次请求生效；地址或凭据变更会重置上下文授权。"
+            return true
+        } catch { status = AIError.safeDescription(error); return false }
+    }
+    private func cancelTest() { testID = UUID(); testTask?.cancel(); testTask = nil; testing = false }
+    private func testConnection() {
+        cancelTest()
+        let id = UUID(); testID = id; testing = true; status = nil
+        do {
+            let captured = profile
+            let request = try AIProviderAdapter(provider: captured.provider).request(profile: captured, key: draftKey(), messages: [.init(role: "user", content: "请只回复 OK。")], model: settings.models(for: captured).first { $0.id == captured.model })
             testTask = Task {
-                defer { testing = false }
                 do {
-                    for try await _ in OpenAICompatibleClient().stream(request: request) { try Task.checkCancellation() }
-                    status = "流式连接测试成功。请保存设置后使用。"
-                } catch { status = AIError.safeDescription(error) }
+                    for try await _ in OpenAICompatibleClient().stream(request: request, provider: captured.provider) { try Task.checkCancellation() }
+                    guard testID == id else { return }
+                    testing = false; status = "流式连接测试成功。请保存设置后使用。"
+                } catch {
+                    guard testID == id else { return }
+                    testing = false; status = AIError.safeDescription(error)
+                }
             }
         } catch { testing = false; status = AIError.safeDescription(error) }
+    }
+}
+
+private struct AIModelPicker: View {
+    let profile: AIProviderProfile
+    @ObservedObject var settings: AISettings
+    let key: () throws -> String
+    var mayCache = true
+    let select: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var models: [AIModelDescriptor] = []
+    @State private var search = ""
+    @State private var manual = ""
+    @State private var status: String?
+    @State private var loading = false
+    @State private var task: Task<Void, Never>?
+    @State private var requestID = UUID()
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text("\(profile.provider.title) · 模型").font(.headline); Spacer(); Button("取消") { dismiss() } }
+            TextField("搜索模型名称或 ID", text: $search).textFieldStyle(.roundedBorder)
+            List(models.filter { search.isEmpty || $0.id.localizedCaseInsensitiveContains(search) || $0.name.localizedCaseInsensitiveContains(search) }) { model in
+                Button { manual = model.id } label: {
+                    VStack(alignment: .leading) { Text(model.id); Text(model.name).font(.caption).foregroundStyle(.secondary) }
+                }.buttonStyle(.plain).accessibilityLabel("选择 \(model.id)")
+            }
+            HStack {
+                Button(loading ? "停止刷新" : "刷新模型列表") { if loading { cancel() } else { refresh() } }
+                    .disabled(!profile.provider.discoverySupported)
+                if loading { ProgressView().controlSize(.small) }
+            }
+            TextField("手动填写模型 ID / 推理接入点 ID", text: $manual).textFieldStyle(.roundedBorder)
+            Text(profile.provider == .volcengine ? "请从方舟控制台复制已开通的模型 ID 或 ep- 接入点 ID。" : "列表来自当前服务，不代表具备调用权限或支持所有参数。刷新仅查询目录，不发送对话。也可手动填写 ID。")
+                .font(.caption).foregroundStyle(.secondary)
+            if let status { Text(status).font(.caption).foregroundStyle(Color.appWarning) }
+            HStack { Spacer(); Button("使用此模型") {
+                let id = manual.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !id.isEmpty, id.utf8.count <= 256, !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { status = AIError.configuration.localizedDescription; return }
+                select(id); dismiss()
+            }.buttonStyle(.borderedProminent).disabled(manual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+        }.padding(20).frame(width: 540, height: 540)
+            .onAppear { models = mayCache ? settings.models(for: profile) : []; manual = profile.model }
+            .onDisappear { cancel() }
+            .onChange(of: profile) { _, _ in cancel(); models = []; manual = profile.model }
+    }
+    private func cancel() { requestID = UUID(); task?.cancel(); task = nil; loading = false }
+    private func refresh() {
+        cancel(); let id = UUID(); requestID = id; loading = true; status = nil
+        do {
+            let token = try key()
+            task = Task {
+                do {
+                    let list = try await AIProviderAdapter(provider: profile.provider).listModels(profile: profile, key: token)
+                    try Task.checkCancellation(); guard requestID == id else { return }
+                    models = list; if mayCache { settings.cache(list, for: profile) }; loading = false
+                    status = list.isEmpty ? "服务未返回模型，请手动填写。" : nil
+                } catch {
+                    guard requestID == id else { return }
+                    loading = false; status = AIError.safeDescription(error)
+                }
+            }
+        } catch { loading = false; status = AIError.safeDescription(error) }
     }
 }

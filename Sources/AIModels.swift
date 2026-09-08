@@ -15,6 +15,8 @@ struct AIMessage: Codable, Identifiable, Equatable, Sendable {
     var text: String
     var state: State = .complete
     var date = Date()
+    var provider: AIProviderID?
+    var model: String?
 }
 
 struct AIConversation: Codable, Identifiable, Equatable, Sendable {
@@ -25,19 +27,26 @@ struct AIConversation: Codable, Identifiable, Equatable, Sendable {
     var serverID: UUID?
     var updatedAt = Date()
     var messages: [AIMessage] = []
+    var destination: AIConversationDestination?
 }
 
 enum AIError: LocalizedError {
     case configuration, keychain, storage, limit, tooLarge, malformedStream, incompleteStream
     case http(Int), network, cancelled
+    case outputLimit, refused, destinationChanged, modelDiscovery, parameters
     var errorDescription: String? {
         switch self {
+        case .outputLimit: return "回复达到输出上限，已保留内容。请调整 Max Tokens 后手动重试；未完成代码不可执行。"
+        case .refused: return "模型拒绝了请求或触发安全限制。已保留收到的内容。"
+        case .destinationChanged: return "此对话的发送地址已变更，请新建对话；不会向新地址发送旧历史。"
+        case .modelDiscovery: return "无法获取模型列表。已保留原选择，请手动填写模型 ID，或检查地址、凭据及区域。"
+        case .parameters: return "模型参数无效或不受支持。请检查 Temperature、Max Tokens 和历史消息上限。"
         case .configuration: return "请配置有效的 API 地址与模型。仅支持 HTTPS，HTTP 仅限本机回环地址；地址中不能包含凭据、查询或片段。"
         case .keychain: return "无法访问 AI API Key，请在设置中重新保存或解锁本机 Keychain。"
         case .storage: return "AI 对话无法读取或保存。请检查本机目录权限和磁盘空间；不会覆盖损坏的文件。"
         case .limit: return "最多保存 50 个对话。请先在对话列表中删除不需要的记录。"
         case .tooLarge: return "内容超过安全大小限制。请缩短输入、减少上下文，或新建对话。"
-        case .malformedStream: return "服务返回了不支持的流式数据，请检查 Chat Completions 兼容性。"
+        case .malformedStream: return "服务返回了不支持或损坏的流式数据，请检查提供商协议与模型。"
         case .incompleteStream: return "回复未完整结束，已保留收到的内容。请手动重试；不会自动重复请求。"
         case .http(let status):
             switch status {
@@ -102,30 +111,6 @@ enum AIKeychain {
         if status == errSecItemNotFound {
             guard SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess else { throw AIError.keychain }
         } else if status != errSecSuccess { throw AIError.keychain }
-    }
-}
-
-@MainActor
-final class AISettings: ObservableObject {
-    static let shared = AISettings()
-    @Published private(set) var configuration: AIConfiguration
-    @Published private(set) var revision = UUID()
-    private let defaults: UserDefaults
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        configuration = defaults.data(forKey: "ai.configuration.v1")
-            .flatMap { try? JSONDecoder().decode(AIConfiguration.self, from: $0) } ?? AIConfiguration()
-        configuration.contextMessages = min(100, max(2, configuration.contextMessages))
-    }
-    func save(_ value: AIConfiguration, key: String?) throws {
-        _ = try value.endpoint()
-        var value = value
-        value.contextMessages = min(100, max(2, value.contextMessages))
-        if let key { try AIKeychain.save(key) }
-        let data = try JSONEncoder().encode(value)
-        defaults.set(data, forKey: "ai.configuration.v1")
-        configuration = value
-        revision = UUID() // Re-authorize context even when only credentials have changed.
     }
 }
 

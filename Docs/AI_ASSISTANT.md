@@ -2,12 +2,40 @@
 
 ## 开始使用
 
-1. 打开 **设置 → AI 助手**，填写 API 基础地址、模型 ID，以及服务要求的 API Key。基础地址示例为 `https://api.openai.com/v1`；应用自动追加 `/chat/completions`，不要重复填写完整端点。
-2. 点击“测试连接”可以验证流式兼容性；测试只发送“请只回复 OK”，不附终端数据，但可能产生服务费用。点击“保存设置”生效。API Key 留空保留原值；删除须显式勾选。
+1. 打开 **设置 → AI 助手**，选择提供商，填写 API 基础地址与 API Key。八种选择各保存一套配置，切换表单时可保存或放弃未保存修改。地址预填官方默认值，不要填写完整生成端点。
+2. 点击“选择模型…”搜索／刷新服务模型目录，也可手动填写模型 ID。火山引擎手动填写模型 ID 或 `ep-` 推理接入点 ID。模型列表不是账号调用权限保证。点击“测试连接”只发送“请只回复 OK”，不附终端数据，但可能产生费用；保存后生效。Key 留空仅在地址未变时保留，删除须显式勾选。
 3. 右侧检查器按 **状态／AI／代码片段** 排列，进入会话工作区默认显示“状态”。点击顶部 ✨ 按钮或选择 **AI** 页签即可进入助手，输入需求并发送，生成命令、解释参数、分析错误或编写脚本。
 4. 需要独立问答时，点击“通用对话 ↗”，或使用 macOS 菜单 **AI → 打开通用对话**。通用窗口不绑定终端、不读取选区或输出，也不提供直接执行按钮。
 
 首版仅支持 macOS；不新增 iPhone／iPad AI 功能，不需要修改 SwiftData Schema，也不启用 iCloud 或跨设备同步。
+
+## 提供商与模型配置
+
+- OpenAI：默认 `https://api.openai.com/v1`，使用 Chat Completions；模型目录通过 `/models` 查询。
+- Anthropic/Claude：默认 `https://api.anthropic.com/v1`，使用 Messages 与 Claude 模型目录；不支持 Bedrock、Vertex。
+- Gemini：默认 `https://generativelanguage.googleapis.com/v1beta`，使用 GenerateContent；目录只保留支持内容生成的模型，不使用 Vertex 认证。
+- DeepSeek：默认 `https://api.deepseek.com/v1`，使用兼容 Chat Completions 的协议与模型目录。
+- 通义千问：默认北京地域 `https://dashscope.aliyuncs.com/compatible-mode/v1`；也可配置百炼业务空间域名。Key 必须匹配地域，模型目录使用同域名 `/api/v1/models`，查询失败仍可手动填写。详见[百炼接入域名](https://help.aliyun.com/zh/model-studio/base-url)与[模型目录](https://help.aliyun.com/en/model-studio/list-models)。
+- 火山引擎/方舟：默认 `https://ark.cn-beijing.volces.com/api/v3`，使用 Chat Completions；从控制台复制已开通模型／推理接入点 ID，不请求管理资源或要求 AccessKey/SecretKey。
+- Ollama：默认 `http://localhost:11434`，使用原生 `/api/chat` 与 `/api/tags`。本机服务可不填 Key，不自动下载、安装或启动模型。只有本机本地模型才可离线；Ollama 也支持[云模型](https://docs.ollama.com/cloud)，不能笼统承诺数据不出网。
+- 自定义 API：填写企业或其他兼容服务的基础地址，允许不填 Key，使用 Chat Completions；目录不支持 `/models` 时手动输入。
+
+本轮只接入文本流式对话，不包括内置账号通道、登录、额度／计费后台、Azure、Bedrock、Vertex、Coding Plan 专用协议、图片或工具调用。不会把已下线的示例模型写死为“可用”，也不会自动换模型、换服务或重试付费请求。
+
+### 高级参数
+
+- Temperature 默认“模型默认”，即不覆盖。手动范围最多 0–2，Claude 旧模型最多 1；对已知不支持覆盖的推理模型禁用。未知模型仍可能由服务端拒绝参数，需手动调整，不静默修改或重试。0 不保证完全确定。依据 [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) 和 [Claude Messages](https://platform.claude.com/docs/en/api/messages/create) 的限制。
+- Max Tokens 新配置默认 4096，允许正整数，并根据已查询的模型上限检查；除 Claude 必须填写外，也可选择服务默认。OpenAI 使用 `max_completion_tokens`，Claude 及其他兼容服务使用 `max_tokens`，Gemini 使用 `maxOutputTokens`，Ollama 使用 `options.num_predict`。部分模型的限制包含推理消耗，不等于最终可见文字长度。
+- 历史消息上限 1–50，默认 20；不包含系统提示与当前问题。仅取完整消息，并裁掉孤立开头的助手回复及超限旧历史，因此实际数量可能少于设置值。当前问题不截断。
+- 非敏感参数修改从下一次请求生效；正在生成的回复继续使用发起时的参数快照。达到 Token 上限、安全拒绝或中断时保留已收到的文本，未完成回复不提供执行按钮。
+
+### 快捷切换与旧配置迁移
+
+- AI 面板显示提供商、模型及发送地址。切换提供商创建新对话，旧对话保留，不复制旧历史、草稿、选区或授权；达到 50 个对话时提示整理，不删除已有记录。
+- 同一提供商切换模型保留对话，停止当前生成后下次使用新模型；每条新回复标注实际提供商与模型。不会改变其他面板的选择或请求。
+- 设置的默认提供商与模型仅用于新对话，已有对话保持自己的选择。修改 API 地址不沿用旧 Key，旧对话仍绑定原地址，继续使用需新建对话。地址／凭据变化会停止该提供商相关请求并撤销终端授权，其他提供商不受影响。
+- 旧单套配置迁移为“自定义 API”，保留地址、模型和 Key，不新增 Temperature／Token 覆盖；历史超过 50 时调整并提示。原 Key 留作回滚副本，v2 请求不读取它。迁移失败保留原数据，解锁 Keychain 后可重试。
+- v1 对话始终绑定迁移时的原发送地址，不绑定后来修改过的地址。找不到可信原配置时仍保留聊天，但需新建对话才能发送，不猜测目的地。
 
 ## 运维模式与终端附件
 
@@ -15,7 +43,7 @@
 - 默认不自动附带屏幕。勾选“附带可见终端”时显示目标服务、服务器及隐私提示；授权仅限该面板当前连接。只有用户发送消息时才读取当前可见屏幕及服务器名称、地址、端口、用户名，不持续监听或上传输出。
 - “预览”展示当前附件；之后发送时会重新采集当前可见屏幕，不保证与较早的预览完全一致。随时可关闭自动附件。
 - 选中终端中的日志或命令，右键 **发送给 AI…／AI 解释…**，打开右侧草稿并附选区；仍需点击“发送”。可以预览或移除选区。选区优先，占用同一个 16 KiB 附件额度；不会顺便上传整个历史。
-- 重连、断开、关闭面板或删除服务器会撤销相关终端授权并停止该面板的 AI 请求。修改 AI 设置后需重新授权；通用对话的内容不因此绑定终端。停止只终止本机接收，不保证服务商停止计费或删除服务端数据。
+- 重连、断开、关闭面板或删除服务器会撤销相关终端授权并停止该面板的 AI 请求。切换提供商、修改地址或凭据后需重新授权；参数或模型列表刷新不重置授权。停止只终止本机接收，不保证服务商停止计费或删除服务端数据。
 - 附件仅用于当次请求，不保存在聊天 JSON 中，也不自动作为后续轮次上下文。用户自行粘贴进消息的内容会保存，AI 回复也可能复述附件中的敏感信息。
 
 ## 命令与脚本
@@ -33,23 +61,23 @@
 - 每条消息支持复制、删除；清空对话和删除均需确认。删除为永久本地删除，不能撤销，也不会删除服务商保留的数据。
 - 对话位于 `~/Library/Application Support/ServerDash/AI/`，每个对话使用版本化 JSON，目录权限 0700、文件权限 0600。不写入 SwiftData、会话导出包、终端录制或诊断日志。
 - 使用后台串行存储及原子替换，旧写入不能复活已删除对话。损坏、超限或版本未知的文件不会静默覆盖；显示错误并要求处理存储问题。
-- 默认最近 20 条完整消息作为请求历史，可在 2–100 条间调整；大历史还会按请求大小裁减最旧消息。单次输入最多 32 KiB，终端附件最多 16 KiB，历史内容合计最多 128 KiB，编码请求最多 256 KiB。
+- 默认最近 20 条完整历史消息，可在 1–50 条间调整，不含系统提示与当前问题；大历史还会按请求大小裁减最旧消息。单次输入最多 32 KiB，终端附件最多 16 KiB，内容合计最多 128 KiB，编码请求最多 256 KiB。
 - 每对话最多 512 条消息及 4 MiB 文件；流式响应累计最多 2 MiB、单行／事件最多 256 KiB。超限给出明确错误，不自动重试；请缩短输入或新建对话。
 - 用户问题及回复占位在请求前保存，完成／手动停止时保存已收到的回复；异常退出可能丢失尚未保存的流式增量。再次启动把遗留的生成中回复标为未完成，不自动恢复请求。
 
 ## API、安全与兼容性
 
-- 使用 `URLSession` 与 `text/event-stream`，接入 Chat Completions 的 `choices[0].delta.content`／`refusal`、结束原因及 `[DONE]`，不调用远程会话存储、工具或文件接口。请求显式设置 `store: false`。协议参考 [官方 Chat API 文档](https://developers.openai.com/api/reference/resources/chat)。
-- 适配“基础地址 + 模型 ID + API Key”的文本流式接口，不声称兼容所有第三方服务／所有模型。服务须支持标准流式结束事件；返回 JSON、缺少结束事件、不支持参数时明确报错，不静默降级。未使用真实付费 API 做本轮验收。
+- 使用 `URLSession`、SSE／NDJSON，按提供商分别解析文本增量和正常完成、Token 上限、拒绝、中断等结束原因；不调用远程会话存储、工具或文件接口。只有 OpenAI 专用适配器发送 `store: false`，不向其他服务盲发该字段。
+- 原生协议分别依据 [Claude 流式 Messages](https://platform.claude.com/docs/en/build-with-claude/streaming)、[Gemini GenerateContent](https://ai.google.dev/api/generate-content?authuser=01&hl=en)、[Ollama Chat](https://docs.ollama.com/api/chat)。不展示或持久化推理专用增量；不承诺所有模型／第三方服务兼容。缺少结束事件或不支持参数时明确报错，不静默降级。未使用真实付费 API 做本轮验收。
 - HTTPS 使用系统证书验证，不关闭 TLS 校验。HTTP 仅支持 `localhost`、`127.0.0.1` 和 `::1` 本机回环；拒绝含 URL 用户名、密码、查询及片段的基础地址。不跟随重定向，不携带 Cookie，不使用共享缓存。
-- API Key 独立存放于 `com.serverdash.ai.api-key` Keychain 服务，使用 `WhenUnlockedThisDeviceOnly`；不写入设置 JSON、聊天文件、日志或会话迁移。
+- API Key 独立存放于 `com.serverdash.ai.api-key` Keychain 服务，按提供商、规范化地址摘要及凭据版本隔离，使用 `WhenUnlockedThisDeviceOnly`；不写入设置 JSON、聊天文件、日志或会话迁移。新凭据写入并读回验证成功后才更新配置，失败补偿删除本次新凭据。
 - 终端附件、日志和回复均作为不可信文本处理。界面不加载模型生成的远程图片或 HTML，不自动触发链接、剪贴板或终端控制序列。错误消息不包含响应正文、带凭据 URL 或 API Key。
 - 不读取原始键盘事件、隐藏密码输入、SSH 私钥、完整命令历史、录制、SSH 配置或环境变量作为自动上下文。输出与用户粘贴内容仍可能含秘密，Unicode／控制字符清理不是可靠脱敏。
 - 聊天只在本地持久化不等于数据从未离开设备：点击发送或测试会把对应请求送到用户配置的服务。服务商的保留、处理与计费政策由该服务决定，`store: false` 不是所有服务的零留存承诺。
 
 ## 实现边界
 
-`AISettings` 管理非敏感配置，`AIKeychain` 管理密钥；`AIRequestBuilder`／`AIStreamingClient` 负责可替换、可取消的流式请求；`AIStreamDecoder` 处理跨字节 UTF-8/SSE 及大小限制。
+`AISettings` 管理版本化 `AIProviderProfile` 与迁移，`AIProviderKeychain` 管理密钥；`AIProviderAdapter` 负责请求、鉴权及模型发现，`AIProviderStreamDecoder` 处理跨字节 UTF-8/SSE/NDJSON 和统一流事件；`AIStreamingClient` 提供可替换、可取消的传输。模型查询有分页、字节／条数上限和取消校验，模型缓存仅在内存且隔离地址与凭据代次。
 
 `AIWorkspace` 持有对话、请求和命令目标，`AIConversationDisk` actor 串行写入；`AIPaneState` 由 `TerminalSessionController` 持有，保存仅内存的草稿、选区及授权。界面仅展示这些状态。利用现有 SwiftTerm `getSelection()` 与显示快照读取解析后的可见字符，本功能没有新增 Vendor 补丁或依赖。
 

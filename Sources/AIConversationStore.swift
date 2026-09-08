@@ -23,7 +23,7 @@ actor AIConversationDisk {
                 guard attributes.isRegularFile == true, attributes.isSymbolicLink != true,
                       let size = attributes.fileSize, size <= 4 * 1024 * 1024 else { throw AIError.storage }
                 var chat = try JSONDecoder().decode(AIConversation.self, from: Data(contentsOf: file))
-                guard chat.version == 1, file.deletingPathExtension().lastPathComponent == chat.id.uuidString,
+                guard (1...2).contains(chat.version), file.deletingPathExtension().lastPathComponent == chat.id.uuidString,
                       chat.messages.count <= 512, chat.messages.allSatisfy({ $0.text.utf8.count <= AIStreamDecoder.responseLimit }),
                       Set(chat.messages.map(\.id)).count == chat.messages.count else { throw AIError.storage }
                 for index in chat.messages.indices where chat.messages[index].state == .streaming {
@@ -94,7 +94,8 @@ final class AIWorkspace: ObservableObject {
     @Published private(set) var commandTargets: [UUID: AICommandTarget] = [:]
     private let disk: AIConversationDisk
     private let client: any AIStreamingClient
-    private let keyProvider: () throws -> String
+    private let keyProvider: (() throws -> String)?
+    let settings: AISettings
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var requests: [UUID: UUID] = [:]
     private var revision = 0
@@ -105,8 +106,16 @@ final class AIWorkspace: ObservableObject {
     private var writes: [UUID: Task<Void, Never>] = [:]
 
     init(disk: AIConversationDisk = AIConversationDisk(), client: any AIStreamingClient = OpenAICompatibleClient(),
-         keyProvider: @escaping () throws -> String = AIKeychain.read) {
+         keyProvider: (() throws -> String)? = nil, settings: AISettings? = nil) {
         self.disk = disk; self.client = client; self.keyProvider = keyProvider
+        self.settings = settings ?? .shared
+        self.settings.observeSecurityChanges { [weak self] provider in
+            guard let self else { return }
+            for chat in self.conversations where chat.destination?.provider == provider {
+                self.stop(chat.id); self.owners[chat.id]?.state?.revoke()
+                self.owners[chat.id]?.state?.selectedText = nil
+            }
+        }
     }
     func load() async {
         guard !loaded else { return }
@@ -114,16 +123,26 @@ final class AIWorkspace: ObservableObject {
         do {
             let result = try await loadTask!.value
             guard !loaded else { return }
-            conversations = result; loaded = true; storageError = nil; loadTask = nil
+            guard settings.isReady else { throw AIError.storage }
+            conversations = result.map { value in
+                var chat = value
+                if chat.destination == nil {
+                    chat.destination = settings.legacyDestination; chat.version = 2
+                }
+                return chat
+            }
+            loaded = true; storageError = nil; loadTask = nil
+            for chat in conversations where result.first(where: { $0.id == chat.id })?.destination == nil { persist(chat) }
         } catch { storageError = AIError.storage.localizedDescription; loadTask = nil }
     }
     func conversation(_ id: UUID?) -> AIConversation? { conversations.first { $0.id == id } }
 
-    @discardableResult func create(mode: AIMode, serverID: UUID? = nil, name: String? = nil) -> UUID? {
+    @discardableResult func create(mode: AIMode, serverID: UUID? = nil, name: String? = nil, profile: AIProviderProfile? = nil) -> UUID? {
         guard loaded else { return nil }
         guard conversations.count < 50 else { storageError = AIError.limit.localizedDescription; return nil }
         if storageError == AIError.limit.localizedDescription { storageError = nil }
-        let chat = AIConversation(mode: mode, title: name ?? "新对话", serverID: serverID)
+        let chat = AIConversation(version: 2, mode: mode, title: name ?? "新对话", serverID: serverID,
+                                  destination: (profile ?? settings.profile(settings.defaultProvider)).destination)
         conversations.insert(chat, at: 0)
         persist(chat)
         return chat.id
@@ -145,7 +164,42 @@ final class AIWorkspace: ObservableObject {
     }
 
     func send(id: UUID, prompt: String, configuration: AIConfiguration, context: AITerminalContext?, target: AICommandTarget?) -> Bool {
+        var profile = AIProviderProfile(provider: .custom)
+        profile.baseURL = configuration.baseURL; profile.model = configuration.model
+        profile.options = .init(temperature: nil, maxTokens: nil, historyMessages: min(50, max(1, configuration.contextMessages)))
+        if let index = conversations.firstIndex(where: { $0.id == id }), conversations[index].messages.isEmpty {
+            conversations[index].destination = profile.destination
+        }
+        return send(id: id, prompt: prompt, profile: profile, context: context, target: target)
+    }
+
+    /// Selection is owned by the conversation, never by a global current-provider variable.
+    @discardableResult func selectProvider(_ provider: AIProviderID, in id: UUID) -> UUID? {
+        guard let chat = conversation(id) else { return nil }
+        let profile = settings.profile(provider)
+        if chat.destination?.matches(profile) == true { return id }
+        guard let next = create(mode: chat.mode, serverID: chat.serverID, profile: profile) else { return nil }
+        stop(id)
+        owners[id]?.state?.revoke(); owners[id]?.state?.selectedText = nil
+        return next
+    }
+    func selectModel(_ model: String, in id: UUID) {
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        stop(id); conversations[index].destination?.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        persist(conversations[index])
+    }
+
+    func send(id: UUID, prompt: String, profile: AIProviderProfile, context: AITerminalContext?, target: AICommandTarget?) -> Bool {
         guard loaded, !running.contains(id), !deleting.contains(id), let index = conversations.firstIndex(where: { $0.id == id }) else { return false }
+        if keyProvider == nil {
+            let current = settings.profile(profile.provider)
+            guard settings.isReady, current.destination.matches(profile), current.authorizationRevision == profile.authorizationRevision else {
+                errors[id] = AIError.destinationChanged.localizedDescription; return false
+            }
+        }
+        guard conversations[index].destination?.matches(profile) == true, conversations[index].destination?.model == profile.model else {
+            errors[id] = AIError.destinationChanged.localizedDescription; return false
+        }
         let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return false }
         guard prompt.utf8.count <= 32 * 1024, conversations[index].messages.count <= 510 else {
@@ -155,11 +209,12 @@ final class AIWorkspace: ObservableObject {
         chat.messages.append(.init(role: .user, text: prompt))
         let request: URLRequest
         do {
-            request = try AIRequestBuilder.request(configuration: configuration, key: keyProvider(),
-                messages: AIRequestBuilder.messages(conversation: chat, count: configuration.contextMessages, context: context))
+            request = try AIProviderAdapter(provider: profile.provider).request(profile: profile, key: keyProvider?() ?? settings.key(for: profile),
+                messages: AIRequestBuilder.messages(conversation: chat, count: profile.options.historyMessages, context: context),
+                model: settings.models(for: profile).first { $0.id == profile.model })
             guard try JSONEncoder().encode(chat).count < 2 * 1024 * 1024 else { throw AIError.tooLarge }
         } catch { errors[id] = AIError.safeDescription(error); return false }
-        let response = AIMessage(role: .assistant, text: "", state: .streaming)
+        let response = AIMessage(role: .assistant, text: "", state: .streaming, provider: profile.provider, model: profile.model)
         chat.messages.append(response)
         chat.updatedAt = .now
         if chat.messages.count == 2 { chat.title = String(prompt.prefix(40)) }
@@ -174,7 +229,7 @@ final class AIWorkspace: ObservableObject {
                 try await disk.save(chat, revision: initialRevision)
                 guard let self, self.requests[id] == requestID else { return }
                 var lastFlush = ContinuousClock.now
-                for try await delta in client.stream(request: request) {
+                for try await delta in client.stream(request: request, provider: profile.provider) {
                     try Task.checkCancellation()
                     guard self.requests[id] == requestID else { return }
                     self.pendingText[id, default: ""] += delta
