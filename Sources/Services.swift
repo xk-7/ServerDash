@@ -244,10 +244,10 @@ enum SSHSupport {
     ) throws -> [String] {
         var arguments = [
             "-p", String(config.port),
-            "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "ConnectTimeout=\(Int(config.effectiveConnectTimeout))",
             "-o", "BatchMode=\(batchMode ? "yes" : "no")",
-            "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=3",
+            "-o", "ServerAliveInterval=\(config.keepAliveInterval)",
+            "-o", "ServerAliveCountMax=\(config.keepAliveCountMax)",
             "-o", "StrictHostKeyChecking=\(strictHostChecking)",
             "-o", userKnownHostsOption,
             "-o", "GlobalKnownHostsFile=/dev/null",
@@ -302,10 +302,10 @@ enum SSHSupport {
         var arguments = [
             "-q",
             "-P", String(config.port),
-            "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
+            "-o", "ConnectTimeout=\(Int(config.effectiveConnectTimeout))",
             "-o", "BatchMode=no",
-            "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=3",
+            "-o", "ServerAliveInterval=\(config.keepAliveInterval)",
+            "-o", "ServerAliveCountMax=\(config.keepAliveCountMax)",
             "-o", "StrictHostKeyChecking=yes",
             "-o", userKnownHostsOption,
             "-o", "GlobalKnownHostsFile=/dev/null",
@@ -656,7 +656,7 @@ enum SSHMonitoringService {
     sleep 0.25
     grep "^cpu" /proc/stat 2>/dev/null > "$cpu_b"
     cat /proc/diskstats 2>/dev/null > "$disk_b"
-    cpu_metrics=$(awk "NR==FNR {u[\$1]=\$2; n[\$1]=\$3; s[\$1]=\$4; i[\$1]=\$5; w[\$1]=\$6; q[\$1]=\$7; z[\$1]=\$8; t[\$1]=\$9; next} {k=\$1; du=\$2-u[k]; dn=\$3-n[k]; ds=\$4-s[k]; di=\$5-i[k]; dw=\$6-w[k]; dq=\$7-q[k]; dz=\$8-z[k]; dt=\$9-t[k]; total=du+dn+ds+di+dw+dq+dz+dt; if(total<=0) next; user_pct=du*100/total; nice_pct=dn*100/total; system_pct=(ds+dq+dz)*100/total; wait_pct=dw*100/total; steal_pct=dt*100/total; if(k==\"cpu\") printf \"cpu=%.2f\\n\", 100-(di*100/total); else if(k ~ /^cpu[0-9]+$/) printf \"core=%s|%.2f|%.2f|%.2f|%.2f|%.2f\\n\", substr(k,4), user_pct, system_pct, nice_pct, wait_pct, steal_pct}" "$cpu_a" "$cpu_b")
+    cpu_metrics=$(awk "NR==FNR {u[\$1]=\$2; n[\$1]=\$3; s[\$1]=\$4; i[\$1]=\$5; w[\$1]=\$6; q[\$1]=\$7; z[\$1]=\$8; t[\$1]=\$9; next} {k=\$1; du=\$2-u[k]; dn=\$3-n[k]; ds=\$4-s[k]; di=\$5-i[k]; dw=\$6-w[k]; dq=\$7-q[k]; dz=\$8-z[k]; dt=\$9-t[k]; total=du+dn+ds+di+dw+dq+dz+dt; if(total<=0) next; user_pct=du*100/total; nice_pct=dn*100/total; system_pct=(ds+dq+dz)*100/total; wait_pct=dw*100/total; steal_pct=dt*100/total; if(k==\"cpu\") printf \"cpu=%.2f\\ncpu_user=%.2f\\ncpu_system=%.2f\\ncpu_iowait=%.2f\\n\", 100-(di*100/total), user_pct+nice_pct, system_pct, wait_pct; else if(k ~ /^cpu[0-9]+$/) printf \"core=%s|%.2f|%.2f|%.2f|%.2f|%.2f\\n\", substr(k,4), user_pct, system_pct, nice_pct, wait_pct, steal_pct}" "$cpu_a" "$cpu_b")
     if printf "%s\n" "$cpu_metrics" | grep -q "^cpu="; then
       printf "%s\n" "$cpu_metrics"
     else
@@ -676,7 +676,7 @@ enum SSHMonitoringService {
     swap_free=$(awk "/SwapFree/ {print \$2}" /proc/meminfo 2>/dev/null)
     set -- $(df -B1 / 2>/dev/null | awk "NR==2 {print \$3, \$2}")
     disk_used=$1; disk_total=$2
-    awk -F"[: ]+" "NR>2 {name=\$2; rx=\$3; tx=\$11; if(name !~ /^(lo|docker|veth|br-|virbr|tun|tap|tailscale|zt)/) {printf \"iface=%s|%.0f|%.0f\\n\", name, rx, tx; score=rx+tx; if(score>max){max=score; active=name; arx=rx; atx=tx}}} END {printf \"active_iface=%s\\nnet_rx=%.0f\\nnet_tx=%.0f\\n\", active, arx+0, atx+0}" /proc/net/dev 2>/dev/null
+    awk -F"[: ]+" "NR>2 {name=\$2; rx=\$3; tx=\$11; if(name != \"\") {printf \"iface=%s|%.0f|%.0f\\n\", name, rx, tx; score=rx+tx; if(name !~ /^(lo|docker|veth|br-|virbr|tun|tap|tailscale|zt)/ && (score>max || active==\"\")){max=score; active=name; arx=rx; atx=tx}}} END {printf \"active_iface=%s\\nnet_rx=%.0f\\nnet_tx=%.0f\\n\", active, arx+0, atx+0}" /proc/net/dev 2>/dev/null
     awk -v interval=0.25 "NR==FNR {reads[\$3]=\$4; rsec[\$3]=\$6; rms[\$3]=\$7; writes[\$3]=\$8; wsec[\$3]=\$10; wms[\$3]=\$11; next} {dev=\$3; if(dev !~ /^(sd|vd|xvd|hd|nvme|mmcblk)/) next; if(dev ~ /^(sd|vd|xvd|hd)[a-z]+[0-9]+$/ || dev ~ /p[0-9]+$/) next; dr=\$4-reads[dev]; dw=\$8-writes[dev]; drs=\$6-rsec[dev]; dws=\$10-wsec[dev]; drm=\$7-rms[dev]; dwm=\$11-wms[dev]; if(dr<0||dw<0) next; printf \"diskio=%s|%.0f|%.0f|%.2f|%.2f|%.2f|%.2f|%.0f|%.0f\\n\", dev, drs*512/interval, dws*512/interval, dr/interval, dw/interval, dr>0?drm/dr:0, dw>0?dwm/dw:0, \$6*512, \$10*512}" "$disk_a" "$disk_b"
     rm -f "$cpu_a" "$cpu_b" "$disk_a" "$disk_b"
     uptime_text=$(uptime -p 2>/dev/null | sed "s/^up //" || true)
@@ -689,15 +689,31 @@ enum SSHMonitoringService {
     printf "disk_used=%s\ndisk_total=%s\n" "$disk_used" "$disk_total"
     printf "uptime=%s\ndistro=%s\nkernel=%s\nusers=%s\nprocesses=%s\n" "$uptime_text" "$distro" "$kernel" "$users" "$processes"
     ps -eo pid=,user=,comm=,%cpu=,%mem=,nlwp=,args= --sort=-%cpu 2>/dev/null | awk "NR<=100 {cmd=\$7; for(i=8;i<=NF;i++) cmd=cmd \" \" \$i; gsub(/[|]/,\"/\",cmd); printf \"proc=%s|%s|%s|%s|%s|%s|%s\\n\", \$1, \$2, \$3, \$4, \$5, \$6, cmd}"
+    if [ -r /proc/sys/fs/file-nr ]; then
+      awk "{printf \"file_handles_used=%.0f\\nfile_handles_limit=%s\\n\", \$1-\$2, \$3}" /proc/sys/fs/file-nr
+    fi
+    if [ -r /proc/net/sockstat ]; then
+      awk "\$1==\"sockets:\" {printf \"socket_total=%d\\n\",\$3} \$1==\"TCP:\" {printf \"socket_tcp=%d\\nsocket_timewait=%d\\n\",\$3,\$7} \$1==\"UDP:\" {printf \"socket_udp=%d\\n\",\$3}" /proc/net/sockstat
+      awk "FNR>1 && \$4==\"0A\" {n++} END {printf \"socket_listening=%d\\n\",n}" /proc/net/tcp /proc/net/tcp6 2>/dev/null
+    fi
+    if command -v ss >/dev/null 2>&1; then
+      if ss -H -lntup > "${sample_base}.listeners" 2>/dev/null; then
+        printf "listeners_available=1\n"
+        awk "NR<=200 {process=\$7; for(i=8;i<=NF;i++) process=process \" \" \$i; gsub(/[|]/,\"/\",process); printf \"listener=%s|%s|%s\\n\",\$1,\$5,process}" "${sample_base}.listeners"
+      else
+        printf "listeners_error=ss failed\n"
+      fi
+      rm -f "${sample_base}.listeners"
+    fi
     uid=$(id -u 2>/dev/null || echo 0)
-    slow_cache="/tmp/serverdash-monitor-${uid}.cache"
+    slow_cache="/tmp/serverdash-monitor-${uid}.v2.cache"
     now=$(date +%s)
     cache_time=$(stat -c %Y "$slow_cache" 2>/dev/null || echo 0)
     cache_age=$((now-cache_time))
     if [ ! -s "$slow_cache" ] || [ "$cache_age" -gt 15 ]; then
       slow_tmp="${slow_cache}.$$"
       {
-        df -B1 -PT 2>/dev/null | awk "NR>1 {dev=\$1; type=\$2; total=\$3; used=\$4; mount=\$7; for(i=8;i<=NF;i++) mount=mount \" \" \$i; if(type !~ /^(tmpfs|devtmpfs|overlay|squashfs|proc|sysfs|cgroup|cgroup2|tracefs|debugfs|securityfs|pstore|efivarfs|mqueue|hugetlbfs|fusectl)$/ && dev !~ /^\\/dev\\/loop/) {gsub(/[|]/,\"/\",dev); gsub(/[|]/,\"/\",mount); printf \"fs=%s|%s|%.0f|%.0f|%s\\n\", dev, type, used, total, mount}}"
+        df -B1 -PT 2>/dev/null | awk "NR>1 {dev=\$1; type=\$2; total=\$3; used=\$4; mount=\$7; for(i=8;i<=NF;i++) mount=mount \" \" \$i; if(total>0) {gsub(/[|]/,\"/\",dev); gsub(/[|]/,\"/\",mount); printf \"fs=%s|%s|%.0f|%.0f|%s\\n\", dev, type, used, total, mount}}"
         if command -v nvidia-smi >/dev/null 2>&1; then
           driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d " ")
           cuda=$(nvidia-smi 2>/dev/null | sed -n "s/.*CUDA Version: \\([0-9.]*\\).*/\\1/p" | head -1)
@@ -896,6 +912,7 @@ enum MonitoringResponseParser {
         var gpus: [GPUMetric] = []
         var gpuProcesses: [GPUProcessMetric] = []
         var dockerContainers: [DockerContainerMetric] = []
+        var listeners: [ListeningPortMetric] = []
 
         for line in output.split(whereSeparator: \.isNewline) {
             let text = String(line)
@@ -903,6 +920,12 @@ enum MonitoringResponseParser {
             let key = String(text[..<separator])
             let value = String(text[text.index(after: separator)...])
             switch key {
+            case "listener":
+                let fields = value.split(separator: "|", omittingEmptySubsequences: false)
+                if fields.count >= 3 {
+                    let item = ListeningPortMetric(transport: String(fields[0]), address: String(fields[1]), process: fields.dropFirst(2).joined(separator: "|"))
+                    if !listeners.contains(where: { $0.id == item.id }) { listeners.append(item) }
+                }
             case "proc":
                 let fields = value.split(separator: "|", omittingEmptySubsequences: false)
                 if fields.count == 4 {
@@ -1105,7 +1128,20 @@ enum MonitoringResponseParser {
             dockerAvailable: boolean(values["docker_available"]),
             dockerVersion: values["docker_version"] ?? "",
             dockerContainers: dockerContainers,
-            geoLocation: GeoPayloadParser.parse(values["geo_json"])
+            geoLocation: GeoPayloadParser.parse(values["geo_json"]),
+            cpuUserPercent: optionalNumber(values["cpu_user"]),
+            cpuSystemPercent: optionalNumber(values["cpu_system"]),
+            cpuIOWaitPercent: optionalNumber(values["cpu_iowait"]),
+            sockets: values["socket_total"].flatMap(Int.init).map {
+                SocketSummaryMetric(total: $0, tcp: Int(values["socket_tcp"] ?? "") ?? 0,
+                    udp: Int(values["socket_udp"] ?? "") ?? 0, listening: Int(values["socket_listening"] ?? "") ?? 0,
+                    timeWait: Int(values["socket_timewait"] ?? "") ?? 0)
+            },
+            listeningPorts: listeners,
+            listeningPortsAvailable: boolean(values["listeners_available"]),
+            listeningPortsError: values["listeners_error"],
+            fileHandlesUsed: Int(values["file_handles_used"] ?? ""),
+            fileHandlesLimit: Int(values["file_handles_limit"] ?? "")
         )
     }
 

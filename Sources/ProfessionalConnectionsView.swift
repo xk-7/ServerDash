@@ -3,6 +3,8 @@ import SwiftData
 import SwiftUI
 
 struct ProfessionalConnectionsView: View {
+    var initialServerID: UUID? = nil
+    var routeOnly = false
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
@@ -37,6 +39,9 @@ struct ProfessionalConnectionsView: View {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".ssh/config")
     }
+    private var visibleRoutes: [ConnectionRouteRecord] {
+        routeOnly ? routeRecords.filter { $0.serverID == initialServerID } : routeRecords
+    }
 
     var body: some View {
         ScrollView {
@@ -45,7 +50,7 @@ struct ProfessionalConnectionsView: View {
                 importCard
                 proxyCard
                 routeCard
-                tunnelRuleCard
+                if !routeOnly { tunnelRuleCard }
             }
             .padding(AppleDesign.Spacing.lg)
             .frame(maxWidth: AppleDesign.Layout.readingWidth, alignment: .leading)
@@ -56,7 +61,11 @@ struct ProfessionalConnectionsView: View {
                FileManager.default.isReadableFile(atPath: defaultConfigURL.path) {
                 configURL = defaultConfigURL
             }
-            if selectedServerID == nil { selectedServerID = servers.first?.id }
+            if selectedServerID == nil { selectedServerID = initialServerID ?? servers.first?.id }
+            if routeOnly, let proxy = visibleRoutes.first?.route?.proxy {
+                proxyKind = proxy.kind; proxyHost = proxy.host; proxyPort = proxy.port
+                proxyUsername = proxy.username ?? ""
+            }
             while !Task.isCancelled {
                 await appState.refreshPortForwardSnapshots()
                 try? await Task.sleep(for: .seconds(1))
@@ -119,6 +128,7 @@ struct ProfessionalConnectionsView: View {
                         }
                     }
                     .frame(width: 220)
+                    .disabled(routeOnly)
                     Button("解析") { parseConfig() }
                         .disabled(alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || configURL == nil)
                 }
@@ -207,11 +217,11 @@ struct ProfessionalConnectionsView: View {
     private var routeCard: some View {
         MonitorSectionPanel(title: "已保存路线") {
             VStack(alignment: .leading, spacing: 10) {
-                if routeRecords.isEmpty {
+                if visibleRoutes.isEmpty {
                     Text("尚未保存专业连接路线。未绑定路线的服务器继续使用严格校验的直接连接。")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(routeRecords) { record in
+                    ForEach(visibleRoutes) { record in
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(record.name).font(.headline)
@@ -231,7 +241,7 @@ struct ProfessionalConnectionsView: View {
                                     .background(Color.secondary.opacity(0.12), in: Capsule())
                             }
                         }
-                        if record.id != routeRecords.last?.id { Divider() }
+                        if record.id != visibleRoutes.last?.id { Divider() }
                     }
                 }
             }
@@ -255,6 +265,7 @@ struct ProfessionalConnectionsView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
+                    .disabled(routeOnly)
                 }
                 HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
@@ -324,7 +335,7 @@ struct ProfessionalConnectionsView: View {
                     }
                     .frame(width: 100)
                 }
-                if direction != .dynamic {
+                if direction != .dynamic && direction != .http {
                     HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
                         VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                             Text("目标主机").font(.caption).foregroundStyle(.secondary)
@@ -485,12 +496,13 @@ struct ProfessionalConnectionsView: View {
         let routeID = existing?.id ?? UUID()
         let username = proxyUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         let secret = proxySecret
-        guard username.isEmpty == secret.isEmpty else {
+        let retainExistingSecret = secret.isEmpty && !username.isEmpty && existing?.route?.proxy?.username == username && existing?.route?.proxy?.secretAccount != nil
+        guard username.isEmpty == secret.isEmpty || retainExistingSecret else {
             proxyError = "代理用户名与 Secret 必须同时填写或同时留空。"
             return
         }
         let revision = UUID()
-        let account = secret.isEmpty
+        let account = retainExistingSecret ? existing?.route?.proxy?.secretAccount : secret.isEmpty
             ? nil
             : KeychainService.proxyAccount(for: routeID, revision: revision)
         let oldAccount = existing?.route?.proxy?.secretAccount
@@ -506,11 +518,12 @@ struct ProfessionalConnectionsView: View {
         }
         var insertedRecord: ConnectionRouteRecord?
         do {
-            if let account { try KeychainService.saveSecret(secret, account: account) }
+            if let account, !retainExistingSecret { try KeychainService.saveSecret(secret, account: account) }
             let route = ConnectionRoute(
                 id: routeID,
                 revision: revision,
                 name: "\(proxyKind == .socks5 ? "SOCKS5" : "HTTP CONNECT") · \(proxyHost)",
+                hops: existing?.route?.hops ?? [],
                 proxy: NetworkProxy(
                     kind: proxyKind,
                     host: proxyHost,
@@ -547,7 +560,7 @@ struct ProfessionalConnectionsView: View {
             proxySecret = ""
             proxyError = nil
         } catch {
-            if let account { try? KeychainService.deleteSecret(account: account) }
+            if let account, !retainExistingSecret { try? KeychainService.deleteSecret(account: account) }
             if let existing, let previousRecord {
                 existing.name = previousRecord.name
                 existing.revision = previousRecord.revision
@@ -639,6 +652,8 @@ struct ProfessionalConnectionsView: View {
         switch rule.direction {
         case .dynamic:
             return "SOCKS \(rule.bindAddress):\(rule.listenPort)"
+        case .http:
+            return "HTTP \(rule.bindAddress):\(rule.listenPort) · 经 SSH SOCKS 转发"
         case .local, .remote:
             return "\(rule.direction.title) \(rule.bindAddress):\(rule.listenPort) → \(rule.targetHost):\(rule.targetPort)"
         }

@@ -111,6 +111,12 @@ final class RDPConfigurationTests: XCTestCase {
 
 @MainActor
 final class RDPWorkspaceTests: XCTestCase {
+    private func activityStore(now: @escaping () -> Date = Date.init) throws -> RDPConnectionActivityStore {
+        let suite = "RDPActivityTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return RDPConnectionActivityStore(defaults: defaults, now: now)
+    }
     func testUnifiedMachineFiltersKeepProtocolIdentityAndOrdering() throws {
         let ssh = ServerRecord(name: "Zulu Linux", host: "linux.test", username: "operator")
         let rdp = try RDPConnectionRecord(id: ssh.id, name: "Alpha Windows", host: "windows.test", username: "operator", groupName: "Office", tagsText: "prod, win")
@@ -126,7 +132,7 @@ final class RDPWorkspaceTests: XCTestCase {
         let config = try RDPConnectionRecord(name: "Retry fixture", host: "example.invalid", username: "operator").configuration()
         var engines: [MockRDPEngine] = []
         let delays = RDPRetryDelays()
-        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, factory: {
+        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, activityStore: try activityStore(), factory: {
             let engine = MockRDPEngine(); engines.append(engine); return engine
         }, retrySleep: { await delays.append($0) })
         controller.connect(); engines[0].event?(.connected)
@@ -161,7 +167,7 @@ final class RDPWorkspaceTests: XCTestCase {
             window.orderOut(nil); window.contentView = nil
         }
         let config = try RDPConnectionRecord(name: "Windows · 演示", host: "example.invalid", username: "operator").configuration()
-        let controller = RDPSessionController(configuration: config, configurationProvider: { config }, factory: { MockRDPEngine() })
+        let controller = RDPSessionController(configuration: config, configurationProvider: { config }, activityStore: try activityStore(), factory: { MockRDPEngine() })
         controller.connect(); XCTAssertTrue(controller.needsPassword)
         let root = NSHostingView(rootView: RDPDesktopPane(controller: controller))
         root.frame = NSRect(x: 0, y: 0, width: 900, height: 620)
@@ -275,7 +281,7 @@ final class RDPWorkspaceTests: XCTestCase {
     func testClosedControllerRejectsLateConnectionEvents() async throws {
         let record = try RDPConnectionRecord(name: "Windows", host: "example.test", username: "user")
         let config = try record.configuration(), mock = MockRDPEngine()
-        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, factory: { mock })
+        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, activityStore: try activityStore(), factory: { mock })
         controller.connect(); XCTAssertEqual(mock.starts, 1)
         controller.close(); mock.event?(.connected)
         await Task.yield()
@@ -289,7 +295,7 @@ final class RDPWorkspaceTests: XCTestCase {
         var config = original
         let first = MockRDPEngine(), second = MockRDPEngine()
         var count = 0
-        let controller = RDPSessionController(configuration: original, password: "fixture-only", configurationProvider: { config }, factory: { count += 1; return count == 1 ? first : second })
+        let controller = RDPSessionController(configuration: original, password: "fixture-only", configurationProvider: { config }, activityStore: try activityStore(), factory: { count += 1; return count == 1 ? first : second })
         controller.connect()
         config.settings.width = 1600
         controller.connect()
@@ -304,11 +310,28 @@ final class RDPWorkspaceTests: XCTestCase {
     func testDestinationChangeDoesNotReuseMemoryPassword() throws {
         var config = try RDPConnectionRecord(name: "Windows", host: "one.test", username: "user").configuration()
         let mock = MockRDPEngine()
-        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, factory: { mock })
+        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, activityStore: try activityStore(), factory: { mock })
         controller.connect(); config.host = "two.test"; controller.connect()
         XCTAssertTrue(controller.needsPassword)
         XCTAssertEqual(mock.starts, 1)
         controller.close()
+    }
+
+    func testLocalActivityRecordsOnlyAcceptedConnectionSuccessAndCanBeDeleted() async throws {
+        let config = try RDPConnectionRecord(name: "Activity fixture", host: "example.invalid", username: "operator").configuration()
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let store = try activityStore(now: { date })
+        let mock = MockRDPEngine()
+        let controller = RDPSessionController(configuration: config, password: "fixture-only", configurationProvider: { config }, activityStore: store, factory: { mock })
+        controller.connect()
+        XCTAssertNil(store.lastConnectedAt(for: config.id), "Starting negotiation is not a successful connection")
+        mock.event?(.connected)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(store.lastConnectedAt(for: config.id), date)
+        controller.close(); store.remove(config.id)
+        mock.event?(.connected)
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertNil(store.lastConnectedAt(for: config.id), "Late events must not recreate deleted local activity")
     }
 }
 

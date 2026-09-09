@@ -180,8 +180,8 @@ final class TerminalToolsTests: XCTestCase {
     }
 
     func testAllPresetsMatchExamples() throws {
-        let samples = ["https://example.com", "192.168.1.100", "fe80::1", "admin@example.com", "2024-01-15 14:30:22", "/var/log/syslog", "8080"]
-        XCTAssertEqual(TerminalHighlightRule.presets.count, 7)
+        let samples = ["https://example.com", "192.168.1.100", "fe80::1", "admin@example.com", "2024-01-15", "Mon Jan 01", "14:30:22", "Jan  1 14:30:22", "c4ff68b0-e7ab-408d-a5cf-b36493660874", "ERROR", "warning", "success", "/var/log/syslog", "AA:BB:CC:DD:EE:FF", "8080"]
+        XCTAssertEqual(TerminalHighlightRule.presets.count, 15)
         XCTAssertEqual(TerminalHighlightRule.colors.count, 12)
         for (rule, text) in zip(TerminalHighlightRule.presets, samples) {
             let regex = try NSRegularExpression(pattern: rule.pattern)

@@ -104,9 +104,14 @@ struct ServerDashApp: App {
         }.defaultSize(width: 640, height: 760)
 
         Settings {
-            SettingsView()
-                .environmentObject(appState)
-                .environmentObject(monitorLayoutStore)
+            if let container = persistence.container {
+                SettingsView()
+                    .environmentObject(appState)
+                    .environmentObject(monitorLayoutStore)
+                    .modelContainer(container)
+            } else {
+                Text("请先完成数据库恢复。").padding()
+            }
         }
     }
 

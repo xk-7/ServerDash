@@ -102,14 +102,20 @@ private struct TerminalWorkspaceContent: View {
     @Query(sort: \CommandSnippetRecord.title) private var snippets: [CommandSnippetRecord]
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
     @Query(sort: \RDPConnectionRecord.name) private var rdpMachines: [RDPConnectionRecord]
+    @Query(sort: \SerialConnectionRecord.name) private var serialMachines: [SerialConnectionRecord]
+    @State private var showingSerialEditor = false
+    @State private var workspaceError: String?
     @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
     @SceneStorage("terminal.inspector.visible") private var showingInspector = false
     @State private var inspectorTab = "status"
     @Environment(\.openWindow) private var openWindow
 
+    @State private var showingBatch = false
+    @State private var showingTunnels = false
+    @State private var workspaceWidth: CGFloat = 1200
     @State private var showingServerPicker = false
-    @State private var pendingClose: [WorkspaceTab] = []
+    @State private var pendingRDPClose: [WorkspaceTab] = []
     @ObservedObject var registry: TerminalSessionRegistry
     @ObservedObject var workspace: TerminalWorkspace
     @ObservedObject private var recordingStore = RecordingStore.shared
@@ -129,7 +135,9 @@ private struct TerminalWorkspaceContent: View {
             hasSession: selectedController != nil,
             canSwitchTabs: workspace.tabs.count > 1,
             newTab: {
-                if workspace.selectedTab?.kind == .rdp, let record = rdpMachines.first(where: { $0.id == workspace.selectedTab?.serverID }) {
+                if workspace.selectedTab?.kind == .local {
+                    do { try WorkbenchConnectionLauncher.openLocal(appState: appState) } catch { workspaceError = error.localizedDescription }
+                } else if workspace.selectedTab?.kind == .rdp, let record = rdpMachines.first(where: { $0.id == workspace.selectedTab?.serverID }) {
                     appState.openRDP(record, newTab: true)
                 } else if let activeServer { appState.newTerminal(for: activeServer) } else { showingServerPicker = true }
             },
@@ -150,7 +158,7 @@ private struct TerminalWorkspaceContent: View {
     }
 
     private var activeServer: ServerRecord? {
-        guard workspace.selectedTab?.kind != .rdp else { return nil }
+        guard let kind = workspace.selectedTab?.kind, [.terminal, .sftp, .monitor].contains(kind) else { return nil }
         return servers.first { $0.id == (selectedController?.serverID ?? workspace.selectedTab?.serverID) }
     }
     private func split(_ axis: TerminalSplitAxis, server: ServerRecord) {
@@ -165,8 +173,10 @@ private struct TerminalWorkspaceContent: View {
     }
     private func close(_ tab: WorkspaceTab) { requestClose([tab]) }
     private func requestClose(_ tabs: [WorkspaceTab]) {
-        if tabs.contains(where: { tab in tab.layout.panes.contains { appState.fileControllers[$0]?.hasActiveTransfer == true || appState.rdpControllers[$0]?.hasActiveTransfer == true } }) {
-            pendingClose = tabs
+        // SFTP transfers belong to the application controller and continue after a tab closes.
+        // RDP clipboard transfers still end when their desktop session is disconnected.
+        if tabs.contains(where: { tab in tab.kind == .rdp && tab.layout.panes.contains { appState.rdpControllers[$0]?.hasActiveTransfer == true } }) {
+            pendingRDPClose = tabs
         } else { appState.closeWorkspaceTabs(tabs) }
     }
 
@@ -179,8 +189,23 @@ private struct TerminalWorkspaceContent: View {
                 Divider()
                     .frame(height: 20)
 
-                Button("选择机器") { showingServerPicker = true }
+                if workspaceWidth >= 1180 { Button("选择机器") { showingServerPicker = true } }
                 Menu {
+                    Button("选择机器…") { showingServerPicker = true }
+                    if let selectedController {
+                        Button("查找终端内容…") { selectedController.hostView.tools.searchVisible.toggle() }
+                        Button("终端外观…") { showingAppearance = true }
+                    }
+                    Button("本地终端", systemImage: "terminal") {
+                        do { try WorkbenchConnectionLauncher.openLocal(appState: appState) } catch { workspaceError = error.localizedDescription }
+                    }
+                    Button("新建串口连接…", systemImage: "cable.connector") { showingSerialEditor = true }
+                    ForEach(serialMachines) { target in
+                        Button("串口 · \(target.displayName)", systemImage: "cable.connector") {
+                            do { try WorkbenchConnectionLauncher.openSerial(target, appState: appState) } catch { workspaceError = error.localizedDescription }
+                        }
+                    }
+                    Divider()
                     if let selectedController {
                         Button("整理为网格（最多 4×4）") { workspace.arrangeGrid() }
                         if (workspace.selectedTab?.layout.panes.count ?? 0) > 1 {
@@ -216,7 +241,13 @@ private struct TerminalWorkspaceContent: View {
                 .frame(width: 32, height: 32)
                 .help("新建标签（⌘T）、分屏与面板操作")
                 .accessibilityLabel("新建标签与面板操作")
-                if let selectedController {
+                if let selectedController, let activeServer, workspaceWidth >= 1180 {
+                    Button { split(.right, server: activeServer) } label: { Image(systemName: "rectangle.split.2x1") }
+                        .buttonStyle(.borderless).help("右侧分屏").accessibilityLabel("右侧分屏")
+                        .disabled(!workspace.canSplit(selectedController.id))
+                    Button { split(.below, server: activeServer) } label: { Image(systemName: "rectangle.split.1x2") }
+                        .buttonStyle(.borderless).help("下方分屏").accessibilityLabel("下方分屏")
+                        .disabled(!workspace.canSplit(selectedController.id))
                     Menu {
                         Button("终端外观…", systemImage: "paintpalette") {
                             showingAppearance = true
@@ -263,14 +294,15 @@ private struct TerminalWorkspaceContent: View {
                             }
                         }
                     } label: {
-                        Image(systemName: "curlybraces")
+                        if workspaceWidth >= 1180 { Label("快速命令", systemImage: "curlybraces") }
+                        else { Image(systemName: "curlybraces") }
                     }
                     .menuStyle(.borderlessButton)
-                    .frame(width: 32, height: 32)
+                    .fixedSize()
                     .help("插入代码片段")
                     .accessibilityLabel("代码片段")
                 }
-                if selectedController != nil {
+                if selectedController != nil, workspaceWidth >= 1180 {
                     Button {
                         inspectorTab = "ai"; showingInspector = true
                     } label: {
@@ -287,7 +319,7 @@ private struct TerminalWorkspaceContent: View {
                 }
                 .buttonStyle(.borderless)
                 .frame(width: 32, height: 32)
-                .help(workspace.selectedTab?.kind == .rdp ? "显示 RDP 状态" : "显示 AI、状态与代码片段（⌘⌥I）")
+                .help(workspace.selectedTab?.kind == .rdp ? "显示 RDP 状态" : "显示资源监控、文件、AI 和代码片段（⌘⌥I）")
                 .accessibilityLabel(showingInspector ? "隐藏终端检查器" : "显示终端检查器")
             }
             .controlSize(.regular)
@@ -300,10 +332,14 @@ private struct TerminalWorkspaceContent: View {
                 .frame(height: 1)
 
             ZStack {
+                if let tab = workspace.selectedTab, tab.kind == .local || tab.kind == .serial,
+                   let controller = appState.workbenchSessions.controller(for: tab.activePane) {
+                    WorkbenchSessionPane(controller: controller).id(controller.id)
+                }
                 if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
                     RDPDesktopPane(controller: controller).id(controller.id)
                 }
-                ForEach(workspace.tabs.filter { $0.kind != .terminal && $0.id == workspace.selectedTabID }) { tab in
+                ForEach(workspace.tabs.filter { ($0.kind == .sftp || $0.kind == .monitor) && $0.id == workspace.selectedTabID }) { tab in
                     if tab.kind != .rdp, let target = servers.first(where: { $0.id == tab.serverID }) {
                         Group {
                             if tab.kind == .sftp { if let controller = appState.fileControllers[tab.activePane] { SFTPBrowserView(controller: controller) } }
@@ -338,44 +374,40 @@ private struct TerminalWorkspaceContent: View {
                 }
             }
             }
+            if let selectedController {
+                Divider()
+                TerminalToolsBar(tools: selectedController.hostView.tools,
+                    connected: selectedController.status == .connected,
+                    send: selectedController.hostView.sendCommand,
+                    recordingController: selectedController,
+                    onBatch: { showingBatch = true }, onTunnels: { showingTunnels = true },
+                    onReconnect: { appState.reconnectTerminal(selectedController.session) })
+                    .id(selectedController.id)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .confirmationDialog("取消传输并关闭所选标签？", isPresented: Binding(get: { !pendingClose.isEmpty }, set: { if !$0 { pendingClose = [] } })) {
-            Button("取消传输并关闭", role: .destructive) { appState.closeWorkspaceTabs(pendingClose); pendingClose = [] }
-            Button("保留会话", role: .cancel) { pendingClose = [] }
-        } message: { Text("进行中的传输将取消，需要从头重新传输。") }
+        .background { TerminalWindowWidthReader { workspaceWidth = $0 } }
+        .sheet(isPresented: $showingSerialEditor) { SerialEditorView() }
+        .alert("无法打开会话", isPresented: Binding(get: { workspaceError != nil }, set: { if !$0 { workspaceError = nil } })) {
+            Button("好") { workspaceError = nil }
+        } message: { Text(workspaceError ?? "") }
+        .sheet(isPresented: $showingBatch) { TerminalBatchExecutionSheet(registry: registry) }
+        .sheet(isPresented: $showingTunnels) {
+            if let activeServer { TerminalTunnelManagerView(server: activeServer) }
+        }
+        .confirmationDialog("中断 RDP 文件传输并关闭所选标签？", isPresented: Binding(get: { !pendingRDPClose.isEmpty }, set: { if !$0 { pendingRDPClose = [] } })) {
+            Button("中断 RDP 传输并关闭", role: .destructive) { appState.closeWorkspaceTabs(pendingRDPClose); pendingRDPClose = [] }
+            Button("保留会话", role: .cancel) { pendingRDPClose = [] }
+        } message: { Text("关闭 RDP 会话会中断该会话的文件传输。SFTP 传输将继续在后台进行。") }
         .sheet(isPresented: $showingServerPicker) {
             RDPSessionPicker(servers: servers, rdpMachines: rdpMachines,
                 onSSH: { appState.openTerminal(for: $0) }, onRDP: { appState.openRDP($0) })
         }
-        .inspector(isPresented: $showingInspector) {
-            if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("RDP 状态", systemImage: "desktopcomputer").font(.headline)
-                    Text(controller.configuration.name)
-                    Text("NLA/CredSSP · TLS 1.2+")
-                    Text("远程桌面不提供 SSH AI、命令片段或终端录制。")
-                }.padding().inspectorColumnWidth(min: 280, ideal: 320, max: 400)
-            } else if let selectedController, let activeServer {
-                TerminalInspectorView(
-                    server: activeServer, controller: selectedController,
-                    runtime: appState.runtime(for: activeServer), snippets: snippets,
-                    refreshInterval: appState.refreshInterval,
-                    selectedTab: $inspectorTab,
-                    onInsert: { requestSnippet($0, into: selectedController.id, execute: false) },
-                    onRun: { requestSnippet($0, into: selectedController.id, execute: true) },
-                    isActivePane: { workspace.selectedTab?.kind == .terminal && workspace.activePane == selectedController.id }
-                )
-                .inspectorColumnWidth(min: 340, ideal: 390, max: 600)
-            } else {
-                ContentUnavailableView {
-                    Label("AI 助手", systemImage: "sparkles")
-                } description: {
-                    Text("选择 SSH 面板使用运维模式，或打开独立通用对话。")
-                } actions: {
-                    Button("打开通用对话") { openWindow(id: "ai-general") }
-                }.inspectorColumnWidth(min: 340, ideal: 390, max: 600)
-            }
+        .inspector(isPresented: Binding(get: { showingInspector && workspaceWidth >= 1180 }, set: { if workspaceWidth >= 1180 { showingInspector = $0 } })) {
+            inspectorContent
+        }
+        .popover(isPresented: Binding(get: { showingInspector && workspaceWidth < 1180 }, set: { if workspaceWidth < 1180 { showingInspector = $0 } })) {
+            inspectorContent.frame(width: min(440, max(300, workspaceWidth - 40)), height: 520)
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalShowAI)) { notification in
             guard let id = notification.object as? UUID, let controller = registry.controller(for: id) else { return }
@@ -428,6 +460,36 @@ private struct TerminalWorkspaceContent: View {
                 )
             }
         }
+    }
+
+    @ViewBuilder private var inspectorContent: some View {
+            if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("RDP 状态", systemImage: "desktopcomputer").font(.headline)
+                    Text(controller.configuration.name)
+                    Text("NLA/CredSSP · TLS 1.2+")
+                    Text("远程桌面不提供 SSH AI、命令片段或终端录制。")
+                }.padding().inspectorColumnWidth(min: 280, ideal: 320, max: 400)
+            } else if let selectedController, let activeServer {
+                TerminalInspectorView(
+                    server: activeServer, controller: selectedController,
+                    runtime: appState.runtime(for: activeServer), snippets: snippets,
+                    refreshInterval: appState.refreshInterval,
+                    selectedTab: $inspectorTab,
+                    onInsert: { requestSnippet($0, into: selectedController.id, execute: false) },
+                    onRun: { requestSnippet($0, into: selectedController.id, execute: true) },
+                    isActivePane: { workspace.selectedTab?.kind == .terminal && workspace.activePane == selectedController.id }
+                )
+                .inspectorColumnWidth(min: 340, ideal: 390, max: 600)
+            } else {
+                ContentUnavailableView {
+                    Label("AI 助手", systemImage: "sparkles")
+                } description: {
+                    Text("选择 SSH 面板使用运维模式，或打开独立通用对话。")
+                } actions: {
+                    Button("打开通用对话") { openWindow(id: "ai-general") }
+                }.inspectorColumnWidth(min: 340, ideal: 390, max: 600)
+            }
     }
 
     private func requestSnippet(
@@ -484,6 +546,7 @@ struct TerminalSnippetRequest {
 }
 
 struct TerminalInspectorView: View {
+    @EnvironmentObject private var appState: AppState
     let server: ServerRecord
     @ObservedObject var controller: TerminalSessionController
     @ObservedObject var runtime: ServerRuntimeState
@@ -512,16 +575,29 @@ struct TerminalInspectorView: View {
                 Text(controller.serverName)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Picker("检查器内容", selection: $selectedTab) {
-                    Text("状态").tag("status")
-                    Text("AI").tag("ai")
-                    Text("代码片段").tag("snippets")
+                    ForEach(TerminalInspectorSection.allCases) { section in
+                        Label(section.title, systemImage: section.icon).tag(section.rawValue)
+                    }
+                }.pickerStyle(.menu)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(TerminalInspectorSection.allCases) { section in
+                            Button { selectedTab = section.rawValue } label: {
+                                Image(systemName: section.icon).frame(width: 28, height: 28)
+                            }.buttonStyle(.borderless).foregroundStyle(selectedTab == section.rawValue ? Color.accentColor : .secondary)
+                                .help(section.title).accessibilityLabel(section.title)
+                                .accessibilityAddTraits(selectedTab == section.rawValue ? .isSelected : [])
+                        }
+                    }
                 }
-                .pickerStyle(.segmented).labelsHidden()
             }
             .padding(AppleDesign.Spacing.md)
             Divider()
             if selectedTab == "ai" {
                 AIAssistantPanel(controller: controller, isActive: isActivePane)
+            } else if selectedTab == "files" {
+                SFTPBrowserView(controller: appState.inspectorFileController(for: server), compact: true)
+                    .id(server.id)
             } else { ScrollView {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
                     if selectedTab == "snippets" { snippetContent } else { statusContent }
@@ -547,52 +623,14 @@ struct TerminalInspectorView: View {
             Text("正在切换服务器…").foregroundStyle(.secondary)
         } else if state.hasSnapshot {
             HStack {
-                Text("资源快照").font(.headline)
-                Spacer()
                 ServerStatusBadge(status: state.status)
+                Spacer()
+                Button { Task { await appState.refresh(server) } } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(state.isRefreshing).help("刷新资源快照").accessibilityLabel("刷新资源快照")
             }
-            VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
-                metric("CPU", value: snapshot.cpuUsage, detail: "\(snapshot.coreCount) 核心")
-                Divider()
-                metric("内存", value: snapshot.memoryUsage,
-                       detail: "\(DisplayFormat.bytes(snapshot.memoryUsedBytes)) / \(DisplayFormat.bytes(snapshot.memoryTotalBytes))")
-                Divider()
-                metric("磁盘", value: snapshot.diskUsage,
-                       detail: "\(DisplayFormat.bytes(snapshot.diskUsedBytes)) / \(DisplayFormat.bytes(snapshot.diskTotalBytes))")
-            }
-            .applePanel()
-
-            VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
-                Text("平均负载").font(.headline)
-                HStack {
-                    load("1 分钟", value: snapshot.load1)
-                    load("5 分钟", value: snapshot.load5)
-                    load("15 分钟", value: snapshot.load15)
-                }
-                Divider()
-                HStack {
-                    Label(DisplayFormat.speed(snapshot.downloadBytesPerSecond), systemImage: "arrow.down")
-                    Spacer(minLength: 0)
-                    Label(DisplayFormat.speed(snapshot.uploadBytesPerSecond), systemImage: "arrow.up")
-                }
-                .font(.caption).monospacedDigit()
-            }
-            .applePanel()
-
-            if !snapshot.topProcesses.isEmpty {
-                VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
-                    Text("活跃进程 · CPU").font(.headline)
-                    ForEach(snapshot.topProcesses.prefix(5)) { process in
-                        HStack {
-                            Text(process.name).lineLimit(1)
-                            Spacer(minLength: AppleDesign.Spacing.sm)
-                            Text(DisplayFormat.percent(process.cpu)).monospacedDigit()
-                        }
-                        .font(.caption)
-                    }
-                }
-                .applePanel()
-            }
+            if let error = state.error { Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
+            CompactMonitorContent(snapshot: snapshot, history: state.history,
+                section: TerminalInspectorSection(rawValue: selectedTab) ?? .status)
             TimelineView(.periodic(from: .now, by: 5)) { context in
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
                     if !server.enableDashboardMonitor {
@@ -611,9 +649,16 @@ struct TerminalInspectorView: View {
             ContentUnavailableView {
                 Label(state.status == .failed ? "资源采集失败" : "暂无资源快照", systemImage: "waveform.path.ecg")
             } description: {
-                Text(server.enableDashboardMonitor
-                     ? "采集成功后将在这里显示，终端连接与监控状态相互独立。"
-                     : "此服务器未开启仪表盘监控，可在机器设置中开启。")
+                if let error = state.error {
+                    Text(error).textSelection(.enabled)
+                    if !server.enableDashboardMonitor {
+                        Text("自动监控已关闭，可在机器设置中开启。").font(.caption)
+                    }
+                } else {
+                    Text(server.enableDashboardMonitor
+                         ? "采集成功后将在这里显示，终端连接与监控状态相互独立。"
+                         : "此服务器未开启仪表盘监控，可在机器设置中开启。")
+                }
             }
         }
     }
@@ -709,10 +754,6 @@ private struct TerminalSessionPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isActive {
-                TerminalToolsBar(tools: controller.hostView.tools, connected: controller.status == .connected,
-                                 send: controller.hostView.sendCommand, recordingController: controller)
-            }
             PersistentTerminalView(controller: controller)
                 // The controller owns the persistent NSView; a different session must mount its own view.
                 .id(controller.id)

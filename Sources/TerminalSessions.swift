@@ -67,6 +67,8 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     let hostView: TerminalHostView
     let ai = AIPaneState()
     let recording: TerminalRecordingController
+    private var startupTask: Task<Void, Never>?
+    private var outputLog: SSHSessionOutputLog?
     private let attachProcess: Bool
     private let initialAppearanceProfile: TerminalAppearanceProfile
 
@@ -113,7 +115,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         hostView.onTerminated = { [weak self] code in
             guard let self else { return }
             self.recording.stop(reason: "disconnected")
-            guard self.status == .connected else { return }
+            guard self.status == .connected || self.status == .connecting else { return }
+            self.startupTask?.cancel()
+            self.outputLog?.close(); self.outputLog = nil
             self.status = code == 0 ? .disconnected : .failed
             self.lastError = code == 0 ? "会话已结束" : "SSH 进程退出，代码 \(code ?? -1)"
             EventLogStore.shared.append(
@@ -130,9 +134,9 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         hostView.onFontShortcut = { [weak self] shortcut in
             self?.performFontShortcut(shortcut)
         }
-        hostView.onRecordingOutput = { [weak self] in self?.recording.output($0) }
+        hostView.onRecordingOutput = { [weak self] in self?.recording.output($0); self?.outputLog?.append($0) }
         hostView.onRecordingDisplayChanged = { [weak self] in self?.recording.displayChanged() }
-        hostView.shouldCaptureOutput = { [weak self] in self?.recording.isRecording == true }
+        hostView.shouldCaptureOutput = { [weak self] in self?.recording.isRecording == true || self?.outputLog != nil }
         hostView.onAISelection = { [weak self] text, explain in
             guard let self else { return }
             self.ai.selectedText = AITerminalContext.bounded(text)
@@ -146,19 +150,47 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         status = .connecting
         lastError = nil
         guard attachProcess else { return }
-        do {
-            try hostView.startIfNeeded()
-            status = .connected
-        } catch {
-            status = .failed
-            lastError = error.localizedDescription
-            return
+        startupTask?.cancel()
+        let current = connectionGeneration
+        let settings = config.advancedSettings
+        startupTask = Task { [weak self] in
+            guard let self else { return }
+            var marker: URL?
+            defer { if let marker { SSHSessionBootstrap.removeMarker(marker) } }
+            do {
+                try settings?.validate()
+                if settings?.commandsEnabled == true {
+                    let output = try await SSHSessionBootstrap.runLocalCommand(settings?.beforeConnectCommand ?? "", serverID: self.serverID)
+                    try Task.checkCancellation()
+                    if !output.isEmpty { self.hostView.feedLocalOutput(output) }
+                }
+                guard self.connectionGeneration == current else { return }
+                if settings?.logOutput == true { self.outputLog = try SSHSessionOutputLog(sessionID: self.id) }
+                let signal = try SSHSessionBootstrap.handshakeMarker(); marker = signal
+                try self.hostView.startIfNeeded(handshakeMarker: signal)
+                // ConnectTimeout bounds OpenSSH's socket/handshake phase; the remaining budget allows authentication.
+                try await SSHSessionBootstrap.waitForAuthentication(marker: signal,
+                    timeout: self.config.effectiveConnectTimeout + TimeInterval(settings?.authenticationTimeout ?? 30))
+                try Task.checkCancellation()
+                guard self.connectionGeneration == current else { return }
+                self.status = .connected
+                EventLogStore.shared.append(serverID: self.serverID, module: .terminal, message: "SSH 身份认证成功，终端已连接")
+                if settings?.commandsEnabled == true {
+                    do {
+                        let output = try await SSHSessionBootstrap.runLocalCommand(settings?.afterConnectCommand ?? "", serverID: self.serverID)
+                        try Task.checkCancellation()
+                        if !output.isEmpty { self.hostView.feedLocalOutput(output) }
+                    } catch {
+                        guard self.connectionGeneration == current, !Task.isCancelled else { return }
+                        self.lastError = "SSH 已连接，但连接后本地命令失败：\(error.localizedDescription)"
+                    }
+                }
+            } catch {
+                guard self.connectionGeneration == current, !Task.isCancelled else { return }
+                self.hostView.stop(); self.outputLog?.close(); self.outputLog = nil
+                self.status = .failed; self.lastError = error.localizedDescription
+            }
         }
-        EventLogStore.shared.append(
-            serverID: serverID,
-            module: .terminal,
-            message: "终端会话已启动"
-        )
     }
 
     func updateConfig(_ config: ServerConnectionConfig) {
@@ -167,6 +199,8 @@ final class TerminalSessionController: ObservableObject, Identifiable {
     }
 
     func terminate() {
+        startupTask?.cancel(); startupTask = nil
+        outputLog?.close(); outputLog = nil
         recording.stop(reason: "closed")
         connectionGeneration = UUID()
         connectionTask?.cancel()
@@ -616,10 +650,10 @@ final class TerminalHostView: NSView {
         onRecordingDisplayChanged?()
     }
 
-    func startIfNeeded() throws {
+    func startIfNeeded(handshakeMarker: URL? = nil) throws {
         guard !didStart else { return }
         tools.resetCommandBoundary()
-        try startSSH()
+        try startSSH(handshakeMarker: handshakeMarker)
         didStart = terminalView.process.running
         if !didStart { throw ConnectionError.commandFailed("无法启动 SSH 终端进程。") }
     }
@@ -633,9 +667,12 @@ final class TerminalHostView: NSView {
         didStart = false
     }
 
-    private func startSSH() throws {
+    func feedLocalOutput(_ output: String) { terminalView.feed(text: output) }
+
+    private func startSSH(handshakeMarker: URL?) throws {
         terminalView.resetHostKeyFailureDetection()
-        let plan = try SystemOpenSSHConnectionProvider().launchPlan(for: config, purpose: .interactiveShell)
+        var plan = try SystemOpenSSHConnectionProvider().launchPlan(for: config, purpose: .interactiveShell)
+        if let handshakeMarker { plan.arguments.insert(contentsOf: SSHSessionBootstrap.markerArguments(handshakeMarker), at: 0) }
         let environment = plan.environment.map { "\($0.key)=\($0.value)" }.sorted()
         terminalView.startProcess(executable: plan.executable, args: plan.arguments, environment: environment, execName: "ssh")
     }

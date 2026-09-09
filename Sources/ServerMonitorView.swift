@@ -7,6 +7,11 @@ struct ServerMonitorLayoutView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var layoutStore: MonitorLayoutStore
     @AppStorage("hideIPInformation") private var hideIPInformation = false
+    @AppStorage("monitor.hideSpecialFilesystems") private var hideSpecialFilesystems = true
+    @AppStorage("monitor.hideDockerMounts") private var hideDockerMounts = true
+    @AppStorage("monitor.hideVirtualInterfaces") private var hideVirtualInterfaces = true
+    @AppStorage("monitor.mountPoints") private var monitoredMountPoints = ""
+    @AppStorage("monitor.interfaceNames") private var monitoredInterfaceNames = ""
 
     let server: ServerRecord
     @ObservedObject var runtime: ServerRuntimeState
@@ -16,7 +21,11 @@ struct ServerMonitorLayoutView: View {
     @State private var presentedDetail: MonitorCardKind?
     @State private var copiedMarkdown = false
 
-    private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
+    private var snapshot: ServerSnapshot {
+        MonitoringFilters(hideSpecialFilesystems: hideSpecialFilesystems, hideDockerMounts: hideDockerMounts,
+            hideVirtualInterfaces: hideVirtualInterfaces, mountPoints: monitoredMountPoints,
+            interfaceNames: monitoredInterfaceNames).applying(to: runtime.renderState.snapshot)
+    }
     private var history: [MetricPoint] { runtime.renderState.history }
     private var status: ServerConnectionStatus { runtime.renderState.status }
     private var cards: [MonitorCardKind] {

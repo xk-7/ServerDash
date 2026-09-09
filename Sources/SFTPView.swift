@@ -1,53 +1,61 @@
 import AppKit
 import SwiftUI
 
+@MainActor final class DesktopFileClipboard: ObservableObject {
+    static let shared = DesktopFileClipboard()
+    @Published var serverID: UUID?
+    @Published var items: [RemoteFileItem] = []
+    @Published var cut = false
+    func clear() { items = []; serverID = nil; cut = false }
+}
+
 struct SFTPBrowserView: View {
     @ObservedObject var controller: MacSFTPController
+    var compact = false
+    @ObservedObject private var clipboard = DesktopFileClipboard.shared
+    @ObservedObject private var editor = RemoteEditorStore.shared
+    @State private var showingPermissions = false
+    @State private var permissions = "644"
+    @State private var recursivePermissions = false
+    @State private var showingArchive = false
+    @State private var archiveName = "archive"
+    @State private var archiveFormat = RemoteArchiveFormat.tarGzip
+    @State private var showingPasteConflict = false
+    @State private var showingEditor = false
+    @State private var showingSync = false
+    @State private var showingLocalCopies = false
+    @State private var showSyncSuggestion = true
+
     var body: some View {
         VStack(spacing: 0) {
             browserToolbar
             Divider()
-
-            if controller.items.isEmpty, controller.busyMessage == nil {
-                ContentUnavailableView {
-                    Label(
-                        controller.hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录",
-                        systemImage: controller.hasLoadedDirectory ? "folder" : "folder.badge.questionmark"
-                    )
-                } description: {
-                    Text(controller.hasLoadedDirectory
-                         ? "上传文件、文件夹或创建新项目以开始使用 SFTP。"
-                         : "检查服务器连接后重试，即可浏览和传输文件。")
-                } actions: {
-                    if controller.hasLoadedDirectory {
-                        Button("上传文件", systemImage: "square.and.arrow.up") {
-                            controller.chooseItemsToUpload(directories: false)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    } else {
-                        Button("重新连接", systemImage: "arrow.clockwise") {
-                            Task { await controller.loadDirectory(controller.currentPath) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                fileTable
+            if showSyncSuggestion && DesktopFilePreferences.promptDirectorySync && controller.hasLoadedDirectory {
+                HStack {
+                    Button("配置目录同步", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
+                    Spacer()
+                    Button { showSyncSuggestion = false } label: { Image(systemName: "xmark") }.help("隐藏本次提示")
+                }.font(.caption).buttonStyle(.borderless).padding(8).background(Color.accentColor.opacity(0.06))
             }
-
+            if controller.visibleItems.isEmpty, controller.busyMessage == nil {
+                ContentUnavailableView {
+                    Label(controller.search.isEmpty ? (controller.hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录") : "没有匹配文件", systemImage: "folder")
+                } description: {
+                    Text(controller.search.isEmpty ? "上传文件或创建项目；隐藏文件可在工具栏显示。" : "尝试其他关键词，或显示隐藏文件。")
+                } actions: {
+                    Button("刷新") { Task { await controller.loadDirectory(controller.currentPath) } }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else { fileTable }
             Divider()
             statusBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.appGround)
-        .onAppear { controller.beginIfNeeded() }
+        .onAppear { controller.beginIfNeeded(); if let access = controller.fileAccess { editor.register(access); DirectorySyncStore.shared.register(access) } }
         .alert("新建文件夹", isPresented: $controller.showingNewFolderPrompt) {
             TextField("文件夹名称", text: $controller.promptText)
             Button("取消", role: .cancel) {}
             Button("创建") { controller.createFolder(named: controller.promptText) }
-        } message: {
-            Text("将在 \(controller.currentPath) 中创建文件夹。")
         }
         .alert("新建文件", isPresented: $controller.showingNewFilePrompt) {
             TextField("文件名称", text: $controller.promptText)
@@ -58,302 +66,156 @@ struct SFTPBrowserView: View {
             TextField("新名称", text: $controller.promptText)
             Button("取消", role: .cancel) {}
             Button("重命名") { controller.renameSelectedItem(to: controller.promptText) }
-        } message: {
-            Text(controller.selectedItem?.name ?? "")
         }
         .alert("移动到", isPresented: $controller.showingMovePrompt) {
             TextField("目标目录", text: $controller.promptText)
             Button("取消", role: .cancel) {}
             Button("移动") { controller.moveSelectedItem(to: controller.promptText) }
-        } message: {
-            Text("将 \(controller.selectedItem?.name ?? "项目") 移动到指定远程目录。")
         }
-        .confirmationDialog(
-            "删除 \(controller.itemPendingDeletion?.name ?? "项目")？",
-            isPresented: Binding(
-                get: { controller.itemPendingDeletion != nil },
-                set: { if !$0 { controller.itemPendingDeletion = nil } }
-            )
-        ) {
-            Button("删除", role: .destructive) {
-                guard let item = controller.itemPendingDeletion else { return }
-                controller.delete(item)
-            }
-            Button("取消", role: .cancel) {
-                controller.itemPendingDeletion = nil
-            }
-        } message: {
-            Text(deletionMessage)
-        }
-        .confirmationDialog(
-            "目标已存在",
-            isPresented: $controller.showingConflict
-        ) {
+        .confirmationDialog("删除 \(controller.itemPendingDeletion?.name ?? "项目")？", isPresented: Binding(get: { controller.itemPendingDeletion != nil }, set: { if !$0 { controller.itemPendingDeletion = nil } })) {
+            Button("删除", role: .destructive) { if let item = controller.itemPendingDeletion { controller.delete(item) } }
+            Button("取消", role: .cancel) { controller.itemPendingDeletion = nil }
+        } message: { Text(controller.itemPendingDeletion?.isDirectory == true ? "文件夹及全部内容将永久删除。" : "远程文件将被永久删除。") }
+        .confirmationDialog("目标已存在", isPresented: $controller.showingConflict) {
             Button("覆盖") { controller.resolveConflict(.overwrite) }
             Button("跳过") { controller.resolveConflict(.skip) }
             Button("重命名") { controller.resolveConflict(.rename) }
-            Button("取消", role: .cancel) {
-                controller.pendingUploads = []
-                controller.pendingDownload = nil
-            }
-        } message: {
-            Text("同名文件或文件夹已存在。覆盖会替换目标，跳过会保留现有内容，重命名会自动加序号。")
+            Button("取消", role: .cancel) { controller.pendingUploads = []; controller.pendingDownload = nil }
         }
-        .alert(
-            "SFTP 操作失败",
-            isPresented: Binding(
-                get: { controller.errorMessage != nil },
-                set: { if !$0 { controller.errorMessage = nil } }
-            )
-        ) {
-            Button("重新连接") {
-                controller.errorMessage = nil
-                Task { await controller.loadDirectory(controller.currentPath) }
-            }
+        .confirmationDialog("粘贴时发现同名项目", isPresented: $showingPasteConflict) {
+            Button("覆盖同名项目", role: .destructive) { controller.pasteFiles(policy: .overwrite) }
+            Button("跳过同名项目") { controller.pasteFiles(policy: .skip) }
+            Button("自动重命名") { controller.pasteFiles(policy: .rename) }
+        }
+        .alert("SFTP 操作失败", isPresented: Binding(get: { controller.errorMessage != nil }, set: { if !$0 { controller.errorMessage = nil } })) {
             Button("好") { controller.errorMessage = nil }
-        } message: {
-            Text(controller.errorMessage ?? "")
+        } message: { Text(controller.errorMessage ?? "") }
+        .sheet(isPresented: $showingEditor) { RemoteEditorView() }
+        .sheet(isPresented: $showingLocalCopies) { LocalFileCopiesView(serverID:controller.server.id) }
+        .sheet(isPresented: $showingSync) { if let access = controller.fileAccess { DirectorySyncView(access: access, remotePath: controller.currentPath) } }
+        .sheet(isPresented: $showingPermissions) {
+            VStack(alignment: .leading, spacing: 16) {
+                Label("修改权限", systemImage: "lock.shield").font(.title2.bold())
+                Text("已选择 \(controller.selectedItems.count) 个项目。符号链接不会被跟随。")
+                TextField("八进制权限，例如 644 或 755", text: $permissions).textFieldStyle(.roundedBorder)
+                Toggle("递归应用到文件夹内的文件和子文件夹", isOn: $recursivePermissions)
+                Text("读取 r = 4，写入 w = 2，执行 x = 1；依次为所有者、组、其他用户。").font(.caption).foregroundStyle(.secondary)
+                HStack { Spacer(); Button("取消") { showingPermissions = false }; Button("应用") {
+                    if let mode = UInt16(permissions, radix: 8) { controller.changePermissions(mode, recursive: recursivePermissions); showingPermissions = false }
+                }.buttonStyle(.borderedProminent).disabled(UInt16(permissions, radix: 8).map { $0 > 0o7777 } ?? true) }
+            }.padding(24).frame(width: 510)
         }
-    }
-
-    private var deletionMessage: String {
-        if controller.itemPendingDeletion?.isDirectory == true {
-            return "将删除文件夹及其全部内容，此操作无法撤销。"
+        .sheet(isPresented: $showingArchive) {
+            VStack(alignment: .leading, spacing: 16) {
+                Label("创建压缩包", systemImage: "archivebox").font(.title2.bold())
+                TextField("压缩包名称", text: $archiveName).textFieldStyle(.roundedBorder)
+                Picker("格式", selection: $archiveFormat) { ForEach(RemoteArchiveFormat.allCases) { Text($0.rawValue).tag($0) } }
+                Text("保存在当前目录，保留符号链接，不覆盖同名压缩包。").font(.caption).foregroundStyle(.secondary)
+                HStack { Spacer(); Button("取消") { showingArchive = false }; Button("压缩") { controller.archiveSelection(name: archiveName, format: archiveFormat); showingArchive = false }.buttonStyle(.borderedProminent).disabled(archiveName.isEmpty || archiveName.contains("/")) }
+            }.padding(24).frame(width: 460)
         }
-        return "远程文件将被永久删除，此操作无法撤销。"
     }
 
     private var browserToolbar: some View {
-        VStack(spacing: AppleDesign.Spacing.sm) {
-            HStack(spacing: AppleDesign.Spacing.xs) {
-                Button {
-                    Task { await controller.loadDirectory(".") }
-                } label: {
-                    Image(systemName: "house")
-                }
-                .help("主目录")
-                .accessibilityLabel("前往主目录")
-
-                Button {
-                    Task { await controller.loadDirectory(RemotePath.parent(of: controller.currentPath)) }
-                } label: {
-                    Image(systemName: "arrow.up")
-                }
-                .help("上级目录")
-                .accessibilityLabel("前往上级目录")
-                .disabled(controller.currentPath == "/" || controller.busyMessage != nil)
-
-                TextField("远程路径", text: $controller.pathText)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.body.monospaced())
-                    .onSubmit {
-                        Task { await controller.loadDirectory(controller.pathText) }
-                    }
-
-                Button {
-                    Task { await controller.loadDirectory(controller.currentPath) }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help("刷新")
-                .accessibilityLabel("刷新远程目录")
+        VStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Button { Task { await controller.loadDirectory(".") } } label: { Image(systemName: "house") }.help("主目录")
+                Button { Task { await controller.loadDirectory(RemotePath.parent(of: controller.currentPath)) } } label: { Image(systemName: "chevron.up") }.help("上级目录").disabled(controller.currentPath == "/")
+                TextField("远程路径", text: $controller.pathText).textFieldStyle(.roundedBorder).font(.callout.monospaced()).onSubmit { Task { await controller.loadDirectory(controller.pathText) } }
+                Button { Task { await controller.loadDirectory(controller.currentPath) } } label: { Image(systemName: "arrow.clockwise") }.help("刷新")
             }
-
-            HStack(spacing: AppleDesign.Spacing.xs) {
+            HStack(spacing: 8) {
+                TextField("搜索文件", text: $controller.search).textFieldStyle(.roundedBorder)
+                Toggle(isOn: $controller.showHidden) { Image(systemName: controller.showHidden ? "eye" : "eye.slash") }.toggleStyle(.button).help("显示隐藏文件")
                 Menu {
-                    Button("上传文件", systemImage: "doc.badge.plus") {
-                        controller.chooseItemsToUpload(directories: false)
-                    }
-                    Button("上传文件夹", systemImage: "folder.badge.plus") {
-                        controller.chooseItemsToUpload(directories: true)
-                    }
-                } label: {
-                    Label("上传", systemImage: "square.and.arrow.up")
-                }
-                Button("下载", systemImage: "square.and.arrow.down") {
-                    controller.downloadSelectedItem()
-                }
-                .disabled(controller.selectedItem == nil)
-
-                Spacer(minLength: AppleDesign.Spacing.xs)
-                Text(controller.selectedItem.map { "已选择 \($0.name)" } ?? "远程文件")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                if controller.busyMessage != nil {
-                    Button("取消", role: .destructive) {
-                        controller.transferTask?.cancel()
-                    }
-                }
-
+                    Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
+                    Button("上传文件夹", systemImage: "folder.badge.plus") { controller.chooseItemsToUpload(directories: true) }
+                } label: { Image(systemName: "square.and.arrow.up") }.help("上传")
+                Button { controller.downloadSelectedItem() } label: { Image(systemName: "square.and.arrow.down") }.help("下载").disabled(controller.selectedItem == nil)
                 Menu {
-                    Button("新建文件夹", systemImage: "folder.badge.plus") {
-                        controller.promptText = ""
-                        controller.showingNewFolderPrompt = true
-                    }
-                    Button("新建文件", systemImage: "doc.badge.plus") {
-                        controller.promptText = ""
-                        controller.showingNewFilePrompt = true
-                    }
-                    Button("重命名", systemImage: "pencil") {
-                        controller.beginRename()
-                    }
-                    .disabled(controller.selectedItem == nil)
-                    Button("移动…", systemImage: "arrow.right") {
-                        controller.promptText = RemotePath.parent(of: controller.selectedItem?.path ?? controller.currentPath)
-                        controller.showingMovePrompt = true
-                    }
-                    .disabled(controller.selectedItem == nil)
+                    Button("新建文件夹", systemImage: "folder.badge.plus") { controller.promptText = ""; controller.showingNewFolderPrompt = true }
+                    Button("新建文件", systemImage: "doc.badge.plus") { controller.promptText = ""; controller.showingNewFilePrompt = true }
                     Divider()
-                    Button("删除", systemImage: "trash", role: .destructive) {
-                        controller.itemPendingDeletion = controller.selectedItem
-                    }
-                    .disabled(controller.selectedItem == nil)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .help("更多操作")
-                .accessibilityLabel("文件操作")
+                    Button("粘贴", systemImage: "doc.on.clipboard", action: paste).disabled(clipboard.serverID != controller.server.id || clipboard.items.isEmpty)
+                    Button("目录同步…", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
+                    Button("打开编辑器与恢复草稿", systemImage: "doc.text") { showingEditor = true }
+                    Button("本地副本 / 上传修改…",systemImage:"arrow.up.doc"){showingLocalCopies=true}
+                    if controller.hasActiveTransfer { Button("取消当前操作", role: .destructive) { controller.transferTask?.cancel() } }
+                } label: { Image(systemName: "ellipsis.circle") }.help("文件操作")
             }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .disabled(controller.busyMessage != nil && controller.transferTask == nil)
-        .padding(.horizontal, AppleDesign.Spacing.md)
-        .padding(.vertical, AppleDesign.Spacing.sm)
-        .background(Color.appGround)
+        }.controlSize(compact ? .small : .regular).buttonStyle(.borderless)
+            .padding(compact ? 8 : 12).background(.bar)
+            .disabled(controller.busyMessage != nil && controller.transferTask == nil)
     }
-
     private var fileTable: some View {
-        Table(controller.items, selection: $controller.selection) {
-            TableColumn("名称") { item in
-                Label(item.name, systemImage: icon(for: item))
-                    .symbolRenderingMode(.monochrome)
-                    .lineLimit(1)
-            }
-            .width(min: 140, ideal: 260)
-            TableColumn("大小") { item in
-                Text(item.isDirectory ? "—" : DisplayFormat.bytes(Double(item.size)))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 75, ideal: 95, max: 120)
-            TableColumn("修改时间") { item in
-                Text(item.modifiedText)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 110, ideal: 135, max: 170)
-            TableColumn("权限") { item in
-                Text(item.permissions)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-            .width(105)
-            TableColumn("所有者") { item in
-                Text(item.owner)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 80, ideal: 100, max: 140)
-        }
-        .contextMenu(forSelectionType: String.self) { selectedIDs in
-            let item = controller.items.first { selectedIDs.contains($0.id) }
-            if let item {
-                if item.isDirectory {
-                    Button("打开", systemImage: "folder") {
-                        Task { await controller.loadDirectory(item.path) }
-                    }
-                }
-                Button("下载", systemImage: "square.and.arrow.down") {
-                    controller.selection = [item.id]
-                    controller.downloadSelectedItem()
-                }
-                Button("重命名", systemImage: "pencil") {
-                    controller.selection = [item.id]
-                    controller.beginRename()
-                }
+        tableContent
+        .contextMenu(forSelectionType: String.self) { ids in
+            let items = controller.items.filter { ids.contains($0.id) }
+            if let first = items.first {
+                if first.isDirectory { Button("打开", systemImage: "folder") { Task { await controller.loadDirectory(first.path) } } }
+                Button("复制", systemImage: "doc.on.doc") { controller.selection = ids; controller.copyFiles(cut: false) }
+                Button("剪切", systemImage: "scissors") { controller.selection = ids; controller.copyFiles(cut: true) }
+                Button("复制路径", systemImage: "link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(items.map(\.path).joined(separator: "\n"), forType: .string) }
+                Button("粘贴", systemImage: "doc.on.clipboard", action: paste).disabled(clipboard.serverID != controller.server.id || clipboard.items.isEmpty)
                 Divider()
-                Button("删除", systemImage: "trash", role: .destructive) {
-                    controller.selection = [item.id]
-                    controller.itemPendingDeletion = item
-                }
+                Button("压缩…", systemImage: "archivebox") { controller.selection = ids; archiveName = items.count == 1 ? first.name : "archive"; showingArchive = true }
+                Button("编辑", systemImage: "square.and.pencil") { openEditor(items) }.disabled(items.contains { $0.kind != .file })
+                Menu("以指定编码编辑") { ForEach(RemoteTextEncoding.allCases) { encoding in Button(encoding.rawValue) { openEditor(items, encoding: encoding) } } }.disabled(items.contains { $0.kind != .file })
+                Button("用本地程序打开", systemImage: "arrow.up.forward.app") { controller.openLocalCopy(first);showingLocalCopies=true }.disabled(first.kind != .file || editor.busy)
+                Button("下载", systemImage: "square.and.arrow.down") { controller.selection = [first.id]; controller.downloadSelectedItem() }
+                Button("重命名…", systemImage: "pencil") { controller.selection = [first.id]; controller.beginRename() }.disabled(items.count != 1)
+                Button("移动到…", systemImage: "arrow.right") { controller.selection = [first.id]; controller.promptText = controller.currentPath; controller.showingMovePrompt = true }.disabled(items.count != 1)
+                Button("修改权限…", systemImage: "lock.shield") { controller.selection = ids; permissions = first.isDirectory ? "755" : "644"; recursivePermissions = false; showingPermissions = true }
+                Divider()
+                Button("删除", systemImage: "trash", role: .destructive) { controller.itemPendingDeletion = first }.disabled(items.count != 1)
             }
-        } primaryAction: { selectedIDs in
-            guard let item = controller.items.first(where: { selectedIDs.contains($0.id) }) else { return }
-            if item.isDirectory {
-                Task { await controller.loadDirectory(item.path) }
-            } else {
-                controller.selection = [item.id]
-                controller.downloadSelectedItem()
-            }
-        }
-        .overlay {
-            if let busyMessage = controller.busyMessage {
-                ZStack {
-                    Color.appGround.opacity(0.72)
-                    VStack(spacing: AppleDesign.Spacing.sm) {
-                        if let progress = controller.progress {
-                            ProgressView(value: progress.fraction)
-                        } else {
-                            ProgressView()
-                        }
-                        Text(busyMessage)
-                            .font(.callout)
-                        if let progress = controller.progress {
-                            Text(
-                                "\(DisplayFormat.speed(progress.speedBytesPerSecond)) · 剩余 \(DisplayFormat.integer(Int(progress.remaining))) 秒"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                        Button("取消") {
-                            controller.transferTask?.cancel()
-                        }
-                    }
-                    .padding(AppleDesign.Spacing.lg)
-                    .background(AppleChromeBackground())
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: AppleDesign.Radius.thumbnail,
-                            style: .continuous
-                        )
-                    )
-                }
-            }
+        } primaryAction: { ids in
+            guard let first = controller.items.first(where: { ids.contains($0.id) }) else { return }
+            if first.isDirectory { Task { await controller.loadDirectory(first.path) } } else { openEditor([first]) }
         }
     }
-
+    @ViewBuilder private var tableContent: some View {
+        if compact {
+        Table(controller.visibleItems, selection: $controller.selection) {
+            TableColumn("名称") { item in
+                Label(item.name, systemImage: item.isDirectory ? "folder" : item.kind == .symbolicLink ? "link" : "doc")
+                    .foregroundStyle(item.isDirectory ? Color.accentColor : Color.primary).lineLimit(1)
+            }.width(min: 100, ideal: compact ? 180 : 280)
+            TableColumn("大小") { item in Text(item.isDirectory ? "—" : DesktopFileOperations.displaySize(item.size)).monospacedDigit().foregroundStyle(.secondary) }.width(min: 55, ideal: 75, max: 100)
+            TableColumn("修改时间") { item in Text(item.modifiedText).font(.caption).foregroundStyle(.secondary) }.width(min: 65, ideal: compact ? 90 : 125, max: 170)
+        }
+        } else {
+        Table(controller.visibleItems, selection: $controller.selection) {
+            TableColumn("名称") { item in
+                Label(item.name, systemImage: item.isDirectory ? "folder" : item.kind == .symbolicLink ? "link" : "doc")
+                    .foregroundStyle(item.isDirectory ? Color.accentColor : Color.primary).lineLimit(1)
+            }.width(min: 100, ideal: compact ? 180 : 280)
+            TableColumn("大小") { item in Text(item.isDirectory ? "—" : DesktopFileOperations.displaySize(item.size)).monospacedDigit().foregroundStyle(.secondary) }.width(min: 55, ideal: 75, max: 100)
+            TableColumn("修改时间") { item in Text(item.modifiedText).font(.caption).foregroundStyle(.secondary) }.width(min: 65, ideal: compact ? 90 : 125, max: 170)
+                TableColumn("权限") { item in Text(item.permissions).font(.caption.monospaced()).foregroundStyle(.secondary) }.width(105)
+                TableColumn("所有者") { item in Text(item.owner).font(.caption).foregroundStyle(.secondary) }.width(100)
+        }
+        }
+    }
     private var statusBar: some View {
-        HStack {
-            if controller.busyMessage != nil {
-                ProgressView().controlSize(.small)
+        VStack(spacing: 4) {
+            if let progress = controller.progress { ProgressView(value: progress.fraction) }
+            HStack(spacing: 6) {
+                if controller.busyMessage != nil { ProgressView().controlSize(.small) }
+                Text(controller.busyMessage ?? controller.statusMessage).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 2)
+                if controller.hasActiveTransfer { Button("取消") { controller.transferTask?.cancel() } }
+                Text("\(controller.visibleItems.count) 项").monospacedDigit()
             }
-            Text(controller.busyMessage ?? controller.statusMessage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer()
-            Text("\(DisplayFormat.integer(controller.items.count)) 个项目")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, AppleDesign.Spacing.md)
-        .frame(height: 32)
-        .background(AppleChromeBackground())
+        }.font(.caption).foregroundStyle(.secondary).padding(8).background(.bar)
     }
-
-    private func icon(for item: RemoteFileItem) -> String {
-        switch item.kind {
-        case .directory: "folder"
-        case .symbolicLink: "arrow.triangle.turn.up.right.diamond"
-        case .file: "doc"
-        case .other: "questionmark.square.dashed"
-        }
+    private func openEditor(_ items: [RemoteFileItem], encoding: RemoteTextEncoding? = nil) {
+        guard let access = controller.fileAccess else { return }; editor.open(items, access: access, encoding: encoding); showingEditor = true
     }
-
+    private func paste() {
+        if controller.items.contains(where: { item in clipboard.items.contains { $0.name == item.name } }) { showingPasteConflict = true }
+        else { controller.pasteFiles(policy: .skip) }
+    }
 }
 
 @MainActor
@@ -368,6 +230,8 @@ final class MacSFTPController: ObservableObject {
     private var transferGeneration = UUID()
     var hasActiveTransfer: Bool { transferTask != nil }
     @Published var items: [RemoteFileItem] = []
+    @Published var search = ""
+    @Published var showHidden = false
     @Published var hasLoadedDirectory = false
     @Published var currentPath = "."
     @Published var pathText = "."
@@ -388,6 +252,12 @@ final class MacSFTPController: ObservableObject {
     @Published var pendingDownload: (item: RemoteFileItem, url: URL)?
     @Published var conflictPolicy: SFTPConflictPolicy = .overwrite
 
+    var visibleItems: [RemoteFileItem] {
+        items.filter { (showHidden || !$0.name.hasPrefix(".")) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
+    }
+    var selectedItems: [RemoteFileItem] { items.filter { selection.contains($0.id) } }
+    var fileAccess: DesktopFileAccess? { appState.map { DesktopFileAccess(server: server, appState: $0) } }
+
     var selectedItem: RemoteFileItem? {
         guard let id = selection.first else { return nil }
         return items.first { $0.id == id }
@@ -396,8 +266,9 @@ final class MacSFTPController: ObservableObject {
     private var connectionConfig: ServerConnectionConfig { appState?.connectionConfig(for: server) ?? server.connectionConfig }
 
 
-    init(server: ServerRecord, appState: AppState) {
+    init(server: ServerRecord, appState: AppState, automaticallyConnect: Bool = true) {
         self.server = server; self.appState = appState
+        started = !automaticallyConnect
         currentPath = server.defaultSFTPPath.isEmpty ? "." : server.defaultSFTPPath
         pathText = currentPath
     }
@@ -524,6 +395,14 @@ final class MacSFTPController: ObservableObject {
 
     func downloadSelectedItem() {
         guard let item = selectedItem else { return }
+        let preferred = DesktopFilePreferences.downloadDirectory
+        if !preferred.isEmpty {
+            let directory = URL(fileURLWithPath: preferred, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                enqueueDownload(item, to: directory.appendingPathComponent(item.name)); return
+            } catch { errorMessage = error.localizedDescription; return }
+        }
         if item.isDirectory {
             let panel = NSOpenPanel()
             panel.title = "选择下载文件夹的位置"
@@ -602,11 +481,13 @@ final class MacSFTPController: ObservableObject {
     }
 
     func createFolder(named name: String) {
-        runMutation("正在创建文件夹") { [self] in
+        guard !items.contains(where: { $0.name == name }) else { errorMessage = "同名项目已存在。"; return }
+        let directory = currentPath
+        runMutation("正在创建文件夹") { config in
             try await SFTPService.createDirectory(
                 named: name,
-                in: currentPath,
-                config: connectionConfig
+                in: directory,
+                config: config
             )
         } success: {
             "文件夹已创建"
@@ -614,11 +495,13 @@ final class MacSFTPController: ObservableObject {
     }
 
     func createFile(named name: String) {
-        runMutation("正在创建文件") { [self] in
+        guard !items.contains(where: { $0.name == name }) else { errorMessage = "同名项目已存在，不会覆盖原文件。"; return }
+        let directory = currentPath
+        runMutation("正在创建文件") { config in
             try await SFTPService.createFile(
                 named: name,
-                in: currentPath,
-                config: connectionConfig
+                in: directory,
+                config: config
             )
         } success: {
             "文件已创建"
@@ -633,8 +516,10 @@ final class MacSFTPController: ObservableObject {
 
     func renameSelectedItem(to name: String) {
         guard let item = selectedItem else { return }
-        runMutation("正在重命名 \(item.name)") { [self] in
-            try await SFTPService.rename(item: item, to: name, config: connectionConfig)
+        guard name != item.name else { return }
+        guard !items.contains(where: { $0.name == name }) else { errorMessage = "同名项目已存在。"; return }
+        runMutation("正在重命名 \(item.name)") { config in
+            try await SFTPService.rename(item: item, to: name, config: config)
         } success: {
             "重命名完成"
         }
@@ -642,8 +527,8 @@ final class MacSFTPController: ObservableObject {
 
     func moveSelectedItem(to directory: String) {
         guard let item = selectedItem else { return }
-        runMutation("正在移动 \(item.name)") { [self] in
-            try await SFTPService.move(item: item, to: directory, config: connectionConfig)
+        runMutation("正在移动 \(item.name)") { config in
+            try await SFTPService.move(item: item, to: directory, config: config)
         } success: {
             "移动完成"
         }
@@ -651,10 +536,10 @@ final class MacSFTPController: ObservableObject {
 
     func delete(_ item: RemoteFileItem) {
         itemPendingDeletion = nil
-        runMutation("正在删除 \(item.name)") { [self] in
+        runMutation("正在删除 \(item.name)") { config in
             try await SFTPService.delete(
                 item: item,
-                config: connectionConfig,
+                config: config,
                 recursive: item.isDirectory
             )
         } success: {
@@ -662,7 +547,43 @@ final class MacSFTPController: ObservableObject {
         }
     }
 
-    func runMutation(_ message: String, work: @escaping () async throws -> Void, success: @escaping () -> String) {
+    func copyFiles(cut: Bool) {
+        guard !selectedItems.isEmpty else { return }
+        let clipboard = DesktopFileClipboard.shared
+        clipboard.serverID = server.id; clipboard.items = selectedItems; clipboard.cut = cut
+        statusMessage = cut ? "已剪切，选择目标目录后粘贴" : "已复制，选择目标目录后粘贴"
+    }
+    func pasteFiles(policy: SFTPConflictPolicy) {
+        let clipboard = DesktopFileClipboard.shared
+        guard clipboard.serverID == server.id, !clipboard.items.isEmpty else { return }
+        let paths = clipboard.items.map(\.path), cut = clipboard.cut, destination = currentPath
+        runMutation(cut ? "正在移动项目" : "正在复制项目") { config in
+            try await DesktopFileOperations.mutate(action: cut ? "move" : "copy", paths: paths,
+                destination: destination, policy: policy, config: config)
+        } success: {
+            if cut { clipboard.clear() }
+            return cut ? "移动完成" : "复制完成"
+        }
+    }
+    func changePermissions(_ mode: UInt16, recursive: Bool) {
+        let paths = selectedItems.map(\.path)
+        runMutation("正在修改权限") { config in
+            try await DesktopFileOperations.mutate(action: "chmod", paths: paths, mode: mode, recursive: recursive, config: config)
+        } success: { "权限已更新" }
+    }
+    func archiveSelection(name: String, format: RemoteArchiveFormat) {
+        let paths = selectedItems.map(\.path)
+        let destination = RemotePath.child(name.hasSuffix("." + format.rawValue) ? name : name + "." + format.rawValue, of: currentPath)
+        runMutation("正在创建压缩包") { config in
+            try await DesktopFileOperations.mutate(action: "archive", paths: paths, destination: destination, format: format, config: config)
+        } success: { "压缩包已创建" }
+    }
+    func openLocalCopy(_ item: RemoteFileItem) {
+        guard item.kind == .file,let access=fileAccess else{return}
+        RemoteEditorStore.shared.openLocalCopy(item,access:access)
+    }
+
+    func runMutation(_ message: String, work: @escaping (ServerConnectionConfig) async throws -> Void, success: @escaping () -> String) {
         guard !closed, transferTask == nil else { return }
         let request = generation, transfer = UUID()
         transferGeneration = transfer
@@ -673,7 +594,7 @@ final class MacSFTPController: ObservableObject {
                 guard let appState else { throw CancellationError() }
                 let config = connectionConfig
                 try await appState.performTrustedConnection(config, source: .sftp) {
-                    try await work()
+                    try await work(config)
                 }
                 guard generation == request, !Task.isCancelled else { return }
                 busyMessage = nil

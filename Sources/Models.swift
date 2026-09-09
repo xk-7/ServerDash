@@ -490,6 +490,7 @@ struct ServerConnectionConfig: Hashable, Sendable {
     var connectTimeout: TimeInterval = PrivacySettings.connectTimeout
     var route: ConnectionRoute = .direct
     var identityReferenceMissing: Bool = false
+    var advancedSettings: SSHAdvancedSettingsDraft? = nil
 }
 
 struct ServerCapabilities: Hashable, Sendable, Codable {
@@ -648,6 +649,21 @@ struct ServerGeoLocation: Hashable, Sendable {
     let longitude: Double?
 }
 
+struct ListeningPortMetric: Identifiable, Hashable, Sendable {
+    let transport: String
+    let address: String
+    let process: String
+    var id: String { "\(transport)|\(address)|\(process)" }
+}
+
+struct SocketSummaryMetric: Hashable, Sendable {
+    let total: Int
+    let tcp: Int
+    let udp: Int
+    let listening: Int
+    let timeWait: Int
+}
+
 struct ServerSnapshot: Hashable, Sendable {
     var capturedAt: Date
     var cpuUsage: Double
@@ -694,6 +710,15 @@ struct ServerSnapshot: Hashable, Sendable {
     var dockerVersion: String = ""
     var dockerContainers: [DockerContainerMetric] = []
     var geoLocation: ServerGeoLocation?
+    var cpuUserPercent: Double?
+    var cpuSystemPercent: Double?
+    var cpuIOWaitPercent: Double?
+    var sockets: SocketSummaryMetric?
+    var listeningPorts: [ListeningPortMetric] = []
+    var listeningPortsAvailable = false
+    var listeningPortsError: String?
+    var fileHandlesUsed: Int?
+    var fileHandlesLimit: Int?
 
     var memoryUsage: Double {
         guard memoryTotalBytes > 0 else { return 0 }

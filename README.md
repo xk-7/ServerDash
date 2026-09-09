@@ -34,19 +34,27 @@ ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFT
 
 ### Multi-tab terminal workspace
 
-- Shared macOS/iPhone/iPad SSH tabs with no fixed tab-count limit; memory and server limits still apply. The **+** menu also opens SFTP and monitoring tabs. macOS adds RDP tabs in development; VNC and online AI completion are not implemented.
+- Shared macOS/iPhone/iPad SSH tabs with no fixed tab-count limit; memory and server limits still apply. The **+** menu also opens SFTP and monitoring tabs. macOS adds embedded RDP, local Shell and serial tabs, and launches VNC with system Screen Sharing.
 - Drag to reorder, use tab context menus to close current/other/all tabs, and scroll fixed-width tabs with previous/next controls.
 - **Ctrl+Tab / Ctrl+Shift+Tab** switch tabs. **Ctrl+Shift+D** splits right, **Ctrl+Shift+E** splits below, and **Ctrl+Shift+W** closes the active pane. Mobile shortcuts require a hardware keyboard.
 - Each SSH pane owns its connection and scrollback. Choose another server from **+ → server → split**; maximum 16 panes per tab. Drag dividers, arrange as a grid up to 4×4, or maximize one pane without disconnecting the others.
-- **Ctrl+F** (also **Cmd+F** on Mac) searches retained scrollback and highlights visible same-row matches. Seven keyword presets, custom regex rules and twelve colors decorate text without modifying output.
+- **Ctrl+F** (also **Cmd+F** on Mac) searches retained scrollback and highlights visible same-row matches. Fifteen presets, custom regex rules and twelve colors decorate text without modifying output.
 - Command suggestions use local history, Linux commands and saved snippets. The command bar asks for confirmation before submitting; selecting history only fills text.
 - Direct-terminal automatic history and suggestions require OSC 133 shell integration. Choose **… → Enable automatic command history**, select Bash 4.4+ or Zsh and confirm sending at a shell prompt. Only the current shell is modified, not remote startup files; unsupported shells use the command bar.
 - Local history retains up to 2,000 commands with disable/clear controls. Raw keystrokes and password responses are not recorded. Leading spaces, control characters, assignments and recognized sensitive keywords suppress recording. The filter cannot identify every secret: disable history for other confidential arguments. History is not synced or exported.
 - **Sessions → Choose server** opens the terminal workspace directly. Selecting a host reuses its most recently selected SSH pane, including disconnected panes; only **New tab** or **Split** allocates an independent connection. Canceling the picker leaves the workspace unchanged. Ordinary machine rows still open monitoring details.
-- Layouts are in-memory. Foreground navigation retains SSH, SFTP and transfers through workspace-owned controllers. Closing a tab with a running transfer asks for confirmation; mobile downloads remain available for explicit export even when completed off-screen.
+- Layouts are in-memory. Foreground navigation retains SSH, SFTP and transfers through workspace-owned controllers. Mac SFTP transfers continue after closing a file tab; RDP asks before interrupting its active transfers. Mobile downloads remain available for explicit export even when completed off-screen.
 - Mobile backgrounding interrupts connections. Reconnect explicitly starts a new shell with current configuration and trust checks; it does not restore remote processes or resume partially transferred files. See [navigation verification status](Docs/SESSION_NAVIGATION_QA.md) for the final test gate.
 
-See [workspace design and verification checklist](Docs/TERMINAL_WORKSPACE.md).
+The Mac workbench includes hierarchical host groups and tag management, native grid/Table views, multi-selection, privacy mode, and a resizable inspector for CPU, GPU, memory, disk, network, files, AI and snippets. Batch commands preview a fixed list of connected SSH panes before submission. Settings use nine native categories. See [connection behavior](Docs/WORKBENCH_CONNECTIONS.md), [file editing and directory sync](Docs/WORKBENCH_FILES.md), and [workspace design](Docs/TERMINAL_WORKSPACE.md).
+
+### Encrypted configuration sync (macOS)
+
+- Opt-in WebDAV sync previews baseline changes, deletions and conflicts before applying them. Strong ETag conditions protect concurrent writes; failed conditions require a fresh preview.
+- Versioned AES-GCM packages contain host, group, tag, snippet and connection configuration. Recovery keys live in Keychain with explicit export/import.
+- Passwords, private keys, trust, history, recordings, monitoring, local folder authorization and serial device bindings remain local. Imported connection commands remain disabled until explicitly enabled on this Mac.
+
+Mixed-protocol host configuration files can also be exported/imported locally with a separate identity namespace and conflict preview. Local files are plaintext configuration, contain addresses, and never delete hosts omitted from the file. See [sync behavior](Docs/WORKBENCH_SYNC.md) and [workbench verification](Docs/WORKBENCH_UI_QA.md).
 
 ### Linux Resource Monitoring
 
@@ -159,7 +167,7 @@ Export flow:
 | Jump hosts and SOCKS5 / HTTP CONNECT proxies | Yes | No |
 | Local, remote, and dynamic forwarding | Yes | No |
 | Local terminal | Yes | No |
-| CloudKit or cross-device data sync | No | No |
+| Encrypted WebDAV configuration sync | Yes; opt-in | No |
 
 ### Performance and Process Lifecycle
 
@@ -173,7 +181,7 @@ Export flow:
 ### Data and Diagnostics
 
 - SwiftData persistence for servers, identities, SSH key references, connection routes, forwarding rules, snippets, trusted hosts, terminal history, monitoring samples, aggregates, and Data Gaps.
-- Versioned V1/V2/V3/V4 schemas; V4 only adds a separate RDP entity. Existing databases are backed up before upgrade. Migration failures do not automatically clear or rebuild the database.
+- Versioned V1–V5 schemas. V5 adds organization, VNC, serial, SSH advanced settings, directory sync tasks and remote configuration mappings without changing existing connection UUIDs or credential references. Existing databases are backed up before upgrade. Migration failures do not automatically clear or rebuild the database.
 - OSLog categories for App, Data, SSH, Monitoring, Terminal, and SFTP.
 - Per-server event logs and previewable, copyable, redacted SSH diagnostics.
 - IP hiding applies to the UI, Markdown exports, and diagnostics. The frozen 1.0 privacy contract makes remote location lookup opt-in; its current UI/default enforcement is tracked as pre-release work.
@@ -315,4 +323,4 @@ project.yml                 XcodeGen project definition
 
 ## Distribution and Scope
 
-The macOS app launches OpenSSH/SFTP subprocesses, so App Sandbox remains disabled. The iOS/iPadOS app uses its own sandbox container and an independent SwiftData V4 database; it does not migrate or synchronize Mac data. V4 adds shared RDP metadata only; mobile has no RDP UI or engine. Mobile connections are foreground-scoped: monitoring reconnects after foregrounding, while terminals and interrupted transfers require explicit user restart and do not promise process recovery or transfer resume. CloudKit, TestFlight, StoreKit, widgets, Live Activities, paid tiers, guaranteed 24×7 alerts, and Mosh remain outside the current scope. See [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md).
+The macOS app launches OpenSSH/SFTP subprocesses, so App Sandbox remains disabled. The iOS/iPadOS app uses its own sandbox container and an independent SwiftData V5 database; it does not synchronize Mac data. Desktop connection types are shared metadata only on mobile and cannot enter its connection or monitoring pages. Mobile connections are foreground-scoped: monitoring reconnects after foregrounding, while terminals and interrupted transfers require explicit user restart and do not promise process recovery or transfer resume. CloudKit, TestFlight, StoreKit, widgets, Live Activities, paid tiers, guaranteed 24×7 alerts, and Mosh remain outside the current scope. See [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md).

@@ -10,6 +10,9 @@ struct TerminalToolsBar: View {
     let send: (String) -> Void
     #if os(macOS)
     var recordingController: TerminalSessionController? = nil
+    var onBatch: (() -> Void)? = nil
+    var onTunnels: (() -> Void)? = nil
+    var onReconnect: (() -> Void)? = nil
     #endif
     @State private var pendingCommand: String?
     @State private var historySearch = ""
@@ -64,7 +67,13 @@ struct TerminalToolsBar: View {
                         .frame(minHeight: 44)
                 }.padding(.horizontal, 8) }
             }
+            ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
+                #if os(macOS)
+                if let onBatch { Button(action: onBatch) { Label("批执行", systemImage: "play.rectangle.on.rectangle") } }
+                if let onTunnels { Button(action: onTunnels) { Label("隧道", systemImage: "point.3.connected.trianglepath.dotted") } }
+                if let onReconnect { Button(action: onReconnect) { Label("重连", systemImage: "arrow.clockwise") } }
+                #endif
                 Button { tools.composerVisible.toggle() } label: { Label("命令", systemImage: "text.cursor") }
                 Button { tools.showingHistory = true } label: { Label("历史", systemImage: "clock.arrow.circlepath") }
                 Button { tools.showingRules = true } label: { Label("高亮", systemImage: "highlighter") }
@@ -78,7 +87,8 @@ struct TerminalToolsBar: View {
                 #endif
                 Button { tools.searchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
                     .accessibilityLabel("终端搜索 Ctrl+F")
-            }.font(.caption).padding(.horizontal, 8).frame(minHeight: 44)
+            }.font(.caption).padding(.horizontal, 8).frame(minHeight: 36)
+            }
         }
         .buttonStyle(.borderless).background(.bar)
         .onChange(of: highlights.rules) { _, _ in tools.redraw() }
@@ -158,20 +168,32 @@ private struct TerminalHighlightEditor: View {
     @State private var pattern = ""
     @State private var color = 0
     @State private var error: String?
+    @State private var category = "presets"
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+            #if os(macOS)
+            Picker("规则类型", selection: $category) {
+                Text("预设规则").tag("presets")
+                Text("自定义").tag("custom")
+            }.pickerStyle(.segmented).padding()
+            #endif
             Form {
                 Section("规则（最多 32 条，按优先级匹配）") {
                     ForEach($settings.rules) { $rule in
+                        if ruleIsVisible(rule) {
                         VStack(alignment: .leading) {
                             Toggle(rule.name, isOn: $rule.enabled)
                             Text(rule.pattern).font(.caption.monospaced()).textSelection(.enabled)
                             Picker("颜色", selection: $rule.color) { colors }
-                            Button("删除规则", role: .destructive) { settings.rules.removeAll { $0.id == rule.id } }
+                            if rule.presetKey == nil {
+                                Button("删除规则", role: .destructive) { settings.rules.removeAll { $0.id == rule.id } }
+                            }
                         }.padding(.vertical, 4)
+                        }
                     }
                 }
-                Section("自定义正则表达式") {
+                if showsCustom { Section("自定义正则表达式") {
                     TextField("名称", text: $name)
                     TextField("正则（最多 256 字符）", text: $pattern)
                         #if os(iOS)
@@ -185,14 +207,40 @@ private struct TerminalHighlightEditor: View {
                         pattern = ""; name = ""; error = nil
                     }.disabled(settings.rules.count >= 32)
                 }
-                Section { Button("恢复 7 个预设") { settings.rules = TerminalHighlightRule.presets } }
+                }
+                if showsPresets { Section { Button("恢复预设，保留自定义") {
+                    let custom = settings.rules.filter { $0.presetKey == nil }
+                    settings.rules = Array(TerminalHighlightRule.presets.prefix(max(0, 32 - custom.count))) + custom
+                } } }
                 Section { Text("只装饰可见终端文字，不改变输出、复制内容或发送数据。复杂表达式达到时间预算时会跳过该行，避免阻塞终端。") }
             }
-            .formStyle(.grouped).navigationTitle("关键词高亮")
+            .formStyle(.grouped)
+            }.navigationTitle("关键词高亮")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
         #if os(macOS)
         .frame(width: 600, height: 640)
+        #endif
+    }
+    private var showsCustom: Bool {
+        #if os(macOS)
+        category == "custom"
+        #else
+        true
+        #endif
+    }
+    private var showsPresets: Bool {
+        #if os(macOS)
+        category == "presets"
+        #else
+        true
+        #endif
+    }
+    private func ruleIsVisible(_ rule: TerminalHighlightRule) -> Bool {
+        #if os(macOS)
+        (rule.presetKey != nil) == (category == "presets")
+        #else
+        true
         #endif
     }
     private var colors: some View {

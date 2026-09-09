@@ -135,6 +135,8 @@ actor PortForwardSupervisor {
         var snapshot: PortForwardSnapshot
         var generation: UUID
         var stopRequested: Bool
+        var transportRule: PortForwardRule
+        var httpProxy: HTTPToSOCKSProxy?
     }
 
     private let provider: any ConnectionProvider
@@ -174,10 +176,15 @@ actor PortForwardSupervisor {
             return existing.snapshot
         }
         if rule.direction != .remote,
-           !LocalPortAvailability.isAvailable(address: rule.bindAddress, port: rule.listenPort) {
+           !LocalPortAvailability.isAvailable(address: rule.bindAddress, port: rule.listenPort, reuseAddress: rule.direction == .http) {
             throw ConnectionRouteError.portUnavailable(rule.listenPort)
         }
-        let plan = try provider.launchPlan(for: config, purpose: .portForward(rule))
+        var transportRule = rule
+        if rule.direction == .http {
+            transportRule.direction = .dynamic; transportRule.bindAddress = "127.0.0.1"
+            transportRule.listenPort = try HTTPToSOCKSProxy.availableLoopbackPort()
+        }
+        let plan = try provider.launchPlan(for: config, purpose: .portForward(transportRule))
         let handle = try launcher.launch(plan)
         let generation = UUID()
         var active = ActiveTunnel(
@@ -197,11 +204,19 @@ actor PortForwardSupervisor {
                 lastError: nil
             ),
             generation: generation,
-            stopRequested: false
+            stopRequested: false,
+            transportRule: transportRule,
+            httpProxy: nil
         )
         tunnels[rule.id] = active
         do {
-            try await waitUntilReady(rule: rule, handle: handle)
+            try await waitUntilReady(rule: transportRule, handle: handle)
+            guard tunnels[rule.id]?.stopRequested == false else { throw CancellationError() }
+            if rule.direction == .http {
+                let proxy = HTTPToSOCKSProxy(socksPort: transportRule.listenPort)
+                try proxy.start(bindAddress: rule.bindAddress, port: rule.listenPort)
+                active.httpProxy = proxy
+            }
             active.snapshot.state = .ready
             tunnels[rule.id] = active
             monitorExit(ruleID: rule.id, generation: generation, handle: handle)
@@ -222,6 +237,7 @@ actor PortForwardSupervisor {
         guard var active = tunnels[ruleID] else { return nil }
         active.stopRequested = true
         active.snapshot.state = .stopping
+        active.httpProxy?.stop(); active.httpProxy = nil
         tunnels[ruleID] = active
         let deadline = Date().addingTimeInterval(1)
         active.handle.terminate()
@@ -243,13 +259,15 @@ actor PortForwardSupervisor {
         if active.rule.direction != .remote {
             while !LocalPortAvailability.isAvailable(
                 address: active.rule.bindAddress,
-                port: active.rule.listenPort
+                port: active.rule.listenPort,
+                reuseAddress: active.rule.direction == .http
             ), Date() < deadline {
                 try? await Task.sleep(for: .milliseconds(20))
             }
             guard LocalPortAvailability.isAvailable(
                 address: active.rule.bindAddress,
-                port: active.rule.listenPort
+                port: active.rule.listenPort,
+                reuseAddress: active.rule.direction == .http
             ) else {
                 active.snapshot.state = .failed
                 active.snapshot.lastError = ConnectionRouteError.portStillInUse(
@@ -340,6 +358,7 @@ actor PortForwardSupervisor {
             return
         }
         let error = sanitized(active.handle.boundedErrorOutput())
+        active.httpProxy?.stop(); active.httpProxy = nil
         active.snapshot.lastError = error.isEmpty ? "SSH 隧道意外退出。" : error
         if active.snapshot.reconnectAttempt >= maxReconnectAttempts {
             active.snapshot.state = .failed
@@ -364,13 +383,14 @@ actor PortForwardSupervisor {
             if latest.rule.direction != .remote,
                !LocalPortAvailability.isAvailable(
                    address: latest.rule.bindAddress,
-                   port: latest.rule.listenPort
+                   port: latest.rule.listenPort,
+                   reuseAddress: latest.rule.direction == .http
                ) {
                 throw ConnectionRouteError.portUnavailable(latest.rule.listenPort)
             }
             let plan = try provider.launchPlan(
                 for: latest.config,
-                purpose: .portForward(latest.rule)
+                purpose: .portForward(latest.transportRule)
             )
             let nextHandle = try launcher.launch(plan)
             launchedHandle = nextHandle
@@ -379,7 +399,13 @@ actor PortForwardSupervisor {
             latest.generation = nextGeneration
             latest.snapshot.processIdentifier = nextHandle.processIdentifier
             tunnels[ruleID] = latest
-            try await waitUntilReady(rule: latest.rule, handle: nextHandle)
+            try await waitUntilReady(rule: latest.transportRule, handle: nextHandle)
+            guard tunnels[ruleID]?.stopRequested == false else { throw CancellationError() }
+            if latest.rule.direction == .http {
+                let proxy = HTTPToSOCKSProxy(socksPort: latest.transportRule.listenPort)
+                try proxy.start(bindAddress: latest.rule.bindAddress, port: latest.rule.listenPort)
+                latest.httpProxy = proxy
+            }
             latest.snapshot.state = .ready
             tunnels[ruleID] = latest
             monitorExit(ruleID: ruleID, generation: nextGeneration, handle: nextHandle)
@@ -418,19 +444,20 @@ actor PortForwardSupervisor {
 }
 
 enum LocalPortAvailability {
-    static func isAvailable(address: String, port: Int) -> Bool {
+    static func isAvailable(address: String, port: Int, reuseAddress: Bool = false) -> Bool {
         guard (1...65_535).contains(port) else { return false }
         let normalized = address.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalized.contains(":") || normalized == "::" || normalized == "[::]" {
-            return canBindIPv6(address: normalized, port: port)
+            return canBindIPv6(address: normalized, port: port, reuseAddress: reuseAddress)
         }
-        return canBindIPv4(address: normalized, port: port)
+        return canBindIPv4(address: normalized, port: port, reuseAddress: reuseAddress)
     }
 
-    private static func canBindIPv4(address: String, port: Int) -> Bool {
+    private static func canBindIPv4(address: String, port: Int, reuseAddress: Bool) -> Bool {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
         defer { Darwin.close(descriptor) }
+        if reuseAddress { var yes: Int32 = 1; _ = setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size)) }
         var socketAddress = sockaddr_in()
         socketAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         socketAddress.sin_family = sa_family_t(AF_INET)
@@ -444,10 +471,11 @@ enum LocalPortAvailability {
         }
     }
 
-    private static func canBindIPv6(address: String, port: Int) -> Bool {
+    private static func canBindIPv6(address: String, port: Int, reuseAddress: Bool) -> Bool {
         let descriptor = socket(AF_INET6, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
         defer { Darwin.close(descriptor) }
+        if reuseAddress { var yes: Int32 = 1; _ = setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size)) }
         var socketAddress = sockaddr_in6()
         socketAddress.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
         socketAddress.sin6_family = sa_family_t(AF_INET6)

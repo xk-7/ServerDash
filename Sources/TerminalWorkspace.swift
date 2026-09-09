@@ -14,9 +14,16 @@ struct SessionOpenRequest: Equatable {
 
 enum TerminalSplitAxis: String, Codable, Sendable { case right, below }
 enum WorkspaceTabKind: String, Codable, CaseIterable, Sendable {
-    case terminal, sftp, monitor, rdp
-    var title: String { switch self { case .terminal: "SSH"; case .sftp: "SFTP"; case .monitor: "监控"; case .rdp: "RDP" } }
-    var icon: String { switch self { case .terminal: "terminal"; case .sftp: "folder"; case .monitor: "chart.xyaxis.line"; case .rdp: "desktopcomputer" } }
+    case terminal, sftp, monitor, rdp, local, serial
+    var title: String { switch self { case .terminal: "SSH"; case .sftp: "SFTP"; case .monitor: "监控"; case .rdp: "RDP"; case .local: "本地"; case .serial: "串口" } }
+    var icon: String { switch self { case .terminal, .local: "terminal"; case .sftp: "folder"; case .monitor: "chart.xyaxis.line"; case .rdp: "desktopcomputer"; case .serial: "cable.connector" } }
+    static var availableKinds: [Self] {
+#if os(macOS)
+        [.terminal, .sftp, .monitor, .rdp, .local, .serial]
+#else
+        [.terminal, .sftp, .monitor]
+#endif
+    }
 }
 
 /// A tree, not a grid: each divider owns a stable ratio and each leaf owns one session.
@@ -126,6 +133,7 @@ final class TerminalWorkspace: ObservableObject {
     }
 
     func add(sessionID: UUID = UUID(), serverID: UUID, title: String, kind: WorkspaceTabKind = .terminal) {
+        guard WorkspaceTabKind.availableKinds.contains(kind) else { return }
         guard !tabs.contains(where: { $0.layout.panes.contains(sessionID) }) else { select(pane: sessionID); return }
         var label = title, number = 2
         while tabs.contains(where: { $0.kind == kind && $0.title == label }) { label = "\(title) · \(number)"; number += 1 }

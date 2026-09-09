@@ -440,6 +440,7 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
         for config: ServerConnectionConfig,
         purpose: ConnectionPurpose
     ) throws -> OpenSSHLaunchPlan {
+        try config.advancedSettings?.validate()
         let finalEndpoint = ConnectionEndpoint(
             host: config.host,
             port: config.port,
@@ -512,7 +513,10 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
             route: route,
             finalEndpoint: finalEndpoint,
             finalCredential: finalCredential,
-            resolvedHops: resolvedHops
+            resolvedHops: resolvedHops,
+            finalTimeout: config.effectiveConnectTimeout,
+            keepAliveInterval: config.keepAliveInterval,
+            keepAliveCountMax: config.keepAliveCountMax
         )
 
         var executable = "/usr/bin/ssh"
@@ -640,7 +644,10 @@ private enum OpenSSHRouteMaterializer {
         route: ConnectionRoute,
         finalEndpoint: ConnectionEndpoint,
         finalCredential: ResolvedCredential,
-        resolvedHops: [(ConnectionHop, ResolvedCredential)]
+        resolvedHops: [(ConnectionHop, ResolvedCredential)],
+        finalTimeout: TimeInterval,
+        keepAliveInterval: Int,
+        keepAliveCountMax: Int
     ) throws -> MaterializedOpenSSHRoute {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ServerDash/routes/config", isDirectory: true)
@@ -661,8 +668,8 @@ private enum OpenSSHRouteMaterializer {
             "    UserKnownHostsFile \(quote(TrustedHostStore.knownHostsURL.path))",
             "    GlobalKnownHostsFile /dev/null",
             "    UpdateHostKeys no",
-            "    ServerAliveInterval 15",
-            "    ServerAliveCountMax 3",
+            "    ServerAliveInterval \(keepAliveInterval)",
+            "    ServerAliveCountMax \(keepAliveCountMax)",
             "    ForwardAgent no",
             "    ExitOnForwardFailure yes"
         ]
@@ -683,7 +690,7 @@ private enum OpenSSHRouteMaterializer {
         lines += hostBlock(
             alias: finalAlias,
             endpoint: finalEndpoint,
-            timeout: 8,
+            timeout: finalTimeout,
             credential: finalCredential,
             interactiveAccounts: &interactiveAccounts
         )
@@ -1086,12 +1093,14 @@ enum PortForwardDirection: String, CaseIterable, Codable, Sendable {
     case local
     case remote
     case dynamic
+    case http
 
     var title: String {
         switch self {
         case .local: "Local"
         case .remote: "Remote"
         case .dynamic: "Dynamic SOCKS"
+        case .http: "HTTP 代理"
         }
     }
 }
@@ -1138,7 +1147,7 @@ struct PortForwardRule: Identifiable, Hashable, Codable, Sendable {
         guard (1...65_535).contains(listenPort) else {
             throw ConnectionRouteError.portUnavailable(listenPort)
         }
-        if direction != .dynamic {
+        if direction != .dynamic && direction != .http {
             guard !targetHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   (1...65_535).contains(targetPort) else {
                 throw ConnectionRouteError.invalidEndpoint("转发目标")
@@ -1163,14 +1172,14 @@ struct PortForwardRule: Identifiable, Hashable, Codable, Sendable {
             spec = "\(bindAddress):\(listenPort):\(targetHost):\(targetPort)"
         case .remote:
             spec = "\(bindAddress):\(listenPort):\(targetHost):\(targetPort)"
-        case .dynamic:
+        case .dynamic, .http:
             spec = "\(bindAddress):\(listenPort)"
         }
         let flag: String
         switch direction {
         case .local: flag = "-L"
         case .remote: flag = "-R"
-        case .dynamic: flag = "-D"
+        case .dynamic, .http: flag = "-D"
         }
         return [
             "-N",

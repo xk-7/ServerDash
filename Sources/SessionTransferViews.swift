@@ -17,7 +17,9 @@ struct SessionImportWizard: View {
     @Query(sort: \IdentityRecord.name) private var identities: [IdentityRecord]
 
     let existingServers: [ServerRecord]
+    var initialSource: SessionTransferSource = .automatic
     var onComplete: ((SessionImportResult) -> Void)?
+    @State private var initializedSource = false
 
     @State private var step: Step = .source
     @State private var source: SessionTransferSource = .automatic
@@ -46,6 +48,12 @@ struct SessionImportWizard: View {
             .toolbar { toolbarContent }
         }
         .sessionWizardFrame()
+        .onAppear {
+            guard !initializedSource else { return }
+            initializedSource = true
+            source = initialSource
+            if initialSource != .automatic { step = .input }
+        }
         .interactiveDismissDisabled(isWorking)
         .fileImporter(
             isPresented: $showingFileImporter,

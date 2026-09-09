@@ -160,6 +160,7 @@ struct RDPEditorView: View {
             saved.username = candidate.username; saved.domain = candidate.domain; saved.groupName = group
             saved.tagsText = tags; saved.notes = notes; saved.settingsData = candidate.settingsData
             saved.credentialReference = candidate.credentialReference; saved.updatedAt = .now
+            try MachineOrganization.include(names: [saved.groupName], tags: saved.tags, context: writer)
             try writer.save()
             // From this point the new key belongs to the committed record, even if UI refresh fails.
             newCredential = nil

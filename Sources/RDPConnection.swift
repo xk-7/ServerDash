@@ -1,6 +1,30 @@
 import AppKit
 import Foundation
 
+/// Local activity is separate from connection metadata, portable packages and WebDAV.
+@MainActor final class RDPConnectionActivityStore: ObservableObject {
+    static let shared = RDPConnectionActivityStore(defaults: .standard)
+    @Published private(set) var revision = 0
+    private let defaults: UserDefaults
+    private let now: () -> Date
+    private let key = "rdp.localActivity.lastConnectedAt"
+    init(defaults: UserDefaults, now: @escaping () -> Date = Date.init) { self.defaults = defaults; self.now = now }
+    func lastConnectedAt(for machineID: UUID) -> Date? {
+        guard let value = defaults.dictionary(forKey: key)?[machineID.uuidString] as? Double, value.isFinite else { return nil }
+        return Date(timeIntervalSince1970: value)
+    }
+    func recordConnected(_ machineID: UUID) {
+        var values = defaults.dictionary(forKey: key) ?? [:]
+        values[machineID.uuidString] = now().timeIntervalSince1970
+        defaults.set(values, forKey: key); revision &+= 1
+    }
+    func remove(_ machineID: UUID) {
+        var values = defaults.dictionary(forKey: key) ?? [:]
+        guard values.removeValue(forKey: machineID.uuidString) != nil else { return }
+        defaults.set(values, forKey: key); revision &+= 1
+    }
+}
+
 struct RDPFrame: Sendable {
     let width: Int
     let height: Int
@@ -171,6 +195,7 @@ final class RDPSessionController: ObservableObject, Identifiable {
     private var engine: (any RDPConnectionEngine)?
     private let factory: () -> any RDPConnectionEngine
     private let retrySleep: @Sendable (Int) async throws -> Void
+    private let activityStore: RDPConnectionActivityStore
     private var configurationProvider: () throws -> RDPConnectionConfiguration
     private var generation = UUID()
     private var retryTask: Task<Void, Never>?
@@ -190,12 +215,14 @@ final class RDPSessionController: ObservableObject, Identifiable {
 
     init(id: UUID = UUID(), configuration: RDPConnectionConfiguration, password: String? = nil,
          configurationProvider: @escaping () throws -> RDPConnectionConfiguration,
+         activityStore: RDPConnectionActivityStore? = nil,
          factory: @escaping () -> any RDPConnectionEngine = { NativeRDPConnectionEngine() },
          retrySleep: @escaping @Sendable (Int) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) {
         self.id = id; self.machineID = configuration.id; self.configuration = configuration
         self.password = password; self.passwordDestination = Self.credentialScope(configuration)
         self.configurationProvider = configurationProvider; self.factory = factory
         self.retrySleep = retrySleep
+        self.activityStore = activityStore ?? .shared
         self.clipboard = RDPClipboardSession(settings: configuration.settings)
     }
     private static func credentialScope(_ config: RDPConnectionConfiguration) -> String {
@@ -263,6 +290,7 @@ final class RDPSessionController: ObservableObject, Identifiable {
         switch event {
         case .connected:
             state = .connected; established = true; attempts = 0; message = "NLA/CredSSP · TLS 1.2+"
+            activityStore.recordConnected(machineID)
             clipboard.setActive(inputFocus != nil && NSApp.isActive)
             trustPrompt = nil
         case .displayCapabilities(let maximum):

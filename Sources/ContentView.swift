@@ -101,6 +101,8 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var showingNewServer = false
     @State private var showingNewRDP = false
+    @State private var showingNewVNC = false
+    @State private var showingNewSerial = false
     @State private var showingMachineType = false
     @State private var showingSessionImport = false
     @State private var showingSessionExport = false
@@ -209,7 +211,11 @@ struct ContentView: View {
         .confirmationDialog("添加机器", isPresented: $showingMachineType) {
             Button("SSH 服务器") { showingNewServer = true }
             Button("RDP 远程桌面") { showingNewRDP = true }
+            Button("VNC 屏幕共享") { showingNewVNC = true }
+            Button("串口设备") { showingNewSerial = true }
         }
+        .sheet(isPresented: $showingNewVNC) { VNCEditorView() }
+        .sheet(isPresented: $showingNewSerial) { SerialEditorView() }
         .sheet(isPresented: $showingNewRDP) {
             RDPEditorView(record: nil) { record, connect, password in
                 route = .rdp(record.id)
@@ -440,6 +446,9 @@ struct ContentView: View {
             }
             for connectionRoute in connectionRoutes where connectionRoute.serverID == server.id {
                 modelContext.delete(connectionRoute)
+            }
+            for settings in try modelContext.fetch(FetchDescriptor<SSHAdvancedSettingsRecord>()) where settings.serverID == server.id {
+                modelContext.delete(settings)
             }
             try KeychainService.deletePassword(for: server.id)
             try? KeychainService.deleteSecret(

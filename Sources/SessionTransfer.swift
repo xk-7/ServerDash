@@ -640,6 +640,7 @@ enum SessionImportCommitter {
                     passwordIDs.append(id)
                 }
             }
+            try MachineOrganization.include(names: inserted.map(\.groupName), tags: inserted.flatMap(\.tags), context: context)
             try context.save()
         } catch {
             context.rollback()

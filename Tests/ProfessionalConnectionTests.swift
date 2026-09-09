@@ -384,7 +384,7 @@ final class ConnectionRouteProviderTests: XCTestCase {
 
         XCTAssertEqual(try context.fetch(FetchDescriptor<ConnectionRouteRecord>()).count, 1)
         XCTAssertEqual(try context.fetch(FetchDescriptor<PortForwardRuleRecord>()).count, 1)
-        XCTAssertEqual(PersistenceController.currentSchemaVersion, 4)
+        XCTAssertEqual(PersistenceController.currentSchemaVersion, 5)
     }
 
     func testV2FixtureMigratesToV3WithoutLosingServer() throws {

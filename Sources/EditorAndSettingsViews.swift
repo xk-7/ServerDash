@@ -32,6 +32,8 @@ struct ServerEditorView: View {
     @State private var passphrase = ""
     @State private var statusNote: String?
     @State private var sshTestFeedback: SSHTestFeedback?
+    @State private var advanced = SSHAdvancedSettingsDraft.default
+    @State private var showsRoute = false
 
     init(server: ServerRecord?, onSave: ((ServerRecord) -> Void)? = nil) {
         self.server = server
@@ -129,6 +131,15 @@ struct ServerEditorView: View {
                     Toggle("加入仪表盘自动监控", isOn: $enableDashboardMonitor)
                 }
 
+                SSHAdvancedEditorSection(draft: $advanced)
+                Section("连接路线") {
+                    if server != nil {
+                        Button("连接路线、跳板与代理…") { showsRoute = true }
+                    } else {
+                        Text("保存主机后，可配置跳板路线与 SOCKS5 / HTTP 代理。").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
                 if let errorMessage {
                     Section {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -169,9 +180,11 @@ struct ServerEditorView: View {
         }
         .frame(width: 620, height: 680)
         .background(Color.appGround)
+        .sheet(isPresented: $showsRoute) { if let server { SSHConnectionRouteEditor(server: server) } }
         .interactiveDismissDisabled(isValidating)
         .task {
             applySelectedIdentity()
+            if let server { advanced = SSHAdvancedSettingsRecord.load(serverID: server.id, in: modelContext) }
         }
         .alert(
             appState.pendingTrust?.replacing == true ? "主机密钥已变化" : "确认 SSH 主机指纹",
@@ -252,11 +265,14 @@ struct ServerEditorView: View {
                 authentication: identity.authentication,
                 identityID: identity.id
             )
-            return ConnectionConfigResolver.resolve(
+            var config = ConnectionConfigResolver.resolve(
                 server: draft,
                 identities: identities,
                 keys: sshKeys
             )
+            config.advancedSettings = advanced
+            config.connectTimeout = TimeInterval(advanced.connectTimeout)
+            return config
         }
         let hasStoredPassphrase = (try? KeychainService.secret(
             account: KeychainService.passphraseAccount(for: draftID)
@@ -271,7 +287,9 @@ struct ServerEditorView: View {
             authentication: authentication,
             privateKeyPath: privateKeyPath.trimmingCharacters(in: .whitespacesAndNewlines),
             sshKeyID: draftID,
-            hasPassphrase: !passphrase.isEmpty || hasStoredPassphrase
+            hasPassphrase: !passphrase.isEmpty || hasStoredPassphrase,
+            connectTimeout: TimeInterval(advanced.connectTimeout),
+            advancedSettings: advanced
         )
     }
 
@@ -366,6 +384,7 @@ struct ServerEditorView: View {
     }
 
     private func commit(snapshot: ServerSnapshot?, status: ServerVerificationStatus) throws {
+        try advanced.validate()
         let record: ServerRecord
         let isNewRecord = server == nil
         if let server {
@@ -404,12 +423,14 @@ struct ServerEditorView: View {
         }
 
         do {
+            try SSHAdvancedSettingsRecord.upsert(serverID: record.id, settings: advanced, in: modelContext)
             if !authentication.usesPassword {
                 try KeychainService.deletePassword(for: record.id)
             }
             if selectedIdentityID != nil, !authentication.usesPassword {
                 try? KeychainService.deletePassword(for: record.id)
             }
+            try MachineOrganization.include(names: [record.groupName], tags: record.tags, context: modelContext)
             try modelContext.save()
             appState.cacheConfig(draftConfig)
             if let snapshot {
@@ -459,108 +480,5 @@ private enum ValidationError: LocalizedError {
 
     var errorDescription: String? {
         "使用密码认证时必须提供密码。"
-    }
-}
-
-struct SettingsView: View {
-    @EnvironmentObject private var appState: AppState
-    @AppStorage("confirmHostFingerprint") private var confirmHostFingerprint = true
-    @AppStorage("appAppearance") private var appAppearanceRawValue = AppAppearance.system.rawValue
-    @AppStorage("networkDisplayInBits") private var networkDisplayInBits = false
-    @AppStorage("hideIPInformation") private var hideIPInformation = false
-    @AppStorage("disableLocationLookup") private var disableLocationLookup = false
-    @AppStorage("sshConnectTimeout") private var sshConnectTimeout = 8.0
-
-    var body: some View {
-        TabView {
-            Form {
-            Section {
-                AppleSectionHeader(title: "通用设置", subtitle: "调整外观、监控频率与连接偏好。")
-                    .padding(.vertical, AppleDesign.Spacing.xs)
-            }
-            Section("外观") {
-                Picker("显示模式", selection: $appAppearanceRawValue) {
-                    ForEach(AppAppearance.allCases) { appearance in
-                        Label(appearance.title, systemImage: appearance.symbol)
-                            .tag(appearance.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(appAppearance == .system ? "外观会随 macOS 的浅色或深色设置自动变化。" : "此设置仅影响 ServerDash。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("监控") {
-                Picker(
-                    "自动刷新",
-                    selection: Binding(
-                        get: { appState.refreshInterval },
-                        set: { appState.updateRefreshInterval($0) }
-                    )
-                ) {
-                    Text("关闭").tag(0.0)
-                    Text("每 1 秒").tag(1.0)
-                    Text("每 5 秒").tag(5.0)
-                    Text("每 10 秒").tag(10.0)
-                    Text("每 30 秒").tag(30.0)
-                    Text("每分钟").tag(60.0)
-                }
-                if appState.refreshInterval > 0 && appState.refreshInterval < 5 {
-                    Text("低于 5 秒会增加服务器和本机负载。")
-                        .font(.caption)
-                        .foregroundStyle(Color.appWarning)
-                }
-            }
-
-            Section("监控面板") {
-                Toggle("网络速度使用 bit/s", isOn: $networkDisplayInBits)
-                Toggle("隐藏 IP 与位置信息", isOn: $hideIPInformation)
-                Toggle("停止位置采集", isOn: $disableLocationLookup)
-                    .onChange(of: disableLocationLookup) {
-                        if disableLocationLookup {
-                            Task { await ServerLocationService.shared.clearCache() }
-                        }
-                    }
-                Text("停止采集后，服务器不会再请求 ipinfo.io，并清理本机缓存。隐藏 IP 会影响界面、Markdown 和诊断。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("安全") {
-                Toggle("首次连接时确认主机指纹", isOn: $confirmHostFingerprint)
-                HStack {
-                    Text("SSH 超时")
-                    Slider(value: $sshConnectTimeout, in: 5...300, step: 5)
-                    Text("\(DisplayFormat.integer(Int(sshConnectTimeout)))s")
-                        .monospacedDigit()
-                        .frame(width: 44)
-                }
-                Text("首次连接时核验服务器身份。主机密钥变化时会阻止连接，需重新确认。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            }
-            .formStyle(.grouped)
-            .tabItem {
-                Label("通用", systemImage: "gearshape")
-            }
-
-            TerminalAppearanceSettingsView()
-                .tabItem {
-                    Label("终端主题", systemImage: "terminal")
-                }
-            RecordingSettingsView()
-                .tabItem { Label("录制", systemImage: "record.circle") }
-            AISettingsView()
-                .tabItem { Label("AI 助手", systemImage: "sparkles") }
-        }
-        .preferredColorScheme(appAppearance.colorScheme)
-        .frame(width: 920, height: 720)
-    }
-
-    private var appAppearance: AppAppearance {
-        AppAppearance(rawValue: appAppearanceRawValue) ?? .system
     }
 }

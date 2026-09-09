@@ -785,7 +785,7 @@ enum SSHConnectionTester {
                 // TCP connection timeout and SSH authentication timeout are different.
                 // PAM/LDAP-backed password authentication can legitimately take longer
                 // after the socket is connected, so do not report it as a network timeout.
-                totalTimeout: max(60, config.connectTimeout + 30),
+                totalTimeout: config.advancedSettings.map { config.effectiveConnectTimeout + TimeInterval($0.authenticationTimeout) } ?? max(60, config.connectTimeout + 30),
                 maxOutputBytes: 4_096,
                 serverID: config.id,
                 module: .ssh,

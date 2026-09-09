@@ -93,6 +93,9 @@ targets:
     sources:
       - path: Mobile/Sources
       - path: Sources/Models.swift
+      - path: Sources/WorkbenchConnectionModels.swift
+      - path: Sources/WorkbenchOrganization.swift
+      - path: Sources/WorkbenchFileModels.swift
       - path: Sources/RDPModels.swift
       - path: Sources/Persistence.swift
       - path: Sources/ProfessionalConnections.swift

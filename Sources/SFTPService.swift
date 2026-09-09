@@ -60,6 +60,7 @@ enum SFTPError: LocalizedError {
     case invalidResponse
     case invalidName
     case cancelled
+    case invalidPath
 
     var errorDescription: String? {
         switch self {
@@ -71,6 +72,8 @@ enum SFTPError: LocalizedError {
             "名称不能为空，也不能包含“/”。"
         case .cancelled:
             "传输已取消。"
+        case .invalidPath:
+            "路径不能包含换行或控制字符。"
         }
     }
 }
@@ -221,6 +224,7 @@ enum SFTPService {
     ) async throws -> SFTPDirectoryListing {
         let interval = PerformanceTrace.begin(.sftpList)
         defer { PerformanceTrace.end(interval) }
+        try validatePath(path)
         let output = try await run(
             config: config,
             commands: [
@@ -240,6 +244,8 @@ enum SFTPService {
         existingNames: Set<String>,
         onProgress: (@Sendable (SFTPProgress) -> Void)? = nil
     ) async throws {
+        try validatePath(remoteDirectory)
+        for url in localURLs { try validatePath(url.path) }
         var commands: [String] = []
         var totalBytes: Int64 = 0
         var destinations: [String] = []
@@ -260,7 +266,7 @@ enum SFTPService {
             totalBytes += LocalTransferMeasure.size(of: url)
             var isDirectory: ObjCBool = false
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-            let flag = isDirectory.boolValue ? "put -pr" : "put -p"
+            let flag = isDirectory.boolValue ? "put -pR" : "put -p"
             commands.append("\(flag) \(quote(url.path)) \(quote(destination))")
         }
         guard !commands.isEmpty else { return }
@@ -287,6 +293,8 @@ enum SFTPService {
         policy: SFTPConflictPolicy,
         onProgress: (@Sendable (SFTPProgress) -> Void)? = nil
     ) async throws {
+        try validatePath(item.path)
+        try validatePath(localURL.path)
         if FileManager.default.fileExists(atPath: localURL.path) {
             switch policy {
             case .skip:
@@ -305,7 +313,7 @@ enum SFTPService {
                 break
             }
         }
-        let flag = item.isDirectory ? "get -pr" : "get -p"
+        let flag = item.isDirectory ? "get -pR" : "get -p"
         let total = item.isDirectory ? max(item.size, 1) : item.size
         try await runTransfer(
             config: config,
@@ -325,6 +333,7 @@ enum SFTPService {
         config: ServerConnectionConfig
     ) async throws {
         try validateName(name)
+        try validatePath(remoteDirectory)
         _ = try await run(
             config: config,
             commands: ["mkdir \(quote(RemotePath.child(name, of: remoteDirectory)))"]
@@ -337,6 +346,7 @@ enum SFTPService {
         config: ServerConnectionConfig
     ) async throws {
         try validateName(name)
+        try validatePath(remoteDirectory)
         let temporary = FileManager.default.temporaryDirectory
             .appendingPathComponent("ServerDash-empty-\(UUID().uuidString)")
         FileManager.default.createFile(atPath: temporary.path, contents: Data())
@@ -355,6 +365,7 @@ enum SFTPService {
         config: ServerConnectionConfig
     ) async throws {
         try validateName(newName)
+        try validatePath(item.path)
         let destination = RemotePath.child(newName, of: RemotePath.parent(of: item.path))
         _ = try await run(
             config: config,
@@ -367,6 +378,8 @@ enum SFTPService {
         to remoteDirectory: String,
         config: ServerConnectionConfig
     ) async throws {
+        try validatePath(item.path)
+        try validatePath(remoteDirectory)
         let destination = RemotePath.child(item.name, of: remoteDirectory)
         _ = try await run(
             config: config,
@@ -379,28 +392,49 @@ enum SFTPService {
         config: ServerConnectionConfig,
         recursive: Bool = false
     ) async throws {
-        let command: String
-        if item.isDirectory {
-            command = recursive ? "rm -r \(quote(item.path))" : "rmdir \(quote(item.path))"
-        } else {
-            command = "rm \(quote(item.path))"
+        try validatePath(item.path)
+        if item.isDirectory, recursive {
+            let listing = try await list(config: config, path: item.path)
+            for child in listing.items {
+                try Task.checkCancellation()
+                try await delete(item: child, config: config, recursive: child.isDirectory)
+            }
         }
-        _ = try await run(config: config, commands: [command])
+        _ = try await run(config: config, commands: ["\(item.isDirectory ? "rmdir" : "rm") \(quote(item.path))"])
+    }
+
+    /// Unlike upload(localURLs:to:), this API never derives the destination name from the local file.
+    static func uploadFile(localURL: URL, toExactRemotePath path: String, config: ServerConnectionConfig,
+                           preserveLocalAttributes: Bool = false,
+                           onProgress: (@Sendable (SFTPProgress) -> Void)? = nil) async throws {
+        try validatePath(path)
+        try validatePath(localURL.path)
+        try await runTransfer(config: config,
+            commands: ["put \(preserveLocalAttributes ? "-p " : "")\(quote(localURL.path)) \(quote(path))"],
+            totalBytes: LocalTransferMeasure.size(of: localURL),
+            measure: { (try? await remoteSize(config: config, path: path)) ?? 0 }, onProgress: onProgress)
     }
 
     static func quote(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        // Quoted OpenSSH SFTP tokens preserve literal glob characters; escape only the token delimiters.
+        var result = "\""
+        for character in value {
+            if "\\\"".contains(character) { result.append("\\") }
+            result.append(character)
+        }
+        return result + "\""
+    }
+
+    static func validatePath(_ path: String) throws {
+        guard !path.isEmpty, !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw SFTPError.invalidPath
+        }
     }
 
     private static func validateName(_ name: String) throws {
+        try validatePath(name)
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              !trimmed.contains("/"),
-              trimmed != ".",
-              trimmed != ".." else {
+        guard !trimmed.isEmpty, !trimmed.contains("/"), trimmed != ".", trimmed != ".." else {
             throw SFTPError.invalidName
         }
     }

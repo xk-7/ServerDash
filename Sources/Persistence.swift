@@ -49,7 +49,23 @@ enum PersistenceSchemaV3: VersionedSchema {
 
 enum PersistenceSchemaV4: VersionedSchema {
     static let versionIdentifier = Schema.Version(4, 0, 0)
-    static let models: [any PersistentModel.Type] = PersistenceSchemaV3.models + [RDPConnectionRecord.self]
+    // V1–V4 entities are unchanged. New workbench data lives in additive V5
+    // entities rather than mutating the model definitions of an existing store.
+    static let models: [any PersistentModel.Type] = [
+        ServerRecord.self, IdentityRecord.self, SSHKeyRecord.self,
+        CommandSnippetRecord.self, TrustedHostKey.self, TerminalSessionHistory.self,
+        MonitoringSampleRecord.self, MonitoringAggregateRecord.self, MonitoringGapRecord.self,
+        ConnectionRouteRecord.self, PortForwardRuleRecord.self, RDPConnectionRecord.self
+    ]
+}
+
+enum PersistenceSchemaV5: VersionedSchema {
+    static let versionIdentifier = Schema.Version(5, 0, 0)
+    static let models: [any PersistentModel.Type] = PersistenceSchemaV4.models + [
+        MachineGroupRecord.self, MachineTagRecord.self, ConfigurationSyncLink.self,
+        VNCConnectionRecord.self, SerialConnectionRecord.self, SSHAdvancedSettingsRecord.self,
+        DirectorySyncTaskRecord.self
+    ]
 }
 
 enum ServerDashMigrationPlan: SchemaMigrationPlan {
@@ -57,21 +73,23 @@ enum ServerDashMigrationPlan: SchemaMigrationPlan {
         PersistenceSchemaV1.self,
         PersistenceSchemaV2.self,
         PersistenceSchemaV3.self,
-        PersistenceSchemaV4.self
+        PersistenceSchemaV4.self,
+        PersistenceSchemaV5.self
     ]
     static let stages: [MigrationStage] = [
         .lightweight(fromVersion: PersistenceSchemaV1.self, toVersion: PersistenceSchemaV2.self),
         .lightweight(fromVersion: PersistenceSchemaV2.self, toVersion: PersistenceSchemaV3.self),
-        .lightweight(fromVersion: PersistenceSchemaV3.self, toVersion: PersistenceSchemaV4.self)
+        .lightweight(fromVersion: PersistenceSchemaV3.self, toVersion: PersistenceSchemaV4.self),
+        .lightweight(fromVersion: PersistenceSchemaV4.self, toVersion: PersistenceSchemaV5.self)
     ]
 }
 
 enum PersistenceController {
     static let schemaVersionKey = "serverDashSchemaVersion"
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     static var schema: Schema {
-        Schema(versionedSchema: PersistenceSchemaV4.self)
+        Schema(versionedSchema: PersistenceSchemaV5.self)
     }
 
     static func makeContainer(migrateLegacyStore: Bool = true) throws -> ModelContainer {
@@ -86,7 +104,7 @@ enum PersistenceController {
         if migrateLegacyStore {
             try copyLegacyStoreIfNeeded(applicationSupportRoot: root, destination: storeURL)
         }
-        if FileManager.default.fileExists(atPath: storeURL.path), needsV4Backup(storeURL: storeURL) {
+        if FileManager.default.fileExists(atPath: storeURL.path), needsV5Backup(storeURL: storeURL) {
             _ = try backupExistingStore()
         }
         let configuration = ModelConfiguration(
@@ -120,6 +138,13 @@ enum PersistenceController {
             at: storeURL, options: [NSReadOnlyPersistentStoreOption: true]),
               let hashes = metadata[NSStoreModelVersionHashesKey] as? [String: Data] else { return true }
         return !hashes.keys.contains("RDPConnectionRecord")
+    }
+
+    static func needsV5Backup(storeURL: URL) -> Bool {
+        guard let metadata = try? NSPersistentStoreCoordinator.metadataForPersistentStore(ofType: NSSQLiteStoreType,
+            at: storeURL, options: [NSReadOnlyPersistentStoreOption: true]),
+              let hashes = metadata[NSStoreModelVersionHashesKey] as? [String: Data] else { return true }
+        return !hashes.keys.contains("ConfigurationSyncLink")
     }
 
     static func backupExistingStore() throws -> URL? {
@@ -237,7 +262,9 @@ final class PersistenceSession: ObservableObject {
             let testHost = NSClassFromString("XCTestCase") != nil ||
                 ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
                 ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
-            container = try testHost ? PersistenceController.makeInMemoryContainer() : PersistenceController.makeContainer()
+            let opened = try testHost ? PersistenceController.makeInMemoryContainer() : PersistenceController.makeContainer()
+            if !testHost { try MachineOrganization.prepareCatalog(context: ModelContext(opened)) }
+            container = opened
             openError = nil
         } catch {
             container = nil
@@ -250,7 +277,9 @@ final class PersistenceSession: ObservableObject {
         do {
             lastBackupURL = try PersistenceController.backupExistingStore()
             try PersistenceController.destroyStore()
-            container = try PersistenceController.makeContainer(migrateLegacyStore: false)
+            let opened = try PersistenceController.makeContainer(migrateLegacyStore: false)
+            try MachineOrganization.prepareCatalog(context: ModelContext(opened))
+            container = opened
             openError = nil
         } catch {
             openError = error

@@ -53,11 +53,11 @@ private struct MobileWorkspaceContent: View {
                     }
                 }
                 // Only the selected page is mounted; controllers own foreground work.
-                ForEach(workspace.tabs.filter { $0.kind != .terminal && $0.id == workspace.selectedTabID }) { tab in
+                ForEach(workspace.tabs.filter { ($0.kind == .sftp || $0.kind == .monitor) && $0.id == workspace.selectedTabID }) { tab in
                     if let server = servers.first(where: { $0.id == tab.serverID }) {
                         Group {
                             if tab.kind == .sftp { if let controller = runtime.fileControllers[tab.activePane] { MobileSFTPView(controller: controller, reconnect: { controller.reconnect(config: config(server)) }) } }
-                            else { MobileServerDetailView(server: server) }
+                            else if tab.kind == .monitor { MobileServerDetailView(server: server) }
                         }
                         .opacity(workspace.selectedTabID == tab.id ? 1 : 0)
                         .allowsHitTesting(workspace.selectedTabID == tab.id)

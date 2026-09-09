@@ -13,14 +13,23 @@ struct TerminalHighlightRule: Codable, Identifiable, Equatable {
     var pattern: String
     var color: Int
     var enabled = true
+    var presetKey: String? = nil
     static let presets: [Self] = [
-        .init(name: "URL 链接", pattern: #"https?://[^\s<>\"']+"#, color: 0),
-        .init(name: "IPv4", pattern: #"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"#, color: 1),
-        .init(name: "IPv6", pattern: #"(?<![\w:])(?=[\da-fA-F:]*\d|[a-fA-F]+:)(?![\da-fA-F:]*:::)(?:[\da-fA-F]{0,4}:){2,7}[\da-fA-F]{0,4}(?![\w:])"#, color: 2),
-        .init(name: "邮箱", pattern: #"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"#, color: 3),
-        .init(name: "日期时间", pattern: #"\b\d{4}[-/]\d{2}[-/]\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b"#, color: 4),
-        .init(name: "文件路径", pattern: #"(?:[A-Za-z]:\\|(?<![:/\w])/(?!/))[^\s<>\"']+"#, color: 5),
-        .init(name: "数字", pattern: #"\b\d+\b"#, color: 6)
+        .init(name: "URL 链接", pattern: #"(?:https?|ftp|file)://[^\s<>\"']+"#, color: 0, presetKey: "url"),
+        .init(name: "IPv4", pattern: #"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"#, color: 1, presetKey: "ipv4"),
+        .init(name: "IPv6", pattern: #"(?<![\w:])(?=[\da-fA-F:]*\d|[a-fA-F]+:)(?![\da-fA-F:]*:::)(?:[\da-fA-F]{0,4}:){2,7}[\da-fA-F]{0,4}(?![\w:])"#, color: 2, presetKey: "ipv6"),
+        .init(name: "邮箱", pattern: #"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"#, color: 3, presetKey: "email"),
+        .init(name: "ISO 日期", pattern: #"\b\d{4}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])\b"#, color: 4, presetKey: "iso-date"),
+        .init(name: "Unix 日期", pattern: #"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\b"#, color: 6, presetKey: "unix-date"),
+        .init(name: "时间", pattern: #"\b(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b"#, color: 0, presetKey: "time"),
+        .init(name: "Syslog 日期", pattern: #"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\b"#, color: 7, presetKey: "syslog-date"),
+        .init(name: "UUID", pattern: #"\b[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\b"#, color: 7, presetKey: "uuid"),
+        .init(name: "错误 / 失败", pattern: #"(?i)\b(?:error|failed|failure|exception|fatal|critical)\b"#, color: 8, presetKey: "error"),
+        .init(name: "警告", pattern: #"(?i)\b(?:warning|warn|caution)\b"#, color: 6, presetKey: "warning"),
+        .init(name: "成功", pattern: #"(?i)\b(?:success|succeeded|ok|passed|done|complete|completed)\b"#, color: 1, presetKey: "success"),
+        .init(name: "文件路径", pattern: #"(?:[A-Za-z]:\\|(?<![:/\w])/(?!/))[^\s<>\"']+"#, color: 5, presetKey: "path"),
+        .init(name: "MAC 地址", pattern: #"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b"#, color: 9, presetKey: "mac"),
+        .init(name: "数字", pattern: #"\b\d+(?:\.\d+)?\b"#, color: 6, presetKey: "number")
     ]
     static let colors: [SwiftUI.Color] = [.cyan, .green, .teal, .purple, .orange, .blue, .yellow, .pink, .red, .mint, .indigo, .brown]
     static let colorNames = ["青色", "绿色", "蓝绿", "紫色", "橙色", "蓝色", "黄色", "粉色", "红色", "薄荷", "靛蓝", "棕色"]
@@ -34,7 +43,34 @@ final class TerminalHighlightSettings: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         rules = defaults.data(forKey: "terminal.highlight.rules").flatMap { try? JSONDecoder().decode([TerminalHighlightRule].self, from: $0) } ?? TerminalHighlightRule.presets
-        rules = Array(rules.prefix(32))
+        // Recognize the original shipped rules without changing IDs, patterns, colors or enabled flags.
+        let legacyKeys = ["URL 链接": "url", "IPv4": "ipv4", "IPv6": "ipv6", "邮箱": "email", "日期时间": "iso-date", "文件路径": "path", "数字": "number"]
+        rules = Array(rules.prefix(32)).map { rule in
+            var updated = rule
+            let legacyPatterns = [
+                "URL 链接": #"https?://[^\s<>\"']+"#,
+                "日期时间": #"\b\d{4}[-/]\d{2}[-/]\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b"#,
+                "数字": #"\b\d+\b"#
+            ]
+            if updated.presetKey == nil, let key = legacyKeys[updated.name],
+               updated.pattern == (legacyPatterns[updated.name] ?? TerminalHighlightRule.presets.first(where: { $0.presetKey == key })?.pattern) {
+                updated.presetKey = key
+            }
+            return updated
+        }
+        if defaults.integer(forKey: "terminal.highlight.catalogVersion") < 2 {
+            let installed = Set(rules.compactMap(\.presetKey))
+            let legacyCatalogKeys = Set(legacyKeys.values)
+            let missing = TerminalHighlightRule.presets.filter {
+                let key = $0.presetKey ?? ""
+                return !installed.contains(key) && !legacyCatalogKeys.contains(key)
+            }
+            // Specific matches must precede the broad numeric rule.
+            let insertion = rules.firstIndex { $0.presetKey == "number" } ?? rules.endIndex
+            rules.insert(contentsOf: missing.prefix(max(0, 32 - rules.count)), at: insertion)
+            defaults.set(2, forKey: "terminal.highlight.catalogVersion")
+            save()
+        }
     }
     private func save() {
         if let data = try? JSONEncoder().encode(rules) { defaults.set(data, forKey: "terminal.highlight.rules") }

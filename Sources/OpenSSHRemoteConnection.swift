@@ -186,12 +186,8 @@ private struct OpenSSHRemoteFileClient: RemoteFileClient {
         to remotePath: String,
         onProgress: (@Sendable (SFTPProgress) -> Void)?
     ) async throws {
-        try await SFTPService.upload(
-            localURLs: [localURL],
-            to: RemotePath.parent(of: remotePath),
-            config: config,
-            policy: .overwrite,
-            existingNames: [],
+        try await SFTPService.uploadFile(
+            localURL: localURL, toExactRemotePath: remotePath, config: config,
             onProgress: onProgress
         )
     }

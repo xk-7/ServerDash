@@ -605,6 +605,8 @@ final class AppState: ObservableObject {
         return await self.collectScheduled(serverID: serverID)
     }
 
+    private let fileServicesEnabled: Bool
+
     convenience init() {
         self.init(
             trustCoordinator: HostTrustCoordinator(),
@@ -617,9 +619,11 @@ final class AppState: ObservableObject {
         trustCoordinator: HostTrustCoordinator,
         monitoringClock: any MonitoringClock = SystemMonitoringClock(),
         portForwardSupervisor: PortForwardSupervisor = .shared,
-        terminalRegistry: TerminalSessionRegistry? = nil
+        terminalRegistry: TerminalSessionRegistry? = nil,
+        fileServicesEnabled: Bool = true
     ) {
         self.terminalRegistry = terminalRegistry ?? TerminalSessionRegistry()
+        self.fileServicesEnabled = fileServicesEnabled
         self.trustCoordinator = trustCoordinator
         self.monitoringClock = monitoringClock
         self.portForwardSupervisor = portForwardSupervisor
@@ -650,6 +654,7 @@ final class AppState: ObservableObject {
     }
 
     func bootstrap(servers: [ServerRecord], context: ModelContext) {
+        if fileServicesEnabled { DirectorySyncStore.shared.configure(container: context.container) }
         if monitoringHistory == nil {
             monitoringHistory = MonitoringHistoryRepository(
                 context: context,
@@ -680,8 +685,13 @@ final class AppState: ObservableObject {
         for server: ServerRecord,
         synchronizeMonitoring: Bool = true
     ) {
+        if fileServicesEnabled {
+            let fileAccess = DesktopFileAccess(server: server, appState: self)
+            DirectorySyncStore.shared.register(fileAccess)
+            RemoteEditorStore.shared.register(fileAccess)
+        }
         serverRecords[server.id] = server
-        configs[server.id] = configs[server.id] ?? server.connectionConfig
+        configs[server.id] = connectionConfig(for: server)
         if runtimeStates[server.id] == nil {
             runtimeStates[server.id] = ServerRuntimeState(
                 serverID: server.id,
@@ -698,14 +708,29 @@ final class AppState: ObservableObject {
     }
 
     func applyResolvedConfigs(_ resolved: [UUID: ServerConnectionConfig]) {
-        configs.merge(resolved) { _, new in new }
-        if let selectedServerID, let config = resolved[selectedServerID] {
+        configs.merge(resolved) { old, new in
+            var config = new
+            if config.advancedSettings == nil, let advanced = old.advancedSettings {
+                config.advancedSettings = advanced
+                config.connectTimeout = TimeInterval(advanced.connectTimeout)
+            }
+            return config
+        }
+        if let selectedServerID, let config = configs[selectedServerID] {
             selectedConfig = config
         }
     }
 
     func connectionConfig(for server: ServerRecord) -> ServerConnectionConfig {
-        configs[server.id] ?? server.connectionConfig
+        var config = configs[server.id] ?? server.connectionConfig
+        if let context = server.modelContext {
+            let serverID = server.id
+            if let advanced = try? context.fetch(FetchDescriptor<SSHAdvancedSettingsRecord>(predicate: #Predicate { $0.serverID == serverID })).first {
+                config.advancedSettings = advanced.settings
+                config.connectTimeout = TimeInterval(advanced.settings.connectTimeout)
+            }
+        }
+        return config
     }
 
     func select(_ server: ServerRecord?) {
@@ -924,7 +949,17 @@ final class AppState: ObservableObject {
     }
 
     @Published private(set) var fileControllers: [UUID: MacSFTPController] = [:]
+    private var inspectorFileControllers: [UUID: MacSFTPController] = [:]
+
+    func inspectorFileController(for server: ServerRecord) -> MacSFTPController {
+        if let existing = inspectorFileControllers[server.id] { return existing }
+        let controller = fileControllers.values.first { $0.server.id == server.id }
+            ?? MacSFTPController(server: server, appState: self)
+        inspectorFileControllers[server.id] = controller
+        return controller
+    }
     @Published private(set) var rdpControllers: [UUID: RDPSessionController] = [:]
+    let workbenchSessions = WorkbenchSessionRegistry()
     @Published var rdpError: String?
 
     func openRDP(_ record: RDPConnectionRecord, newTab: Bool = false, password: String? = nil) {
@@ -955,12 +990,17 @@ final class AppState: ObservableObject {
     func removeRDP(_ machineID: UUID) {
         let tabs = terminalRegistry.workspace.tabs.filter { $0.kind == .rdp && $0.serverID == machineID }
         closeWorkspaceTabs(tabs)
+        RDPConnectionActivityStore.shared.remove(machineID)
     }
 
     func openSFTP(for server: ServerRecord) {
         route = .section(.terminal)
+        if let existing = terminalRegistry.workspace.tabs.first(where: { $0.kind == .sftp && $0.serverID == server.id }) {
+            terminalRegistry.workspace.select(tab: existing.id)
+            return
+        }
         let id = UUID()
-        let controller = MacSFTPController(server: server, appState: self)
+        let controller = inspectorFileController(for: server)
         fileControllers[id] = controller
         terminalRegistry.workspace.add(sessionID: id, serverID: server.id, title: server.displayName, kind: .sftp)
         controller.beginIfNeeded()
@@ -969,8 +1009,11 @@ final class AppState: ObservableObject {
     func closeWorkspaceTabs(_ tabs: [WorkspaceTab]) {
         for tab in tabs {
             for id in tab.layout.panes {
+                workbenchSessions.close(id)
                 rdpControllers.removeValue(forKey: id)?.close()
-                fileControllers.removeValue(forKey: id)?.close()
+                // The file inspector and standalone tab share a controller.
+                // Closing a presentation does not interrupt an owned transfer.
+                fileControllers.removeValue(forKey: id)
                 if let controller = terminalRegistry.controller(for: id) { closeTerminal(controller.session) }
             }
             terminalRegistry.workspace.remove(tab: tab.id)
@@ -1028,6 +1071,9 @@ final class AppState: ObservableObject {
     }
 
     func removeRuntimeData(for serverID: UUID) {
+        RemoteEditorStore.shared.unregister(serverID: serverID)
+        DirectorySyncStore.shared.unregister(serverID: serverID)
+        inspectorFileControllers.removeValue(forKey: serverID)?.close()
         if let old = runtimeStates.removeValue(forKey: serverID)?.renderState {
             fleetSummaryState.replace(old: old, with: nil)
         }
@@ -1049,6 +1095,11 @@ final class AppState: ObservableObject {
     }
 
     func shutdown() {
+        RemoteEditorStore.shared.shutdown()
+        DirectorySyncStore.shared.shutdown()
+        workbenchSessions.closeAll()
+        inspectorFileControllers.values.forEach { $0.close() }
+        inspectorFileControllers.removeAll()
         rdpControllers.values.forEach { $0.close() }
         rdpControllers.removeAll()
         connectivityMonitor.cancel()
