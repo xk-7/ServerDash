@@ -589,6 +589,30 @@ mod tests {
         platform.request("session_write", params).await.unwrap();
     }
 
+    async fn terminal_handshake(
+        platform: &Platform,
+        opened: &Value,
+        output: &mut mpsc::Receiver<OutputChunk>,
+    ) {
+        // portable-pty requests PSEUDOCONSOLE_INHERIT_CURSOR. xterm.js answers
+        // this DSR in the app; the headless test must act as the terminal too.
+        if cfg!(windows) {
+            let mut received = Vec::new();
+            tokio::time::timeout(Duration::from_secs(20), async {
+                while let Some(chunk) = output.recv().await {
+                    received.extend_from_slice(&chunk.data);
+                    platform.request("session_ack", json!({"sessionId":opened["sessionId"],"generation":opened["generation"],"sequence":chunk.sequence})).await.unwrap();
+                    if received.windows(4).any(|bytes| bytes == b"\x1b[6n") {
+                        write(platform, opened, "\x1b[1;1R").await;
+                        return;
+                    }
+                    assert!(received.len() < 65536, "ConPTY did not request initial cursor position");
+                }
+                panic!("ConPTY closed before startup handshake");
+            }).await.unwrap_or_else(|_| panic!("ConPTY cursor handshake timed out: {:?}", String::from_utf8_lossy(&received)));
+        }
+    }
+
     #[tokio::test]
     async fn local_shell_executes_and_reaps_natural_exit() {
         let directory = tempfile::tempdir().unwrap();
@@ -602,6 +626,7 @@ mod tests {
         let generation = opened["generation"].as_u64().unwrap();
         let session = platform.session(&opened).unwrap();
         let mut output = platform.output(id, generation).unwrap();
+        terminal_handshake(&platform, &opened, &mut output).await;
         // The expected marker never occurs in the input, so terminal echo cannot pass.
         let command = if cfg!(windows) {
             "[Console]::WriteLine(('serverdash-platform-{0}-ok' -f (17 * 19)))\r\n"
@@ -668,6 +693,8 @@ mod tests {
             .await
             .unwrap();
         let session = platform.session(&opened).unwrap();
+        let mut output = platform.output(&session.id, session.generation).unwrap();
+        terminal_handshake(&platform, &opened, &mut output).await;
         let command = if cfg!(windows) {
             "while ($true) { [Console]::Write(('x' * 16384)) }\r\n"
         } else {
