@@ -4,7 +4,7 @@
 
 ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFTP client for Linux VPS hosts. It is built with SwiftUI, requires macOS 14 or iOS/iPadOS 18, and does not require a server-side agent.
 
-A separate **Windows 11 x64 internal preview** is being developed in `Desktop/` with Tauri, React and Rust. It is not yet at macOS feature parity, has no verified Windows installer or Windows 11 runtime acceptance, and keeps RDP disabled. See [Windows implementation and acceptance status](Docs/WINDOWS.md) and [desktop build instructions](Desktop/README.md).
+A separate **Windows 11 x64 internal preview** is being developed in `Desktop/` with Tauri, React and Rust. Its first NSIS installer has passed Windows CI and checksum verification. Windows 11 interactive acceptance and macOS feature parity remain pending; RDP stays disabled. See [Windows implementation and acceptance status](Docs/WINDOWS.md) and [desktop build instructions](Desktop/README.md).
 
 ## Features
 

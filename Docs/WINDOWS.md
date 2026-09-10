@@ -2,7 +2,7 @@
 
 ServerDash 已新增 `Desktop/` 跨平台桌面工程，目标是 Windows 11 x64，架构为 Tauri 2 + React/TypeScript + Rust。现有 macOS、iPhone/iPad 应用继续保留；Linux 仍是远端监控目标。
 
-**当前是开发中的内部预览，尚未完整对齐 macOS。Windows CI 尚未远程运行，没有已验证的 Windows 安装包，也没有 Windows 11 实机通过记录。** 本文区分可检查的实现与后续发布门槛，不将本机共享代码测试视为 Windows 平台验证。
+**当前是开发中的内部预览，尚未完整对齐 macOS。Windows CI 已成功生成首个 NSIS 安装包并核对 SHA-256，Windows 11 实机交互验收仍未完成。** 本文区分可检查的实现与后续发布门槛，不将本机共享代码测试视为 Windows 平台验证。
 
 ## 已实现的基础
 
@@ -49,13 +49,16 @@ Windows 应用使用自身的本地应用数据目录和 SQLite 数据库，不�
 
 测试数量对应本阶段记录，后续以实际测试运行输出为准。loopback 测试使用本机临时测试服务器，不是 Windows 11 测试；共享契约脚本不是完整 Apple UI/应用回归。
 
-`.github/workflows/windows-desktop.yml` 已配置 Windows runner 上的前端/Rust 检查、NSIS 构建及 SHA-256 产物上传，并单独构建 RDP 显示探针；macOS job 执行 Swift → Rust → Swift 互读。工作流尚未远程运行，不能据此宣称 CI 通过或安装包已生成。
+`.github/workflows/windows-desktop.yml` 已配置 Windows runner 上的前端/Rust 检查、NSIS 构建及 SHA-256 产物上传，并单独构建 RDP 显示探针；macOS job 执行 Swift → Rust → Swift 互读。2026-09-10 的 [构建 34449353992](https://github.com/xk-7/ServerDash/actions/runs/34449353992) 三个任务全部通过，Windows runner 上的 47 项 Rust 测试、15 项前端测试和 Release/NSIS 打包均通过。源码提交为 `a22c4f445a20ead056708e66423b3ce4f2ac8abd`。
+
+安装包为 `ServerDash_0.1.0_x64-setup.exe`（6,273,448 字节，约 5.98 MiB），已下载至 `dist/windows/`，下载后的 SHA-256 与 CI 产物一致：`d68b3f848a937aeed5246654eed5b572cb04213f1200a06f6dbc28797a4d4b21`。它按当前用户安装、按需引导 WebView2，无代码签名与自动更新。构建及单元测试通过不等于安装、首次启动和 Windows 11 交互验收通过；RDP 登录会话仍未启用。
 
 ## Windows 11 发布门槛
 
 以下项目尚待 Windows 11 x64 上记录系统版本、测试机器、结果与失败日志：
 
-- [ ] CI 成功生成可安装的 NSIS 产物与校验和；标准用户安装、WebView2 缺失时引导、首次启动、升级保留数据和卸载流程。
+- [x] Windows CI 生成 NSIS 产物与校验和，下载后校验通过。
+- [ ] 标准用户安装、WebView2 缺失时引导、首次启动、升级保留数据和卸载流程。
 - [ ] 用户级 DPAPI 保存/重启后读取、不同 Windows 用户不能解密，以及损坏/缺失凭据的错误处理。
 - [ ] Windows OpenSSH Agent 命名管道、外部/加密私钥、逐跳信任、代理连接、认证失败、取消/超时、断网和睡眠恢复。
 - [ ] ConPTY PowerShell、中文输入与宽字符、`vim/tmux`、高输出量、16 面板、切页保活、退出后的进程与句柄清理。

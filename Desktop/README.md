@@ -1,6 +1,6 @@
 # ServerDash Desktop
 
-面向 Windows 11 x64 的内部预览工程，使用 Tauri 2、React/TypeScript 和 Rust。现有 SwiftUI macOS、iPhone/iPad 应用继续保留。当前实现尚未完整对齐 macOS，Windows 安装包和 Windows 实机验收均未完成；发布条件见 [Windows 支持记录](../Docs/WINDOWS.md)。
+面向 Windows 11 x64 的内部预览工程，使用 Tauri 2、React/TypeScript 和 Rust。现有 SwiftUI macOS、iPhone/iPad 应用继续保留。当前实现尚未完整对齐 macOS，首个 NSIS 安装包已通过 Windows CI 构建和 SHA-256 校验，Windows 11 实机验收仍待完成；发布条件见 [Windows 支持记录](../Docs/WINDOWS.md)。
 
 ## 工程结构
 
@@ -41,7 +41,7 @@ cargo test --workspace --locked
 npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
 ```
 
-最后一条命令用于生成按当前用户安装的 NSIS `.exe`，配置会在需要时下载 WebView2 bootstrapper。预期输出位于仓库 `.build/desktop-target/x86_64-pc-windows-msvc/release/bundle/nsis/`；此路径描述构建目标，不表示仓库已有安装产物。当前不包含签名证书、商店发布或自动更新。
+最后一条命令用于生成按当前用户安装的 NSIS `.exe`，配置会在需要时下载 WebView2 bootstrapper。预期输出位于仓库 `.build/desktop-target/x86_64-pc-windows-msvc/release/bundle/nsis/`；首个内部预览安装包及对应校验和见 [构建产物](https://github.com/xk-7/ServerDash/actions/runs/34449353992)。当前不包含签名证书、商店发布或自动更新。
 
 ## macOS 开发检查
 
@@ -64,4 +64,4 @@ Tauri 宿主使用自身 `app_local_data_dir` 保存独立 SQLite 数据库和�
 
 ## 当前验证边界
 
-本机已验证 Rust 核心、真实 loopback SSH/SFTP 和共享契约往返；这不能替代 Windows DPAPI、OpenSSH 命名管道、ConPTY、安装升级或图形会话验收。Windows CI 配置已经加入，但尚未远程运行。详细功能边界、已执行测试与待验收项目见 [Windows 支持记录](../Docs/WINDOWS.md)。
+本机已验证 Rust 核心、真实 loopback SSH/SFTP 和共享契约往返；这不能替代 Windows DPAPI、OpenSSH 命名管道、ConPTY、安装升级或图形会话验收。Windows CI 的构建、47 项 Rust 测试、15 项前端测试及独立 RDP 显示探针已通过；这仍不是 Windows 11 交互验收。详细功能边界、已执行测试与待验收项目见 [Windows 支持记录](../Docs/WINDOWS.md)。
