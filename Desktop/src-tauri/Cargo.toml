@@ -20,7 +20,7 @@ sha2 = "0.10"
 serverdash-core = { path = "../crates/core" }
 serverdash-platform = { path = "../crates/platform" }
 serverdash-portability = { path = "../crates/portability" }
-tauri = { version = "2", features = [] }
+tauri = { version = "=2.11.5", features = [] }
 tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
