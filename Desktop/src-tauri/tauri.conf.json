@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ServerDash",
+  "version": "0.1.0",
+  "identifier": "com.serverdash.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{"label":"main","title":"ServerDash","width":1360,"height":860,"minWidth":960,"minHeight":640,"dragDropEnabled":false}],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "category": "Utility",
+    "shortDescription": "服务器监控、SSH 终端与文件工作台",
+    "windows": {
+      "webviewInstallMode": {"type":"downloadBootstrapper","silent":true},
+      "nsis": {"installMode":"currentUser","languages":["SimpChinese","English"],"displayLanguageSelector":true}
+    }
+  }
+}

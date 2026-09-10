@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/core", "crates/portability", "crates/platform", "src-tauri"]
+default-members = ["crates/core", "crates/portability", "crates/platform"]
+resolver = "2"
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

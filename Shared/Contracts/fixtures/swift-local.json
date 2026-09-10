@@ -1,0 +1,126 @@
+{
+  "format" : "ServerDash.LocalHostConfiguration",
+  "objects" : [
+    {
+      "deleted" : false,
+      "fields" : {
+        "authentication" : "privateKey",
+        "group" : "研发",
+        "host" : "linux.example",
+        "name" : "示例主机",
+        "notes" : "path \/srv\/a=b",
+        "port" : "2222",
+        "sftpPath" : "\/srv",
+        "tags" : "开发,测试",
+        "username" : "ops"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000001",
+      "kind" : "ssh"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "name" : "研发"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000002",
+      "kind" : "group"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "color" : "blue",
+        "name" : "开发"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000003",
+      "kind" : "tag"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "domain" : "EXAMPLE",
+        "group" : "研发",
+        "host" : "windows.example",
+        "name" : "Windows",
+        "notes" : "",
+        "port" : "3389",
+        "settings" : "{\"audio\":\"local\",\"autoReconnect\":true,\"bitmapCache\":true,\"certificatePolicy\":\"confirm\",\"colorDepth\":32,\"disableMenuAnimations\":false,\"disableThemes\":false,\"disableWallpaper\":false,\"disableWindowDrag\":false,\"dynamicResolution\":false,\"fileClipboard\":false,\"height\":1080,\"keyboardMode\":\"fullscreen\",\"screenIDs\":[],\"shares\":[],\"textClipboard\":false,\"version\":1,\"width\":1920}",
+        "tags" : "",
+        "username" : "operator"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000004",
+      "kind" : "rdp"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "server" : "12345678-90AB-CDEF-1234-000000000001",
+        "settings" : "{\"afterConnectCommand\":\"\",\"authenticationTimeout\":30,\"beforeConnectCommand\":\"\",\"commandsEnabled\":false,\"connectTimeout\":15,\"keepAliveCountMax\":3,\"keepAliveEnabled\":true,\"keepAliveInterval\":30,\"logOutput\":false}"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000005",
+      "kind" : "advanced"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "route" : "{\"hops\":[{\"connectTimeout\":8,\"credential\":{\"sshAgent\":{}},\"endpoint\":{\"host\":\"jump.example\",\"port\":22,\"username\":\"ops\"},\"id\":\"12345678-90AB-CDEF-1234-000000000026\",\"name\":\"jump\"}],\"id\":\"12345678-90AB-CDEF-1234-000000000006\",\"importedProxyCommandConfirmed\":false,\"name\":\"跳板\",\"proxy\":{\"host\":\"proxy.example\",\"kind\":\"socks5\",\"port\":1080},\"revision\":\"12345678-90AB-CDEF-1234-000000000016\"}",
+        "server" : "12345678-90AB-CDEF-1234-000000000001"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000006",
+      "kind" : "route"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "group" : "研发",
+        "host" : "vnc.example",
+        "name" : "VNC",
+        "notes" : "",
+        "port" : "5900",
+        "tags" : ""
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000007",
+      "kind" : "vnc"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "baud" : "115200",
+        "bits" : "8",
+        "flow" : "none",
+        "group" : "研发",
+        "name" : "串口",
+        "notes" : "",
+        "parity" : "none",
+        "stop" : "1",
+        "tags" : ""
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000008",
+      "kind" : "serial"
+    },
+    {
+      "deleted" : false,
+      "fields" : {
+        "bind" : "127.0.0.1",
+        "direction" : "local",
+        "name" : "db",
+        "port" : "15432",
+        "server" : "12345678-90AB-CDEF-1234-000000000001",
+        "target" : "127.0.0.1",
+        "targetPort" : "5432"
+      },
+      "id" : "12345678-90AB-CDEF-1234-000000000009",
+      "kind" : "tunnel"
+    },
+    {
+      "deleted" : true,
+      "fields" : {
+        "color" : "gray",
+        "name" : "已删除"
+      },
+      "id" : "12345678-90AB-CDEF-1234-00000000000A",
+      "kind" : "tag"
+    }
+  ],
+  "sourceID" : "12345678-90AB-CDEF-1234-000000000099",
+  "version" : 1
+}

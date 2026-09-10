@@ -1,0 +1,1 @@
+{"cpuPercent":12.5,"dockerStatus":"Up 1 hour|healthy","filesystemMount":"\/srv\/a|b","gpuFan":null,"gpuMemoryUsedBytes":16777216,"memoryCachedBytes":2621440,"memoryTotalBytes":8388608,"memoryUsedBytes":4718592,"processArguments":"worker --label=a=b|tail","swapUsedBytes":524288}

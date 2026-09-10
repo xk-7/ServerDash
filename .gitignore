@@ -6,3 +6,8 @@ xcuserdata/
 *.xcuserstate
 .build/
 dist/
+Desktop/node_modules/
+Desktop/target/
+Desktop/src-tauri/gen/
+Desktop/coverage/
+Desktop/*.tsbuildinfo

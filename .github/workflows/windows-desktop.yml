@@ -1,0 +1,96 @@
+name: Windows desktop preview
+on:
+  pull_request:
+    paths: ['Desktop/**', 'Shared/Contracts/**', 'Sources/**', 'Vendor/SwiftTerm/**', 'Vendor/RDP/**', 'Scripts/*desktop*', 'Scripts/*windows*', '.github/workflows/windows-desktop.yml']
+  push:
+    paths: ['Desktop/**', 'Shared/Contracts/**', 'Sources/**', 'Vendor/SwiftTerm/**', 'Vendor/RDP/**', 'Scripts/*desktop*', 'Scripts/*windows*', '.github/workflows/windows-desktop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-desktop-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  desktop:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: Desktop
+        shell: pwsh
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.build/desktop-target
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.13.0'
+          cache: npm
+          cache-dependency-path: Desktop/package-lock.json
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt
+          rustup default 1.98.1
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run build
+      - run: cargo fmt --all -- --check
+      - name: Core, interoperability, DPAPI and ConPTY tests
+        run: cargo test --workspace --locked
+      - name: Build per-user NSIS preview
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+      - name: Installer checksums
+        run: |
+          Get-ChildItem "$env:CARGO_TARGET_DIR/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" |
+              Set-Content "$($_.FullName).sha256"
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ServerDash-windows-x64-internal-preview
+          path: .build/desktop-target/x86_64-pc-windows-msvc/release/bundle/nsis/*
+          if-no-files-found: error
+          retention-days: 14
+  apple-contracts:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.build/desktop-target
+      SERVERDASH_CONTRACT_OUTPUT: ${{ github.workspace }}/.build/contracts/rust
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify fixtures with the real Apple codecs
+        run: python3 Shared/Contracts/generate.py --check
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup default 1.98.1
+      - name: Read Swift fixtures and write Rust configuration and recording files
+        working-directory: Desktop
+        run: |
+          cargo test -p serverdash-portability --test shared_contracts --locked
+          cargo test -p serverdash-core --test monitor_contract --locked
+      - name: Read Rust files with the real Apple codecs
+        run: python3 Shared/Contracts/generate.py --verify-rust "$SERVERDASH_CONTRACT_OUTPUT"
+  native-rdp-probe:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Fixed FreeRDP build and HWND D3D11 smoke test
+        shell: pwsh
+        run: ./Scripts/build-windows-rdp.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ServerDash-native-rdp-display-probe
+          path: |
+            .build/windows-rdp/install/bin/
+            .build/windows-rdp/install/LICENSE-*.txt
+          if-no-files-found: error
+          retention-days: 14

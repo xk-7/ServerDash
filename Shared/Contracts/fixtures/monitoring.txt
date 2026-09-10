@@ -1,0 +1,30 @@
+cpu=12.5
+cores=8
+load1=0.75
+load5=0.5
+load15=0.25
+mem_total_kb=8192
+mem_available_kb=4096
+mem_free_kb=1024
+mem_cached_kb=2048
+mem_buffers_kb=512
+swap_total_kb=2048
+swap_free_kb=1536
+disk_used=1234567
+disk_total=9999999
+net_rx=10123456
+net_tx=20123456
+active_iface=eth0
+iface=eth0|10123456|20123456
+proc=12|root|worker|2.5|1.25|4|worker --label=a=b|tail
+core=0|2|3|1|4|0
+fs=/dev/vda1|ext4|1234567|9999999|/srv/a|b
+gpu=0|GPU-example|GPU fixture|12|16|1024|N/A|42|N/A|100
+gproc=GPU-example|12|worker|16
+dcont=abcdef|service|example:1|running|Up 1 hour|healthy
+docker_available=1
+listener=tcp|0.0.0.0:22|sshd,pid=123
+listeners_available=true
+distro=Fixture Linux
+kernel=6.0-fixture
+uptime=1 day
