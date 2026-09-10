@@ -343,11 +343,12 @@ impl Platform {
         let event_id = id.clone();
         let permits = Arc::new(Semaphore::new(8));
         let reader_session = session.clone();
+        let drain_conpty = cfg!(windows) && kind == "local";
         let reader_thread = std::thread::spawn(move || {
             let mut buffer = [0u8; 16384];
             let mut error = None;
             loop {
-                if cancellation.is_cancelled() {
+                if cancellation.is_cancelled() && !drain_conpty {
                     break;
                 }
                 let count = match reader.read(&mut buffer) {
@@ -366,6 +367,13 @@ impl Platform {
                         break;
                     }
                 };
+                // Before Windows 11 24H2 ClosePseudoConsole can wait for pipe
+                // drainage. Cancellation releases terminal backpressure but keeps
+                // this reader alive until the independent reaper closes HPCON.
+                // https://learn.microsoft.com/windows/console/closepseudoconsole
+                if drain_conpty && cancellation.is_cancelled() {
+                    continue;
+                }
                 let accepted=runtime.block_on(async {
                     let permit=tokio::select!{p=permits.clone().acquire_owned()=>p.ok(),_=cancellation.cancelled()=>None};
                     let Some(permit)=permit else{return false;};
@@ -374,11 +382,15 @@ impl Platform {
                     tokio::select!{r=sender.send(OutputChunk{sequence,data:buffer[..count].to_vec()})=>r.is_ok(),_=cancellation.cancelled()=>false}
                 });
                 if !accepted {
-                    break;
+                    cancellation.cancel();
+                    if !drain_conpty {
+                        break;
+                    }
+                    // A dropped frontend receiver must also terminate the child;
+                    // otherwise there would be no close request to wake the reaper.
+                    reader_session.terminate();
                 }
             }
-            // Close the read pipe before the pseudoconsole: ClosePseudoConsole may wait
-            // for its output pipe to drain. The reaper and explicit close can race here.
             drop(reader);
             cancellation.cancel();
             pending.lock().unwrap().clear();
@@ -478,6 +490,9 @@ impl Session {
             let _ = killer.kill();
         }
         self.writer.lock().unwrap().take();
+        // The Windows child reaper owns HPCON teardown; calling it on the pipe
+        // reader could deadlock while the console is still writing final output.
+        #[cfg(not(windows))]
         self.master.lock().unwrap().take();
     }
 }
