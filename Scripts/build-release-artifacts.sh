@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-1.0.0}"
+VERSION="${1:-1.0.1}"
 BUILD_ROOT="${ROOT_DIR}/.build/release-${VERSION}"
 DIST_DIR="${ROOT_DIR}/dist/v${VERSION}"
 MAC_DERIVED_DATA="${BUILD_ROOT}/macOS"

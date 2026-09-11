@@ -27,7 +27,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 ### 多标签与终端分屏
 
-- 三端共用工作区，SSH 标签不设固定数量上限（仍受内存和服务器限制）。**+** 可创建 SSH、SFTP、监控标签；**RDP、VNC、在线 AI 补全尚未实现**。
+- 三端共用 SSH 工作区，标签不设固定数量上限（仍受内存和服务器限制）。**+** 可创建 SSH、SFTP 和监控标签；macOS 另提供内嵌 RDP、本地 Shell、串口标签，并通过系统“屏幕共享”启动 VNC。
 - 拖拽排序，右键或长按关闭当前/其他/全部标签；标签保持固定宽度，支持横向滚动和前后切换按钮。
 - **Ctrl+Tab / Ctrl+Shift+Tab** 切换标签；**Ctrl+Shift+D** 向右分屏，**Ctrl+Shift+E** 向下分屏，**Ctrl+Shift+W** 关闭活跃面板。移动端快捷键需要硬件键盘。
 - 每标签最多 16 个独立 SSH 面板。通过 **+ → 服务器 → 分屏** 连接不同主机，拖动分隔线调整比例，可整理为最多 **4×4 网格**，或放大单面板而不关闭其他连接。
@@ -144,6 +144,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 | --- | --- | --- |
 | 仪表盘与 Linux 监控 | 支持 | 支持；前台刷新 |
 | 多远程终端 | 支持 | 支持；进入后台后中断 |
+| RDP 远程桌面 | 开发实现；Windows 互操作仍待验证 | 不支持 |
 | SFTP 浏览/上传/下载/重命名/移动/删除 | 支持 | 支持；通过“文件”导入导出 |
 | 密码与导入私钥认证 | 支持 | 支持 |
 | 多客户端会话导入/导出 | 支持文件、目录、ZIP 与主动本机发现 | 支持“文件”导入/导出 |
@@ -151,7 +152,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 | 跳板机与 SOCKS5 / HTTP CONNECT 代理 | 支持 | 不支持 |
 | Local / Remote / Dynamic 转发 | 支持 | 不支持 |
 | 本地终端 | 支持 | 不支持 |
-| CloudKit 或跨设备数据同步 | 不支持 | 不支持 |
+| WebDAV 加密配置同步 | 支持；默认关闭 | 不支持 |
 
 ### 性能与进程生命周期
 
@@ -165,7 +166,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 ### 数据与诊断
 
 - SwiftData 持久化服务器、身份、SSH 密钥引用、连接路线、转发规则、代码片段、可信主机、终端历史、监控样本、聚合和 Data Gap。
-- VersionedSchema V1/V2/V3 与 V1 → V2、V2 → V3 迁移阶段；数据库打开失败时提供重试、备份和重建。
+- VersionedSchema V1–V5；V5 新增分组、标签、VNC、串口、SSH 高级设置、目录同步任务及远端配置映射，同时保留既有连接 UUID 与凭据引用。升级前备份数据库；迁移失败时不会自动清空或重建。
 - OSLog 按 App、Data、SSH、Monitoring、Terminal、SFTP 分类。
 - 每台服务器独立事件日志及可复制、可预览的脱敏 SSH Diagnostics。
 - 隐藏 IP 会覆盖界面、Markdown 和诊断；冻结的 1.0 隐私约束要求远端位置查询显式选择加入，其当前界面与默认值接线仍属于内部测试前待完成工作。
@@ -196,7 +197,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
-最新正式版本：[ServerDash 1.0.0](https://github.com/xk-7/ServerDash/releases/tag/v1.0.0)（Build 5）。安装与平台附件说明见[正式发布通知](Docs/RELEASE_NOTES_1.0.0.md)。macOS 附件使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
+最新正式版本：[ServerDash 1.0.1](https://github.com/xk-7/ServerDash/releases/tag/v1.0.1)（Build 6）。安装与平台附件说明见[正式发布通知](Docs/RELEASE_NOTES_1.0.1.md)。macOS 附件使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
 
 ## 运行
 
@@ -264,10 +265,10 @@ DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 
 构建正式 GitHub Release 的 macOS、iPhone Simulator、iPad Simulator 产物，并验证无签名 iOS Device Release 编译：
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.0
+./Scripts/build-release-artifacts.sh 1.0.1
 ```
 
-产物和 SHA-256 校验文件输出到 `dist/v1.0.0/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)。
+产物和 SHA-256 校验文件输出到 `dist/v1.0.1/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)。
 
 ## 项目结构
 
@@ -296,4 +297,4 @@ project.yml                 XcodeGen 工程定义
 
 ## 分发与范围
 
-macOS App 需要启动 OpenSSH/SFTP 子进程，因此继续关闭 App Sandbox。iOS/iPadOS App 使用自己的沙箱容器和独立 SwiftData V3 数据库，不迁移或同步 Mac 数据。移动端连接仅面向前台：回到前台后监控会重连；终端与中断传输必须由用户明确重启，不承诺恢复远程进程或断点续传。CloudKit、TestFlight、StoreKit、Widget、Live Activity、付费分层、7×24 告警和 Mosh 仍不在当前范围内。详见 [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md)。
+macOS App 需要启动 OpenSSH/SFTP 子进程，因此继续关闭 App Sandbox。iOS/iPadOS App 使用自己的沙箱容器和独立 SwiftData V5 数据库，不与 Mac 同步；桌面连接类型在移动端仅作为共享元数据存在，不会进入连接或监控页面。移动端连接仅面向前台：回到前台后监控会重连；终端与中断传输必须由用户明确重启，不承诺恢复远程进程或断点续传。CloudKit、TestFlight、StoreKit、Widget、Live Activity、付费分层、7×24 告警和 Mosh 仍不在当前范围内。详见 [ADR-0005](Docs/ArchitectureDecisions/ADR-0005-native-ios-and-dual-ssh-engine.md)。

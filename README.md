@@ -212,7 +212,7 @@ See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for r
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
-Latest stable release: [ServerDash 1.0.0](https://github.com/xk-7/ServerDash/releases/tag/v1.0.0) (build 5). See the [release announcement](Docs/RELEASE_NOTES_1.0.0.md) for installation and artifact details. The macOS artifact is ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
+Latest stable release: [ServerDash 1.0.1](https://github.com/xk-7/ServerDash/releases/tag/v1.0.1) (build 6). See the [release announcement](Docs/RELEASE_NOTES_1.0.1.md) for installation and artifact details. The macOS artifact is ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run
 
@@ -289,10 +289,10 @@ The DMG is written to `dist/`. On another Mac, open the app with Control-click â
 Build the macOS, iPhone Simulator, and iPad Simulator GitHub Release artifacts, plus an unsigned iOS Device Release compile check:
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.0
+./Scripts/build-release-artifacts.sh 1.0.1
 ```
 
-Artifacts and SHA-256 checksums are written to `dist/v1.0.0/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files.
+Artifacts and SHA-256 checksums are written to `dist/v1.0.1/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files.
 
 ## Project Layout
 
