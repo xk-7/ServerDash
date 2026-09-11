@@ -37,15 +37,31 @@ struct SFTPBrowserView: View {
                     Button { showSyncSuggestion = false } label: { Image(systemName: "xmark") }.help("隐藏本次提示")
                 }.font(.caption).buttonStyle(.borderless).padding(8).background(Color.accentColor.opacity(0.06))
             }
-            if controller.visibleItems.isEmpty, controller.busyMessage == nil {
-                ContentUnavailableView {
-                    Label(controller.search.isEmpty ? (controller.hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录") : "没有匹配文件", systemImage: "folder")
-                } description: {
-                    Text(controller.search.isEmpty ? "上传文件或创建项目；隐藏文件可在工具栏显示。" : "尝试其他关键词，或显示隐藏文件。")
-                } actions: {
-                    Button("刷新") { Task { await controller.loadDirectory(controller.currentPath) } }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else { fileTable }
+            if let failure = controller.directoryError {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("无法读取目录").font(.callout.bold())
+                        Text(failure).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    Spacer(minLength: 8)
+                    Button("重试") { Task { await controller.retryDirectory() } }
+                        .disabled(controller.busyMessage != nil)
+                }.padding(12).background(Color.orange.opacity(0.07))
+            }
+            // Keep the native table mounted during refreshes, empty results and errors.
+            // Stable rows retain the scroll view and its selection/scroll position.
+            fileTable.overlay {
+                if controller.visibleItems.isEmpty, controller.busyMessage == nil, controller.directoryError == nil {
+                    ContentUnavailableView {
+                        Label(controller.search.isEmpty ? (controller.hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录") : "没有匹配文件", systemImage: "folder")
+                    } description: {
+                        Text(controller.search.isEmpty ? "上传文件或创建项目；隐藏文件可在工具栏显示。" : "尝试其他关键词，或显示隐藏文件。")
+                    } actions: {
+                        Button("刷新") { Task { await controller.loadDirectory(controller.currentPath) } }
+                    }
+                }
+            }
             Divider()
             statusBar
         }
@@ -229,9 +245,12 @@ final class MacSFTPController: ObservableObject {
     private var directoryGeneration = UUID()
     private var transferGeneration = UUID()
     var hasActiveTransfer: Bool { transferTask != nil }
-    @Published var items: [RemoteFileItem] = []
-    @Published var search = ""
-    @Published var showHidden = false
+    @Published var items: [RemoteFileItem] = [] { didSet { rebuildVisibleItems() } }
+    @Published var search = "" { didSet { rebuildVisibleItems() } }
+    @Published var showHidden = false { didSet { rebuildVisibleItems() } }
+    @Published private(set) var visibleItems: [RemoteFileItem] = []
+    @Published private(set) var directoryError: String?
+    private var failedDirectoryPath: String?
     @Published var hasLoadedDirectory = false
     @Published var currentPath = "."
     @Published var pathText = "."
@@ -252,15 +271,16 @@ final class MacSFTPController: ObservableObject {
     @Published var pendingDownload: (item: RemoteFileItem, url: URL)?
     @Published var conflictPolicy: SFTPConflictPolicy = .overwrite
 
-    var visibleItems: [RemoteFileItem] {
-        items.filter { (showHidden || !$0.name.hasPrefix(".")) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
+    private func rebuildVisibleItems() {
+        visibleItems = items.filter { (showHidden || !$0.name.hasPrefix(".")) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
+        selection.formIntersection(visibleItems.map(\.id))
     }
-    var selectedItems: [RemoteFileItem] { items.filter { selection.contains($0.id) } }
+    var selectedItems: [RemoteFileItem] { visibleItems.filter { selection.contains($0.id) } }
     var fileAccess: DesktopFileAccess? { appState.map { DesktopFileAccess(server: server, appState: $0) } }
 
     var selectedItem: RemoteFileItem? {
         guard let id = selection.first else { return nil }
-        return items.first { $0.id == id }
+        return visibleItems.first { $0.id == id }
     }
 
     private var connectionConfig: ServerConnectionConfig { appState?.connectionConfig(for: server) ?? server.connectionConfig }
@@ -302,7 +322,7 @@ final class MacSFTPController: ObservableObject {
         let connection = generation
         defer { if generation == connection, directoryGeneration == request { busyMessage = nil } }
         busyMessage = "正在读取 \(path)"
-        errorMessage = nil
+        directoryError = nil
         do {
             guard let appState else { throw CancellationError() }
             let config = connectionConfig
@@ -313,15 +333,13 @@ final class MacSFTPController: ObservableObject {
                 try await SFTPService.list(config: config, path: path)
             }
             guard generation == connection, directoryGeneration == request, !Task.isCancelled else { return }
-            currentPath = listing.path
-            pathText = listing.path
-            items = listing.items
-            hasLoadedDirectory = true
-            selection.removeAll()
+            applyDirectoryListing(listing)
             statusMessage = "已连接 \(server.username)@\(server.host)"
         } catch {
             guard generation == connection, directoryGeneration == request else { return }
-            errorMessage = error.localizedDescription
+            guard !Task.isCancelled else { return }
+            directoryError = error.localizedDescription
+            failedDirectoryPath = path
             statusMessage = "无法读取远程目录"
             EventLogStore.shared.append(
                 serverID: server.id,
@@ -332,6 +350,21 @@ final class MacSFTPController: ObservableObject {
         }
         busyMessage = nil
         progress = nil
+    }
+
+    func applyDirectoryListing(_ listing: SFTPDirectoryListing) {
+        let sameDirectory = hasLoadedDirectory && currentPath == listing.path
+        if !sameDirectory { selection.removeAll() }
+        currentPath = listing.path
+        pathText = listing.path
+        items = listing.items
+        hasLoadedDirectory = true
+        directoryError = nil
+        failedDirectoryPath = nil
+    }
+
+    func retryDirectory() async {
+        await loadDirectory(failedDirectoryPath ?? currentPath)
     }
 
     func chooseItemsToUpload(directories: Bool) {

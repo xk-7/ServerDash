@@ -173,7 +173,10 @@ enum PersistenceController {
     }
 
     static func applicationSupportDirectory() -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #if os(macOS)
+        if MacUIFixture.isEnabled { return MacUIFixture.root }
+        #endif
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 
     static func dataDirectory(applicationSupportRoot: URL) -> URL {
@@ -259,9 +262,12 @@ final class PersistenceSession: ObservableObject {
         defer { PerformanceTrace.end(interval) }
         do {
             // Hosted tests must not migrate the user's database or start monitoring real saved hosts.
-            let testHost = NSClassFromString("XCTestCase") != nil ||
+            var testHost = NSClassFromString("XCTestCase") != nil ||
                 ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
                 ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
+            #if os(macOS)
+            testHost = testHost || MacUIFixture.isEnabled
+            #endif
             let opened = try testHost ? PersistenceController.makeInMemoryContainer() : PersistenceController.makeContainer()
             if !testHost { try MachineOrganization.prepareCatalog(context: ModelContext(opened)) }
             container = opened

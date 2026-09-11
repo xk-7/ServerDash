@@ -169,38 +169,12 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .navigationTitle("ServerDash")
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    Task { await appState.refreshAll(servers) }
-                } label: {
-                    Label("刷新全部", systemImage: "arrow.clockwise")
-                }
-                .help("刷新全部服务器")
-                .disabled(servers.isEmpty)
-                .keyboardShortcut("r", modifiers: .command)
-
-                Menu {
-                    Button("仅重试失败的监控", systemImage: "arrow.clockwise.circle") {
-                        Task { await appState.refreshAll(servers, failedOnly: true) }
-                    }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                } label: {
-                    Image(systemName: "chevron.down")
-                }
-                .help("更多刷新选项")
-                .accessibilityLabel("更多刷新选项")
-                .disabled(servers.isEmpty)
-
-                Button {
-                    showingMachineType = true
-                } label: {
-                    Label("添加服务器", systemImage: "plus")
-                }
-                .help("添加服务器")
-                .keyboardShortcut("n", modifiers: .command)
-            }
-        }
+        .focusedSceneValue(\.workbenchHostActions, WorkbenchHostActions(
+            canRefresh: !servers.isEmpty,
+            add: { showingMachineType = true },
+            refresh: { Task { await appState.refreshAll(servers) } },
+            retryFailed: { Task { await appState.refreshAll(servers, failedOnly: true) } }
+        ))
     }
 
     private var presentationView: some View {

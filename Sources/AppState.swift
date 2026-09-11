@@ -606,6 +606,7 @@ final class AppState: ObservableObject {
     }
 
     private let fileServicesEnabled: Bool
+    private var didShutdown = false
 
     convenience init() {
         self.init(
@@ -963,6 +964,7 @@ final class AppState: ObservableObject {
     @Published var rdpError: String?
 
     func openRDP(_ record: RDPConnectionRecord, newTab: Bool = false, password: String? = nil) {
+        if MacUIFixture.isEnabled { rdpError = "隔离验收不建立真实 RDP 连接。"; return }
         let workspace = terminalRegistry.workspace
         if !newTab, let existing = workspace.mostRecentRDP(for: record.id), rdpControllers[existing.activePane] != nil {
             route = .section(.terminal); workspace.select(tab: existing.id); return
@@ -1095,6 +1097,8 @@ final class AppState: ObservableObject {
     }
 
     func shutdown() {
+        guard !didShutdown else { return }
+        didShutdown = true
         RemoteEditorStore.shared.shutdown()
         DirectorySyncStore.shared.shutdown()
         workbenchSessions.closeAll()
@@ -1106,6 +1110,7 @@ final class AppState: ObservableObject {
         fileControllers.values.forEach { $0.close() }
         fileControllers.removeAll()
         terminalRegistry.terminateAll()
+        if MacUIFixture.isEnabled { return }
         // Writers do not call the main actor to drain; a late OS termination still leaves recoverable blocks.
         _ = RecordingWriter.pendingWrites.wait(timeout: .now() + 3)
         KeyMaterialStore.cleanupAll()
@@ -1332,6 +1337,7 @@ final class AppState: ObservableObject {
         source: HostTrustSource,
         forceScan: Bool = false
     ) async throws {
+        if MacUIFixture.isEnabled { throw URLError(.notConnectedToInternet) }
         try validateConnectionConfiguration(config)
         for hop in config.route.hops {
             let hopConfig = ServerConnectionConfig(
@@ -1468,6 +1474,7 @@ final class AppState: ObservableObject {
         source: HostTrustSource,
         operation: () async throws -> T
     ) async throws -> T {
+        if MacUIFixture.isEnabled { throw URLError(.notConnectedToInternet) }
         try await authorizeConnection(config, source: source)
         do {
             return try await operation()
@@ -1529,6 +1536,11 @@ final class AppState: ObservableObject {
     }
 
     private func connectTerminal(_ controller: TerminalSessionController, server: ServerRecord, forceScan: Bool = false) {
+        if MacUIFixture.isEnabled {
+            controller.status = .connected
+            controller.hostView.feedLocalOutput("隔离会话：仅用于界面验收，不建立网络连接。\r\nfixture@server:~$ ")
+            return
+        }
         // Allocate the pane before authorization. Completion never navigates or changes focus.
         controller.terminate()
         let generation = UUID()

@@ -3,7 +3,7 @@ import AppKit
 import CoreFoundation
 import SwiftUI
 
-enum RemoteTextEncoding: String, Codable, CaseIterable, Identifiable {
+enum RemoteTextEncoding: String, Codable, CaseIterable, Identifiable, Sendable {
     case utf8 = "UTF-8", utf16LE = "UTF-16 LE", utf16BE = "UTF-16 BE", gb18030 = "GB18030"
     var id: String { rawValue }
     var foundation: String.Encoding {
@@ -38,7 +38,7 @@ enum RemoteTextEncoding: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct RemoteEditorDraft: Codable, Identifiable {
+struct RemoteEditorDraft: Codable, Identifiable, Sendable {
     var id: UUID = UUID()
     var serverID: UUID
     var serverName: String
@@ -49,7 +49,10 @@ struct RemoteEditorDraft: Codable, Identifiable {
     var original: Data
     var revision: RemoteFileRevision
     var endpointIdentity: String?
-    var isDirty: Bool { (try? encoding.encode(text, bom: hasBOM)) != original }
+    // Runtime-only cache: encoding is checked in the background persistence worker.
+    var cachedDirty: Bool? = nil
+    var isDirty: Bool { cachedDirty ?? ((try? encoding.encode(text, bom: hasBOM)) != original) }
+    enum CodingKeys: String, CodingKey { case id, serverID, serverName, path, text, encoding, hasBOM, original, revision, endpointIdentity }
     var title: String { (path as NSString).lastPathComponent }
 }
 
@@ -91,6 +94,11 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
     private var operation: Task<Void, Never>?
     private var activeServerID: UUID?
     private var persistTask: Task<Void, Never>?
+    private var persistRevision: UInt64 = 0
+    private let draftWriter = RemoteDraftWriter()
+    private var presentations: [UUID: RemoteEditorPresentation] = [:]
+    @Published private(set) var textMetrics: [UUID: (lines: Int, units: Int)] = [:]
+    @Published private(set) var flushingDrafts = false
     private let persistURL: URL?
     private let copiesURL:URL?
     init(persistURL: URL? = nil, restore: Bool = true) {
@@ -98,7 +106,7 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         copiesURL=self.persistURL?.deletingLastPathComponent().appendingPathComponent("local-copies.json")
         if restore, let url = self.persistURL, let data = try? Data(contentsOf: url),
            let restored = try? JSONDecoder().decode([RemoteEditorDraft].self, from: data) {
-            documents = restored; selectedID = restored.first?.id
+            documents = restored.map { value in var doc = value; doc.cachedDirty = doc.isDirty; return doc }; selectedID = restored.first?.id
         }
         if restore,let copiesURL,let data=try? Data(contentsOf:copiesURL),let saved=try? JSONDecoder().decode([RemoteLocalCopy].self,from:data){localCopies=saved}
     }
@@ -108,7 +116,29 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         accesses[serverID] = nil
         if activeServerID == serverID { operation?.cancel() }
     }
-    func shutdown() { operation?.cancel(); persistTask?.cancel(); persist() }
+    func shutdown() { operation?.cancel(); presentations.values.forEach { $0.invalidate() }; persist() }
+    @discardableResult func shutdownAndFlush() async -> Bool {
+        operation?.cancel()
+        // Finish cancellation first: failure/cancellation handlers may retain a newer draft.
+        await operation?.value
+        return await flushDrafts()
+    }
+    func presentation(for id: UUID) -> RemoteEditorPresentation? {
+        if let existing = presentations[id] { return existing }
+        guard let index = documents.firstIndex(where: { $0.id == id }) else { return nil }
+        let presentation = RemoteEditorPresentation(text: documents[index].text)
+        let initialDirty = documents[index].isDirty
+        presentation.onTextChange = { [weak self] text in self?.updateText(text, id: id) }
+        presentation.onMetricsChange = { [weak self] lines, units in self?.textMetrics[id] = (lines, units) }
+        presentations[id] = presentation
+        // NSViewRepresentable construction must not publish into its current render pass.
+        Task { [weak self, weak presentation] in
+            guard let self, let presentation, let index = self.documents.firstIndex(where: { $0.id == id }) else { return }
+            if self.documents[index].cachedDirty == nil { self.documents[index].cachedDirty = initialDirty }
+            self.textMetrics[id] = (presentation.lineIndex.starts.count, presentation.lineIndex.length)
+        }
+        return presentation
+    }
     func canSave(_ id: UUID) -> Bool {
         guard let doc = documents.first(where: { $0.id == id }) else { return false }
         return accesses[doc.serverID] != nil && !busy
@@ -197,14 +227,16 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
     }
     func updateText(_ value: String, id: UUID) {
         guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
+        guard documents[index].text != value else { return }
         documents[index].text = value
+        documents[index].cachedDirty = true
         schedulePersist()
     }
     func changeEncoding(_ value: RemoteTextEncoding, id: UUID) {
         guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
         do {
             _ = try value.encode(documents[index].text, bom: documents[index].hasBOM)
-            documents[index].encoding = value; persist()
+            documents[index].encoding = value; documents[index].cachedDirty = true; persist()
         } catch { self.error = error.localizedDescription }
     }
     func save(_ id: UUID, force: Bool = false, as destination: String? = nil) {
@@ -214,7 +246,7 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         operation = Task {
             defer { busy = false; operation = nil; activeServerID = nil }
             do {
-                let data = try doc.encoding.encode(doc.text, bom: doc.hasBOM)
+                let data = try await Task.detached(priority: .utility) { try doc.encoding.encode(doc.text, bom: doc.hasBOM) }.value
                 guard data.count <= DesktopFilePreferences.editorByteLimit else { throw DesktopFileError.tooLarge }
                 let path = destination ?? doc.path
                 let revision = try await access.perform(matching: doc.endpointIdentity) {
@@ -223,6 +255,7 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
                 try Task.checkCancellation()
                 guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
                 documents[index].original = data; documents[index].revision = revision; documents[index].path = path
+                documents[index].cachedDirty = documents[index].text != doc.text || documents[index].encoding != doc.encoding || documents[index].hasBOM != doc.hasBOM
                 message = "已保存 \((path as NSString).lastPathComponent)"; persist()
             } catch DesktopFileError.conflict { conflictID = id; conflictDestination = destination }
             catch is CancellationError { message = "保存已取消，本地草稿仍保留" }
@@ -241,30 +274,57 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
                 try Task.checkCancellation()
                 guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
                 documents[index].text = decoded.0; documents[index].hasBOM = decoded.2
-                documents[index].original = data; documents[index].revision = revision; persist()
+                documents[index].original = data; documents[index].revision = revision; documents[index].cachedDirty = false; persist()
             } catch { self.error = error.localizedDescription }
         }
     }
     func close(_ id: UUID) {
         guard !busy else { return }
+        presentations.removeValue(forKey: id)?.invalidate(); textMetrics[id] = nil
         documents.removeAll { $0.id == id }
         if selectedID == id { selectedID = documents.last?.id }
         persist()
     }
     func cancel() { operation?.cancel() }
-    func persist() {
+    func persist() { enqueuePersistence(delay: false) }
+    private func schedulePersist() { enqueuePersistence(delay: true) }
+    private func enqueuePersistence(delay: Bool) {
         persistTask?.cancel()
-        guard let url = persistURL else { return }
-        do {
-            try DesktopFilePreferences.writePrivate(JSONEncoder().encode(documents), to: url)
-            if let copiesURL{try DesktopFilePreferences.writePrivate(JSONEncoder().encode(localCopies),to:copiesURL)}
+        persistRevision &+= 1
+        let revision = persistRevision
+        persistTask = Task { [weak self] in
+            if delay { try? await Task.sleep(for: .milliseconds(350)) }
+            guard !Task.isCancelled, let self, revision == self.persistRevision else { return }
+            _ = await self.writeSnapshot(revision: revision)
         }
-        catch { self.error = "无法保存本地恢复草稿：\(error.localizedDescription)" }
     }
-    private func schedulePersist() {
+    @discardableResult func flushDrafts() async -> Bool {
         persistTask?.cancel()
-        persistTask = Task { try? await Task.sleep(for: .milliseconds(350)); if !Task.isCancelled { persist() } }
+        flushingDrafts = true
+        defer { flushingDrafts = false }
+        // Edits can arrive while a write is running. Flush until its version matches.
+        repeat {
+            persistRevision &+= 1
+            let revision = persistRevision
+            guard await writeSnapshot(revision: revision) else { return false }
+            if revision == persistRevision { return true }
+            persistTask?.cancel()
+        } while true
     }
+    private func writeSnapshot(revision: UInt64) async -> Bool {
+        let snapshot = documents, copies = localCopies
+        do {
+            let dirty = try await draftWriter.write(documents: snapshot, copies: copies, url: persistURL, copiesURL: copiesURL, revision: revision)
+            if revision == persistRevision {
+                for index in documents.indices { documents[index].cachedDirty = dirty[documents[index].id] }
+            }
+            return true
+        } catch {
+            if revision == persistRevision { self.error = "无法保存本地恢复草稿：\(error.localizedDescription)" }
+            return false
+        }
+    }
+
 }
 
 struct RemoteEditorView: View {
@@ -288,7 +348,8 @@ struct RemoteEditorView: View {
                     if let doc=store.selected { if doc.isDirty {pendingClose=doc.id} else {store.close(doc.id)} }
                 }.keyboardShortcut("w").disabled(store.selectedID == nil || store.busy)
                 if store.busy { ProgressView().controlSize(.small); Button("取消操作") { store.cancel() } }
-                Button("完成") { store.persist(); dismiss() }.keyboardShortcut(.cancelAction)
+                Button("完成") { Task { if await store.flushDrafts() { dismiss() } } }
+                    .keyboardShortcut(.cancelAction).disabled(store.flushingDrafts)
             }.padding(14)
             Divider()
             ScrollView(.horizontal) {
@@ -320,14 +381,15 @@ struct RemoteEditorView: View {
                     Button("保存") { store.save(doc.id) }.buttonStyle(.borderedProminent).keyboardShortcut("s").disabled(!store.canSave(doc.id) || !doc.isDirty)
                 }.padding(12)
                 Divider()
-                NativeRemoteCodeEditor(text: Binding(get: { store.documents.first(where:{$0.id==doc.id})?.text ?? "" }, set: { store.updateText($0,id:doc.id) }), search: search, searchStep: searchStep)
+                NativeRemoteCodeEditor(store: store, documentID: doc.id, text: doc.text, search: search, searchStep: searchStep)
                     .id(doc.id).frame(maxWidth:.infinity,maxHeight:.infinity).clipped()
                 Divider()
                 HStack {
                     Text(store.message.isEmpty ? "更改保留在本机草稿；保存会检查远端版本。" : store.message).lineLimit(1)
                     Spacer()
-                    Text("\(doc.text.components(separatedBy:"\n").count) 行 · \(doc.text.count) 字符 · \(doc.encoding.rawValue)")
-                    Text(doc.text.contains("\r\n") ? "CRLF" : "LF")
+                    if let metrics = store.textMetrics[doc.id] {
+                        Text("\(metrics.lines) 行 · \(doc.encoding.rawValue)")
+                    } else { Text(doc.encoding.rawValue) }
                 }.font(.caption).foregroundStyle(.secondary).padding(10)
                 if !store.canSave(doc.id), !store.busy {
                     Text("此恢复草稿尚未连接主机。请在该主机的文件面板中重新打开文件，以核验连接并保存。")
@@ -356,7 +418,9 @@ struct RemoteEditorView: View {
             Button("取消",role:.cancel) {saveAsID=nil}
             Button("保存") {if let id=saveAsID {store.save(id,as:saveAsPath)};saveAsID=nil}
         }
-        .onDisappear {store.persist()}
+        // Dismiss only through “完成”, which waits for the newest encoded snapshot.
+        // This also prevents an onDisappear write from racing application shutdown.
+        .interactiveDismissDisabled(true)
     }
     private func exportLocal(_ doc: RemoteEditorDraft) {
         let panel=NSSavePanel();panel.nameFieldStringValue=doc.title
@@ -434,99 +498,16 @@ struct LocalFileCopiesView:View {
 }
 
 private struct NativeRemoteCodeEditor: NSViewRepresentable {
-    @Binding var text: String
+    let store: RemoteEditorStore
+    let documentID: UUID
+    var text: String
     var search: String
     var searchStep: Int
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView(); scroll.hasVerticalScroller=true; scroll.hasHorizontalScroller=true
-        let editor=NSTextView(frame:NSRect(x:0,y:0,width:800,height:500))
-        editor.isRichText=false; editor.isAutomaticQuoteSubstitutionEnabled=false; editor.isAutomaticDashSubstitutionEnabled=false
-        editor.isAutomaticTextReplacementEnabled=false; editor.isAutomaticSpellingCorrectionEnabled=false; editor.isContinuousSpellCheckingEnabled=false
-        editor.allowsUndo=true; editor.font = .monospacedSystemFont(ofSize:13,weight:.regular)
-        editor.textColor = .textColor; editor.backgroundColor = .textBackgroundColor
-        editor.isVerticallyResizable=true; editor.isHorizontallyResizable=true
-        editor.autoresizingMask=[.width]; editor.textContainer?.widthTracksTextView=false
-        editor.textContainer?.containerSize=NSSize(width:CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
-        editor.minSize=NSSize(width:0,height:0);editor.maxSize=NSSize(width:CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
-        editor.delegate=context.coordinator;editor.string=text
-        scroll.documentView=editor
-        scroll.hasVerticalRuler=true;scroll.rulersVisible=true;scroll.verticalRulerView=EditorLineRuler(textView:editor,scrollView:scroll)
-        context.coordinator.editor=editor;context.coordinator.highlight()
-        return scroll
+        store.presentation(for: documentID)?.scroll ?? NSScrollView()
     }
-    func updateNSView(_ scroll:NSScrollView,context:Context) {
-        context.coordinator.parent=self
-        guard let editor=context.coordinator.editor else{return}
-        if editor.string != text { editor.string=text;context.coordinator.highlight();scroll.verticalRulerView?.needsDisplay=true }
-        if context.coordinator.lastSearch != search || context.coordinator.lastStep != searchStep {
-            let queryChanged = context.coordinator.lastSearch != search
-            let backwards = searchStep < context.coordinator.lastStep
-            context.coordinator.lastSearch=search; context.coordinator.lastStep=searchStep
-            if !search.isEmpty {
-                let value=editor.string as NSString
-                let selection=editor.selectedRange()
-                let start=queryChanged ? 0 : min(value.length,backwards ? selection.location : NSMaxRange(selection))
-                let scope=backwards && !queryChanged ? NSRange(location:0,length:start) : NSRange(location:start,length:value.length-start)
-                var options:NSString.CompareOptions = [.caseInsensitive]
-                if backwards {options.insert(.backwards)}
-                var match=value.range(of:search,options:options,range:scope)
-                if match.location == NSNotFound {match=value.range(of:search,options:options)}
-                if match.location != NSNotFound {editor.setSelectedRange(match);editor.scrollRangeToVisible(match)}
-            }
-        }
-    }
-    final class Coordinator:NSObject,NSTextViewDelegate {
-        var parent:NativeRemoteCodeEditor
-        weak var editor:NSTextView?
-        var lastSearch=""
-        var lastStep=0
-        var pending:DispatchWorkItem?
-        init(_ parent:NativeRemoteCodeEditor){self.parent=parent}
-        func textDidChange(_ notification:Notification) {
-            guard let editor else{return};parent.text=editor.string;editor.enclosingScrollView?.verticalRulerView?.needsDisplay=true
-            pending?.cancel();let work=DispatchWorkItem{[weak self] in self?.highlight()};pending=work
-            DispatchQueue.main.asyncAfter(deadline:.now()+0.2,execute:work)
-        }
-        func highlight() {
-            guard let editor,let storage=editor.textStorage else{return}
-            let range=NSRange(location:0,length:storage.length)
-            storage.beginEditing();storage.addAttribute(.foregroundColor,value:NSColor.textColor,range:range)
-            if storage.length<200_000 {
-                let patterns:[(String,NSColor)] = [
-                    (#"</?[A-Za-z][A-Za-z0-9:-]*"#,.systemOrange),
-                    (#"\b[A-Za-z_][\w-]*(?=\s*[:=])"#,.systemTeal),
-                    (#"\b(?:if|else|for|while|return|func|function|class|struct|import|from|let|var|const|true|false|null|nil|def|try|catch|throw|async|await|public|private)\b"#,.systemPurple),
-                    (#"\b[0-9]+(?:\.[0-9]+)?\b"#,.systemOrange),
-                    (#"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'"#,.systemGreen),
-                    (#"(?m)(?://[^\n]*|#[^\n]*|<!--[^\n]*-->)"#,.secondaryLabelColor)]
-                for (pattern,color) in patterns {
-                    guard let regex=try? NSRegularExpression(pattern:pattern) else{continue}
-                    regex.enumerateMatches(in:storage.string,range:range){match,_,_ in if let match {storage.addAttribute(.foregroundColor,value:color,range:match.range)}}
-                }
-            }
-            storage.endEditing()
-        }
-    }
-}
-
-private final class EditorLineRuler:NSRulerView {
-    weak var editor:NSTextView?
-    init(textView:NSTextView,scrollView:NSScrollView){editor=textView;super.init(scrollView:scrollView,orientation:.verticalRuler);clientView=textView;ruleThickness=48}
-    required init(coder:NSCoder){fatalError("init(coder:) has not been implemented")}
-    override func drawHashMarksAndLabels(in rect:NSRect) {
-        guard let editor,let manager=editor.layoutManager,let container=editor.textContainer else{return}
-        let visible=editor.visibleRect;let glyphs=manager.glyphRange(forBoundingRect:visible,in:container)
-        let string=editor.string as NSString
-        guard manager.numberOfGlyphs > 0 else { return }
-        let firstCharacter=manager.characterIndexForGlyph(at:min(glyphs.location,manager.numberOfGlyphs-1))
-        var line=string.substring(to:min(firstCharacter,string.length)).components(separatedBy:"\n").count
-        let attributes:[NSAttributedString.Key:Any]=[.font:NSFont.monospacedDigitSystemFont(ofSize:11,weight:.regular),.foregroundColor:NSColor.secondaryLabelColor]
-        manager.enumerateLineFragments(forGlyphRange:glyphs){fragment,_,_,_,_ in
-            let label="\(line)" as NSString
-            label.draw(at:NSPoint(x:40-label.size(withAttributes:attributes).width,y:fragment.minY-visible.minY+editor.textContainerInset.height),withAttributes:attributes)
-            line+=1
-        }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        store.presentation(for: documentID)?.update(text: text, search: search, searchStep: searchStep)
     }
 }
 #endif

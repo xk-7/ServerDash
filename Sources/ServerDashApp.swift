@@ -4,20 +4,29 @@ import SwiftUI
 
 @main
 struct ServerDashApp: App {
+    @NSApplicationDelegateAdaptor(MacTerminationDelegate.self) private var terminationDelegate
     @StateObject private var appState: AppState
     @StateObject private var monitorLayoutStore: MonitorLayoutStore
     @StateObject private var persistence: PersistenceSession
     @AppStorage("appAppearance") private var appAppearanceRawValue = AppAppearance.system.rawValue
 
     init() {
+        MacUIFixture.prepareEnvironment()
         LaunchPerformanceTracker.shared.start()
-        _appState = StateObject(wrappedValue: AppState())
+        let state = MacUIFixture.isEnabled ? MacUIFixture.makeAppState() : AppState()
+        let session = PersistenceSession()
+        if MacUIFixture.isEnabled, let container = session.container {
+            do { try MacUIFixture.populate(container, app: state) }
+            catch { session.openError = error; session.container = nil }
+        }
+        _appState = StateObject(wrappedValue: state)
         _monitorLayoutStore = StateObject(wrappedValue: MonitorLayoutStore())
-        _persistence = StateObject(wrappedValue: PersistenceSession())
+        _persistence = StateObject(wrappedValue: session)
+        terminationDelegate.appState = state
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             Group {
                 if let container = persistence.container {
                     ContentView()
@@ -68,12 +77,14 @@ struct ServerDashApp: App {
             }
             .preferredColorScheme(appAppearance.colorScheme)
             .frame(minWidth: 900, minHeight: 620)
+            .background(MacFixtureWindowSetup())
         }
         .defaultSize(width: 1080, height: 760)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             SidebarCommands()
             TerminalCommands()
+            WorkbenchHostCommands()
             CommandMenu("服务器") {
                 Button("切换到监控") {
                     appState.showDetailMode(.monitor)

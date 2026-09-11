@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SwiftUI
 import SwiftTerm
 #if os(macOS)
@@ -141,15 +142,33 @@ enum TerminalShellIntegration {
     static let zsh = #"if [ -n "${ZSH_VERSION-}" ] && [ -z "${SERVERDASH_INTEGRATED-}" ]; then export SERVERDASH_INTEGRATED=1; autoload -Uz add-zsh-hook; __serverdash_preexec() { printf '\033]133;C\007'; }; add-zsh-hook preexec __serverdash_preexec; PS1=$'%{\e]133;A\a%}'"$PS1"$'%{\e]133;B\a%}'; fi"#
 }
 
+/// Display search has no command history, shell integration, recording, or AI context hooks.
+@MainActor
+final class TerminalDisplaySearch: ObservableObject {
+    @Published var isVisible = false
+    @Published var text = "" { didSet { onTextChange?() } }
+    @Published private(set) var found: Bool?
+    weak var terminal: SwiftTerm.TerminalView?
+    var onTextChange: (() -> Void)?
+    func search(backwards: Bool = false) {
+        guard let terminal else { return }
+        guard !text.isEmpty else { terminal.clearSearch(); found = nil; return }
+        found = backwards ? terminal.findPrevious(text) : terminal.findNext(text)
+    }
+    func close() { text = ""; isVisible = false; search() }
+}
+
 /// Display-only helpers owned by a session, alongside its persistent native terminal.
 @MainActor
 final class TerminalTools: ObservableObject {
-    @Published var searchVisible = false
-    @Published var searchText = "" { didSet { cache.removeAll(); redraw() } }
+    let displaySearch = TerminalDisplaySearch()
+    private var searchObservation: AnyCancellable?
+    var searchVisible: Bool { get { displaySearch.isVisible } set { displaySearch.isVisible = newValue } }
+    var searchText: String { get { displaySearch.text } set { displaySearch.text = newValue } }
     @Published var composerVisible = false
     @Published var command = ""
     @Published private(set) var promptCommand = ""
-    @Published var searchFound: Bool?
+    var searchFound: Bool? { displaySearch.found }
     @Published var showingHistory = false
     @Published var showingRules = false
     weak var terminal: SwiftTerm.TerminalView?
@@ -164,10 +183,13 @@ final class TerminalTools: ObservableObject {
         self.serverID = serverID
         self.history = history ?? .shared
         self.highlightSettings = highlightSettings ?? .shared
+        displaySearch.onTextChange = { [weak self] in self?.cache.removeAll(); self?.redraw() }
+        searchObservation = displaySearch.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     func attach(_ view: SwiftTerm.TerminalView) {
         terminal = view
+        displaySearch.terminal = view
         view.cellHighlights = { [weak self, weak view] line in
             guard let self, let view else { return [] }
             return self.highlights(line, terminal: view.getTerminal())
@@ -208,11 +230,7 @@ final class TerminalTools: ObservableObject {
               !suggestion.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
         return String(suggestion.dropFirst(promptCommand.count))
     }
-    func search(backwards: Bool = false) {
-        guard let terminal else { return }
-        if searchText.isEmpty { terminal.clearSearch(); searchFound = nil; return }
-        searchFound = backwards ? terminal.findPrevious(searchText) : terminal.findNext(searchText)
-    }
+    func search(backwards: Bool = false) { displaySearch.search(backwards: backwards) }
     func redraw() {
         #if os(macOS)
         terminal?.needsDisplay = true

@@ -65,6 +65,8 @@ struct MachineManagementView: View {
     @State private var editingRDP: RDPConnectionRecord?
     @State private var editingVNC: VNCConnectionRecord?
     @State private var editingSerial: SerialConnectionRecord?
+    @State private var availableWidth: CGFloat = 0
+    @State private var projectionCache = MachineBrowserProjectionCache()
 
     let servers: [ServerRecord]
     var rdpMachines: [RDPConnectionRecord] = []
@@ -82,124 +84,125 @@ struct MachineManagementView: View {
         servers.map(WorkbenchMachine.ssh) + rdpMachines.map(WorkbenchMachine.rdp) +
         vnc.map(WorkbenchMachine.vnc) + serial.map(WorkbenchMachine.serial)
     }
-    private var filtered: [WorkbenchMachine] {
-        let terms = searchText.split(whereSeparator: \.isWhitespace).map(String.init)
-        let includedGroups = groupNames(in: group)
-        return all.filter { item in
-            let monitorMatches: Bool
-            if case .ssh(let server) = item {
-                monitorMatches = monitoring == "all" || (monitoring == "enabled" ? server.enableDashboardMonitor : !server.enableDashboardMonitor)
-            } else { monitorMatches = monitoring == "all" }
-            return (protocolFilter == "all" || item.kind.lowercased() == protocolFilter) &&
-                (group.isEmpty || includedGroups.contains(item.group)) && (tag.isEmpty || item.tags.contains(tag)) && monitorMatches &&
-                terms.allSatisfy { term in [item.name, item.address, item.group, item.tags.joined(separator: " "), item.notes].contains { $0.localizedCaseInsensitiveContains(term) } }
-        }.sorted {
-            if sort == "newest", $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
-            if sort == "group", $0.group != $1.group { return $0.group.localizedStandardCompare($1.group) == .orderedAscending }
-            let order = $0.name.localizedStandardCompare($1.name)
-            if order != .orderedSame { return order == (sort == "nameDescending" ? .orderedDescending : .orderedAscending) }
-            return $0.id < $1.id
-        }
-    }
     private var selected: [WorkbenchMachine] { all.filter { selection.contains($0.id) } }
     private var hasFilters: Bool { !searchText.isEmpty || !group.isEmpty || !tag.isEmpty || protocolFilter != "all" || monitoring != "all" }
-    private func groupNames(in name: String) -> Set<String> {
-        guard let parent = groups.first(where: { $0.name == name }) else { return [name] }
-        let ids = MachineOrganization.descendants(of: parent.id, groups: groups)
-        return Set(groups.filter { ids.contains($0.id) }.map(\.name))
-    }
+    private var query: MachineBrowserQuery { .init(search: searchText, group: group, tag: tag, kind: protocolFilter, monitoring: monitoring, sort: sort) }
 
     var body: some View {
+        let machines = all
+        let groupItems = groups.map { MachineBrowserGroup(id: $0.id, name: $0.name, parentID: $0.parentID) }
+        let projection = projectionCache.resolve(items: machines.map(\.browserItem), groups: groupItems)
+        let indexedMachines = Dictionary(machines.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let filtered = projectionCache.filteredIDs(query).compactMap { indexedMachines[$0] }
+        let tagPairs = tags.map { ($0.name, (MachineTagTint(rawValue: $0.colorName) ?? .accent).color) }
+        let tagColors = Dictionary(tagPairs, uniquingKeysWith: { first, _ in first })
+        let browser = machineBrowser(filtered: filtered, projection: projection, tagColors: tagColors)
+            .toolbar { hostToolbar }
+            .onChange(of: filtered.map(\.id)) { _, ids in selection.formIntersection(ids) }
+            .onChange(of: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.name) })) { before, after in
+                if let id = before.first(where: { $0.value == group })?.key { group = after[id] ?? "" }
+            }
+            .onChange(of: Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0.name) })) { before, after in
+                if let id = before.first(where: { $0.value == tag })?.key { tag = after[id] ?? "" }
+            }
+        let organizationSheets = browser
+            .sheet(isPresented: $organization) { MachineOrganizationEditor(machines: all) }
+            .sheet(isPresented: $showsSync) { WebDAVSyncView() }
+            .sheet(item: $localTransfer) { LocalConfigurationTransferView(mode: $0) }
+        let transferSheets = organizationSheets
+            .sheet(isPresented: $exportSelection) { SessionExportWizard(servers: selected.compactMap { if case .ssh(let r) = $0 { return r }; return nil }) }
+            .sheet(item: $selectedImport) { source in SessionImportWizard(existingServers: servers, initialSource: source) }
+        let editorSheets = transferSheets
+            .sheet(item: $editingRDP) { record in
+                RDPEditorView(record: record) { value, connect, password in
+                    if connect { appState.openRDP(value, newTab: true, password: password) }
+                }
+            }
+            .sheet(item: $editingVNC) { VNCEditorView(record: $0) }
+            .sheet(item: $editingSerial) { SerialEditorView(record: $0) }
+            .sheet(isPresented: $batchEdit) { batchEditor }
+        return editorSheets
+            .confirmationDialog("删除所选 \(selection.count) 台主机？", isPresented: $confirmDelete) {
+                Button("删除主机", role: .destructive) { deleteSelected() }
+            } message: { Text("配置及专用凭据会被移除，活动连接会关闭。共享身份会保留。") }
+            .alert("操作失败", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("好", role: .cancel) {}
+            } message: { Text(error ?? "") }
+    }
+
+    private func machineBrowser(
+        filtered: [WorkbenchMachine],
+        projection: MachineBrowserProjection,
+        tagColors: [String: Color]
+    ) -> some View {
         GeometryReader { geometry in
-            let groupPanelVisible = showsGroups && geometry.size.width >= 960
-            let contentWidth = geometry.size.width - (groupPanelVisible ? 191 : 0)
-            VStack(spacing: 0) {
-                header(compact: geometry.size.width < 760)
-                Divider()
-                HStack(spacing: 0) {
-                    if groupPanelVisible {
-                        groupPanel.frame(width: 190)
-                        Divider()
-                    }
-                    VStack(spacing: 0) {
-                        filters(compact: !groupPanelVisible)
-                        Divider()
-                        if filtered.isEmpty { emptyState }
-                        else if mode == MachineViewMode.list.rawValue { machineTable(compact: contentWidth < 760) }
-                        else { machineGrid }
-                    }
+            let layout = MachineBrowserLayout(contentWidth: geometry.size.width, prefersGroups: showsGroups)
+            HStack(spacing: 0) {
+                if layout.showsGroupPanel {
+                    groupPanel(projection: projection).frame(width: 190)
+                    Divider()
+                }
+                VStack(spacing: 0) {
+                    filters(compact: !layout.showsGroupPanel, filtered: filtered, projection: projection)
+                    Divider()
+                    if filtered.isEmpty { emptyState }
+                    else if mode == MachineViewMode.list.rawValue { machineTable(filtered: filtered, compact: layout.usesCompactTable, tagColors: tagColors) }
+                    else { machineGrid(filtered: filtered, tagColors: tagColors) }
                 }
             }
             .background(Color.appGround)
+            .onChange(of: geometry.size.width, initial: true) { _, width in availableWidth = width }
         }
-        .onChange(of: filtered.map(\.id)) { _, ids in selection.formIntersection(ids) }
-        .onChange(of: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.name) })) { before, after in
-            if let id = before.first(where: { $0.value == group })?.key { group = after[id] ?? "" }
-        }
-        .onChange(of: Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0.name) })) { before, after in
-            if let id = before.first(where: { $0.value == tag })?.key { tag = after[id] ?? "" }
-        }
-        .sheet(isPresented: $organization) { MachineOrganizationEditor(machines: all) }
-        .sheet(isPresented: $showsSync) { WebDAVSyncView() }
-        .sheet(item: $localTransfer) { LocalConfigurationTransferView(mode: $0) }
-        .sheet(isPresented: $exportSelection) { SessionExportWizard(servers: selected.compactMap { if case .ssh(let r) = $0 { return r }; return nil }) }
-        .sheet(item: $selectedImport) { source in SessionImportWizard(existingServers: servers, initialSource: source) }
-        .sheet(item: $editingRDP) { record in
-            RDPEditorView(record: record) { value, connect, password in
-                if connect { appState.openRDP(value, newTab: true, password: password) }
-            }
-        }
-        .sheet(item: $editingVNC) { VNCEditorView(record: $0) }
-        .sheet(item: $editingSerial) { SerialEditorView(record: $0) }
-        .sheet(isPresented: $batchEdit) { batchEditor }
-        .confirmationDialog("删除所选 \(selection.count) 台主机？", isPresented: $confirmDelete) {
-            Button("删除主机", role: .destructive) { deleteSelected() }
-        } message: { Text("配置及专用凭据会被移除，活动连接会关闭。共享身份会保留。") }
-        .alert("操作失败", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
-            Button("好", role: .cancel) {}
-        } message: { Text(error ?? "") }
     }
 
-    private func header(compact: Bool) -> some View {
-        HStack(spacing: AppleDesign.Spacing.sm) {
-            VStack(alignment: .leading, spacing: 3) {
-                Label("主机管理", systemImage: "server.rack").font(.headline)
-                Text("\(all.count) 台主机 · \(appState.terminalRegistry.workspace.tabs.count) 个会话")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+    @ToolbarContentBuilder private var hostToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            if MachineBrowserLayout(contentWidth: availableWidth, prefersGroups: showsGroups).usesCompactToolbar {
+                Menu {
+                    Toggle("隐私模式", isOn: $hideIP)
+                    Menu("导入") { importActions }
+                    Menu("导出") { exportActions }
+                    Button("WebDAV 同步…", systemImage: "arrow.triangle.2.circlepath") { showsSync = true }
+                } label: { Label("主机操作", systemImage: "ellipsis.circle") }
+                .help("导入、导出、同步与隐私模式").accessibilityIdentifier("machines.toolbar.more")
+            } else {
+                Toggle(isOn: $hideIP) { Label("隐私模式", systemImage: hideIP ? "eye.slash" : "eye") }
+                    .toggleStyle(.button).help("隐藏连接地址和位置信息")
+                    .accessibilityIdentifier("machines.toolbar.privacy")
+                Menu { importActions } label: { Label("导入", systemImage: "square.and.arrow.down") }
+                    .help("导入主机配置").accessibilityIdentifier("machines.toolbar.import")
+                Menu { exportActions } label: { Label("导出", systemImage: "square.and.arrow.up") }
+                    .help("导出主机配置").accessibilityIdentifier("machines.toolbar.export")
+                Button { showsSync = true } label: { Label("同步", systemImage: "arrow.triangle.2.circlepath") }
+                    .help("WebDAV 配置同步").accessibilityIdentifier("machines.toolbar.sync")
             }
-            Spacer(minLength: 8)
-            HStack(spacing: AppleDesign.Spacing.sm) {
-            Toggle(isOn: $hideIP) { Label("隐私模式", systemImage: hideIP ? "eye.slash" : "eye") }
-                .toggleStyle(.button).help("隐藏连接地址和位置信息")
-            Menu {
-                Button("本机主机配置包…") { localTransfer = .importFile }
-                Divider()
-                ForEach(SessionTransferSource.allCases) { source in Button(source.title) { selectedImport = source } }
-            } label: { Label("导入", systemImage: "square.and.arrow.down") }
-            Menu {
-                Button("主机配置包（全部协议）…") { localTransfer = .exportAll }.disabled(all.isEmpty)
-                Button("SSH 兼容格式…", action: onExport).disabled(servers.isEmpty)
-            } label: { Image(systemName: "square.and.arrow.up") }.help("导出主机配置").accessibilityLabel("导出主机配置")
-            Button { showsSync = true } label: { Label("同步", systemImage: "arrow.triangle.2.circlepath") }.help("WebDAV 配置同步")
-            Button("新建主机", systemImage: "plus", action: onAdd).buttonStyle(.borderedProminent)
-                .help("新建主机")
-            }.labelStyle(WorkbenchMachineActionLabelStyle(compact: compact))
+            Button("新建主机", systemImage: "plus", action: onAdd)
+                .help("新建主机（⌘N）").accessibilityIdentifier("machines.toolbar.new")
         }
-        .controlSize(.regular).padding(AppleDesign.Spacing.md)
     }
 
-    private func filters(compact: Bool) -> some View {
-        VStack(spacing: 10) {
+    @ViewBuilder private var importActions: some View {
+        Button("本机主机配置包…") { localTransfer = .importFile }
+        Divider()
+        ForEach(SessionTransferSource.allCases) { source in Button(source.title) { selectedImport = source } }
+    }
+    @ViewBuilder private var exportActions: some View {
+        Button("主机配置包（全部协议）…") { localTransfer = .exportAll }.disabled(all.isEmpty)
+        Button("SSH 兼容格式…", action: onExport).disabled(servers.isEmpty)
+    }
+
+    private func filters(compact: Bool, filtered: [WorkbenchMachine], projection: MachineBrowserProjection) -> some View {
+        VStack(spacing: 8) {
             HStack {
-                if !compact {
-                    Button { showsGroups.toggle() } label: { Image(systemName: "sidebar.leading") }
-                        .help("显示或隐藏分组").accessibilityLabel("显示或隐藏分组")
-                }
+                Button { showsGroups.toggle() } label: { Image(systemName: "sidebar.leading") }
+                    .help(availableWidth < 900 ? "设置宽窗口的分组栏显示偏好" : (showsGroups ? "隐藏分组栏" : "显示分组栏"))
+                    .accessibilityLabel("显示或隐藏分组栏").accessibilityValue(showsGroups ? "显示" : "隐藏")
+                    .accessibilityIdentifier("machines.groups.toggle")
                 AppleSearchField(prompt: "搜索主机、地址、标签或备注", text: $searchText)
                 Picker("协议", selection: $protocolFilter) {
                     Text("全部协议").tag("all")
                     ForEach(["SSH", "RDP", "VNC", "SERIAL"], id: \.self) { Text($0).tag($0.lowercased()) }
-                }.frame(width: 130).labelsHidden()
+                }.frame(width: compact ? 105 : 120).labelsHidden()
                 Menu {
                     Picker("排序", selection: $sort) { ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) } }
                     Picker("监控", selection: $monitoring) { ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) } }
@@ -213,10 +216,12 @@ struct MachineManagementView: View {
                 HStack {
                     Picker("分组", selection: $group) {
                         Text("全部分组").tag("")
-                        if !groups.contains(where: { $0.name == "默认分组" }) { Text("默认分组").tag("默认分组") }
-                        ForEach(groupRows(), id: \.0.id) { item in Text(String(repeating: "　", count: item.1) + item.0.name).tag(item.0.name) }
+                        if !projection.groupNames.contains("默认分组") { Text("默认分组").tag("默认分组") }
+                        ForEach(projection.groupRows) { item in Text(String(repeating: "　", count: item.depth) + item.group.name).tag(item.group.name) }
                     }
+                    .accessibilityIdentifier("machines.groups.filter")
                     Picker("标签", selection: $tag) { Text("全部标签").tag(""); ForEach(tags) { Text($0.name).tag($0.name) } }
+                        .accessibilityIdentifier("machines.tags.filter")
                 }
             }
             HStack {
@@ -231,28 +236,28 @@ struct MachineManagementView: View {
                 Spacer()
                 if hasFilters { Button("清除筛选") { searchText = ""; group = ""; tag = ""; protocolFilter = "all"; monitoring = "all" } }
             }.font(.caption).buttonStyle(.borderless)
-        }.padding(AppleDesign.Spacing.md)
+        }.padding(12)
     }
 
-    private var groupPanel: some View {
+    private func groupPanel(projection: MachineBrowserProjection) -> some View {
         VStack(spacing: 0) {
             List {
                 Section("分组导航") {
                     Button { group = "" } label: { Label("全部主机", systemImage: "square.grid.2x2").foregroundStyle(group.isEmpty ? Color.appAccent : .primary) }
-                    if !groups.contains(where: { $0.name == "默认分组" }) {
+                    if !projection.groupNames.contains("默认分组") {
                         Button { group = "默认分组" } label: {
                             Label("默认分组", systemImage: "folder").foregroundStyle(group == "默认分组" ? Color.appAccent : .primary)
                         }
                     }
-                    ForEach(groupRows(), id: \.0.id) { item in
-                        Button { group = item.0.name } label: {
+                    ForEach(projection.groupRows) { item in
+                        Button { group = item.group.name } label: {
                             HStack {
-                                Label(item.0.name, systemImage: "folder").lineLimit(1)
+                                Label(item.group.name, systemImage: "folder").lineLimit(1)
                                 Spacer()
-                                Text("\(all.filter { groupNames(in: item.0.name).contains($0.group) }.count)").foregroundStyle(.secondary)
-                            }.padding(.leading, CGFloat(item.1) * 12)
-                                .foregroundStyle(group == item.0.name ? Color.appAccent : .primary)
-                        }.help("\(item.0.name)（包含子分组）")
+                                Text("\(item.count)").foregroundStyle(.secondary).monospacedDigit()
+                            }.padding(.leading, CGFloat(item.depth) * 12)
+                                .foregroundStyle(group == item.group.name ? Color.appAccent : .primary)
+                        }.help("\(item.group.name)（包含子分组）")
                     }
                 }
                 Section("标签筛选") {
@@ -269,42 +274,31 @@ struct MachineManagementView: View {
                 .frame(maxWidth: .infinity).padding(12)
         }
     }
-    private func groupRows() -> [(MachineGroupRecord, Int)] {
-        var rows: [(MachineGroupRecord, Int)] = []
-        var visited = Set<UUID>()
-        func append(_ parent: UUID?, depth: Int) {
-            for value in groups where value.parentID == parent && !visited.contains(value.id) {
-                visited.insert(value.id); rows.append((value, depth)); append(value.id, depth: depth + 1)
-            }
-        }
-        append(nil, depth: 0)
-        for value in groups where !visited.contains(value.id) { rows.append((value, 0)) }
-        return rows
-    }
-
-    private var machineGrid: some View {
+    private func machineGrid(filtered: [WorkbenchMachine], tagColors: [String: Color]) -> some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
                 ForEach(filtered) { item in
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 9) {
                         HStack {
-                            Image(systemName: item.symbol).font(.title2).foregroundStyle(.secondary)
+                            Image(systemName: item.symbol).font(.title3).foregroundStyle(.secondary)
+                            protocolBadge(item.kind)
                             Spacer()
                             machineStatus(item)
                             Toggle("选择 \(item.name)", isOn: selectionBinding(item)).labelsHidden().toggleStyle(.checkbox)
                         }
                         Button { show(item) } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack { Text(item.name).font(.headline).lineLimit(1); protocolBadge(item.kind) }
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.name).font(.headline).lineLimit(1).help(item.name)
                                 Text(hideIP ? "连接地址已隐藏" : item.address).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    .help(hideIP ? "连接地址已隐藏" : item.address)
                                 machineSystem(item)
-                                Text(item.notes.isEmpty ? "暂无备注" : item.notes).font(.caption).foregroundStyle(.secondary).lineLimit(2).frame(height: 30, alignment: .top)
+                                if !item.notes.isEmpty { Text(item.notes).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.notes) }
                                 HStack {
-                                    Text(item.group.isEmpty ? "默认分组" : item.group).lineLimit(1)
+                                    Text(item.group).lineLimit(1).help(item.group)
                                     Spacer()
                                     if item.kind == "VNC", let date = item.lastOpened { Text(date, style: .relative).help("最后启动时间") }
                                 }.font(.caption).foregroundStyle(.secondary)
-                                tagSummary(item.tags).font(.caption).lineLimit(1)
+                                if !item.tags.isEmpty { tagSummary(item.tags, colors: tagColors).font(.caption).lineLimit(1).help(item.tags.joined(separator: "、")) }
                             }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                         Divider()
@@ -314,26 +308,26 @@ struct MachineManagementView: View {
                         .contextMenu { itemMenu(item) }
                         .id(item.uuid)
                 }
-            }.scrollTargetLayout().padding(16)
+            }.scrollTargetLayout().padding(12)
         }.scrollPosition(id: $scrollAnchor, anchor: .top)
     }
 
-    private func machineTable(compact: Bool) -> some View {
+    private func machineTable(filtered: [WorkbenchMachine], compact: Bool, tagColors: [String: Color]) -> some View {
         Group {
             if compact {
                 Table(filtered, selection: $selection) {
-                    TableColumn("主机信息") { machineInformation($0, compact: true) }.width(min: 160, ideal: 240)
+                    TableColumn("主机信息") { machineInformation($0, compact: true, tagColors: tagColors) }.width(min: 160, ideal: 240)
                     TableColumn("状态 / 延迟") { machineStatus($0) }.width(min: 90, ideal: 100)
                     TableColumn("协议") { protocolBadge($0.kind) }.width(60)
                     TableColumn("") { machineConnectButton($0) }.width(36)
                 }
             } else {
                 Table(filtered, selection: $selection) {
-                    TableColumn("主机信息") { machineInformation($0, compact: false) }.width(min: 160, ideal: 240)
+                    TableColumn("主机信息") { machineInformation($0, compact: false, tagColors: tagColors) }.width(min: 160, ideal: 240)
                     TableColumn("状态 / 延迟") { machineStatus($0) }.width(min: 90, ideal: 100)
                     TableColumn("协议") { protocolBadge($0.kind) }.width(60)
-                    TableColumn("分组") { Text($0.group).lineLimit(1) }.width(min: 65, ideal: 100)
-                    TableColumn("标签") { tagSummary($0.tags).lineLimit(1) }.width(min: 65, ideal: 100)
+                    TableColumn("分组") { Text($0.group).lineLimit(1).help($0.group) }.width(min: 65, ideal: 100)
+                    TableColumn("标签") { tagSummary($0.tags, colors: tagColors).lineLimit(1).help($0.tags.joined(separator: "、")) }.width(min: 65, ideal: 100)
                     TableColumn("最近连接 / 启动") { item in
                         if let date = item.lastOpened { Text(date, style: .relative).font(.caption).help(item.kind == "VNC" ? "最后启动系统屏幕共享的时间，不代表连接成功" : "最近连接时间") }
                         else { Text("—").foregroundStyle(.secondary) }
@@ -352,20 +346,21 @@ struct MachineManagementView: View {
             }
         } primaryAction: { ids in if let item = all.first(where: { ids.contains($0.id) }) { show(item) } }
     }
-    private func machineInformation(_ item: WorkbenchMachine, compact: Bool) -> some View {
+    private func machineInformation(_ item: WorkbenchMachine, compact: Bool, tagColors: [String: Color]) -> some View {
         HStack(spacing: 10) {
             Image(systemName: item.symbol).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Button { show(item) } label: { Text(item.name).fontWeight(.medium).lineLimit(1) }
                     .buttonStyle(.plain).foregroundStyle(Color.appAccent).help("查看 \(item.name) 详情")
                 Text(hideIP ? "连接地址已隐藏" : item.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .help(hideIP ? "连接地址已隐藏" : item.address)
                 machineSystem(item)
                 if compact {
-                    (Text(item.group + (item.tags.isEmpty ? "" : " · ")).foregroundColor(.secondary) + tagSummary(item.tags, empty: "")).font(.caption).lineLimit(1)
-                    if let date = item.lastOpened { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary) }
+                    (Text(item.group + (item.tags.isEmpty ? "" : " · ")).foregroundColor(.secondary) + tagSummary(item.tags, colors: tagColors, empty: "")).font(.caption).lineLimit(1)
+                        .help(([item.group] + item.tags).joined(separator: "、"))
                 }
             }
-        }.padding(.vertical, 7).onTapGesture(count: 2) { show(item) }.contextMenu { itemMenu(item) }
+        }.padding(.vertical, 4).onTapGesture(count: 2) { show(item) }.contextMenu { itemMenu(item) }
     }
     private func machineConnectButton(_ item: WorkbenchMachine) -> some View {
         Button { connect(item) } label: { Image(systemName: "bolt.horizontal") }
@@ -383,7 +378,6 @@ struct MachineManagementView: View {
                         Button { selectedImport = source } label: { Label("从 \(source.title) 导入", systemImage: source.symbol).frame(maxWidth: .infinity, alignment: .leading).padding(10) }
                     }
                 }.frame(maxWidth: 720)
-                Button("新建主机", systemImage: "plus", action: onAdd).buttonStyle(.borderedProminent)
             }
             Spacer()
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -407,10 +401,10 @@ struct MachineManagementView: View {
         Text(value).font(.caption.weight(.medium)).padding(.horizontal, 6).padding(.vertical, 3)
             .background(Color.appTrack, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.chip))
     }
-    private func tagSummary(_ names: [String], empty: String = "无标签") -> Text {
+    private func tagSummary(_ names: [String], colors: [String: Color], empty: String = "—") -> Text {
         guard !names.isEmpty else { return Text(empty).foregroundColor(.secondary) }
         return names.enumerated().reduce(Text("")) { result, item in
-            let color = tags.first { $0.name == item.element }.flatMap { MachineTagTint(rawValue: $0.colorName) }?.color ?? .appAccent
+            let color = colors[item.element] ?? .appAccent
             return result + Text((item.offset == 0 ? "" : "  ") + "#" + item.element).foregroundColor(color)
         }
     }
@@ -492,10 +486,12 @@ struct MachineManagementView: View {
     }
 }
 
-private struct WorkbenchMachineActionLabelStyle: LabelStyle {
-    let compact: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) { configuration.icon; if !compact { configuration.title } }
+private extension WorkbenchMachine {
+    var browserItem: MachineBrowserItem {
+        let monitoring: Bool?
+        if case .ssh(let server) = self { monitoring = server.enableDashboardMonitor } else { monitoring = nil }
+        return MachineBrowserItem(id: id, name: name, address: address, group: group, tags: tags, notes: notes,
+                                  kind: kind, createdAt: createdAt, monitoringEnabled: monitoring)
     }
 }
 

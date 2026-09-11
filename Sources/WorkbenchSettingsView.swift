@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-private enum SettingsPage: String, CaseIterable, Identifiable {
+enum SettingsPage: String, CaseIterable, Identifiable {
     case general, terminal, monitoring, files, shortcuts, security, sync, recording, ai
     var id: String { rawValue }
     var title: String { switch self { case .general: "通用"; case .terminal: "终端"; case .monitoring: "监控"; case .files: "SFTP"; case .shortcuts: "快捷键"; case .security: "安全"; case .sync: "同步"; case .recording: "录制"; case .ai: "AI 助手" } }
@@ -14,22 +14,29 @@ struct SettingsView: View {
     @AppStorage("networkDisplayInBits") private var networkBits = false
     @AppStorage("hideIPInformation") private var hideIP = false
     @AppStorage("disableLocationLookup") private var disableLocation = false
-    @AppStorage("sshConnectTimeout") private var connectionTimeout = 8.0
     @AppStorage("confirmHostFingerprint") private var confirmFingerprint = true
     @AppStorage("workbench.localShellPath") private var localShell = ""
     @AppStorage("workbench.localShellEnvironment") private var localEnvironment = "inherit"
-    @State private var page: SettingsPage? = .general
+    @AppStorage("mac.settings.selectedPage") private var pageID = SettingsPage.general.rawValue
+    @State private var timeoutText = ""
+    @State private var timeoutError: String?
+    @State private var timeoutSaved = false
+    @FocusState private var timeoutFocused: Bool
     @State private var shortcutSearch = ""
+    private var page: SettingsPage { SettingsPage(rawValue: pageID) ?? .general }
+    private var pageSelection: Binding<SettingsPage?> {
+        Binding(get: { page }, set: { if let value = $0 { pageID = value.rawValue } })
+    }
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsPage.allCases, selection: $page) {
+            List(SettingsPage.allCases, selection: pageSelection) {
                 Label($0.title, systemImage: $0.symbol).tag($0)
             }.listStyle(.sidebar).navigationTitle("设置")
                 .navigationSplitViewColumnWidth(min: 155, ideal: 170, max: 210)
         } detail: {
             VStack(alignment: .leading, spacing: 0) {
-                Label((page ?? .general).title, systemImage: (page ?? .general).symbol)
+                Label(page.title, systemImage: page.symbol)
                     .font(.title2.weight(.semibold)).padding(20)
                 Divider()
                 detail.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -37,9 +44,11 @@ struct SettingsView: View {
         }
         .frame(minWidth: 820, idealWidth: 1000, minHeight: 620, idealHeight: 740)
         .preferredColorScheme((AppAppearance(rawValue: appearance) ?? .system).colorScheme)
+        .onAppear { reloadTimeout() }
+        .onChange(of: pageID) { _, _ in reloadTimeout() }
     }
     @ViewBuilder private var detail: some View {
-        switch page ?? .general {
+        switch page {
         case .general:
             Form {
                 Section("外观") {
@@ -49,7 +58,7 @@ struct SettingsView: View {
                 }
                 Section("工作区") {
                     Text("标签与连接由工作区持有，切换页面后保持运行。").foregroundStyle(.secondary)
-                    LabeledContent("版本", value: "ServerDash 1.0")
+                    LabeledContent("版本", value: MacSettingsValidation.versionLabel())
                 }
             }.formStyle(.grouped)
         case .terminal:
@@ -97,8 +106,19 @@ struct SettingsView: View {
                 Section("SSH") {
                     Toggle("首次连接时确认主机指纹", isOn: $confirmFingerprint)
                     LabeledContent("默认连接超时") {
-                        TextField("秒", value: $connectionTimeout, format: .number).frame(width: 80)
+                        HStack {
+                            TextField("5–300", text: $timeoutText).frame(width: 80)
+                                .focused($timeoutFocused).onSubmit(saveTimeout)
+                                .accessibilityLabel("默认连接超时，秒")
+                                .onChange(of: timeoutText) { _, _ in timeoutSaved = false; timeoutError = nil }
+                            Text("秒").foregroundStyle(.secondary)
+                            Button("保存", action: saveTimeout)
+                                .disabled(MacSettingsValidation.timeout(timeoutText) == nil)
+                        }
                     }
+                    if let timeoutError { Text(timeoutError).foregroundStyle(Color.appError) }
+                    else if timeoutSaved { Label("已保存", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+                    else if MacSettingsValidation.timeout(timeoutText) == nil { Text("请输入 5–300 之间的整数秒数。").foregroundStyle(Color.appError) }
                     Text("已有连接可在编辑主机中设置独立超时。主机密钥变化时继续要求重新确认。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("位置采集") {
@@ -113,14 +133,42 @@ struct SettingsView: View {
         }
     }
     private var shortcuts: [(String, String)] {
-        [("新建主机", "⌘N"), ("刷新全部", "⌘R"), ("重试失败监控", "⇧⌘R"), ("新建 SSH 标签", "⌘T"),
+        [("新建主机", "⌘N"), ("刷新全部", "⌘R"), ("重试失败监控", "⇧⌘R"), ("新建会话标签", "⌘T"),
          ("下一标签", "⌃Tab"), ("上一标签", "⌃⇧Tab"), ("向右分屏", "⌃⇧D"), ("向下分屏", "⌃⇧E"),
          ("关闭活跃面板", "⌃⇧W"), ("查找终端", "⌘F / ⌃F"), ("显示检查器", "⌥⌘I"),
          ("放大字号", "⌘+"), ("缩小字号", "⌘−"), ("恢复字号", "⌘0"), ("终端外观", "⇧⌘,"),
          ("保存远程文件", "⌘S"), ("设置", "⌘,")]
     }
+    private func reloadTimeout() {
+        timeoutText = MacSettingsValidation.timeoutText(PrivacySettings.connectTimeout)
+        timeoutError = nil; timeoutSaved = false
+    }
+    private func saveTimeout() {
+        guard let seconds = MacSettingsValidation.timeout(timeoutText) else {
+            timeoutError = "请输入 5–300 之间的整数秒数。"; return
+        }
+        UserDefaults.standard.set(seconds, forKey: "sshConnectTimeout")
+        timeoutText = String(seconds); timeoutError = nil; timeoutSaved = true; timeoutFocused = false
+    }
     private func chooseShell() {
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false; panel.directoryURL = URL(fileURLWithPath: "/bin")
         if panel.runModal() == .OK, let url = panel.url { localShell = url.path }
+    }
+}
+
+enum MacSettingsValidation {
+    static func timeout(_ text: String) -> Int? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let seconds = Int(value), (5...300).contains(seconds) else { return nil }
+        return seconds
+    }
+    static func versionLabel(info: [String: Any] = Bundle.main.infoDictionary ?? [:]) -> String {
+        let version = info["CFBundleShortVersionString"] as? String ?? "—"
+        guard let build = info["CFBundleVersion"] as? String, !build.isEmpty else { return version }
+        return "\(version)（\(build)）"
+    }
+    static func timeoutText(_ seconds: TimeInterval) -> String {
+        seconds.rounded() == seconds ? String(Int(seconds)) : String(seconds)
     }
 }

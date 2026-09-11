@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import Combine
 import Foundation
 import IOKit
 import IOKit.serial
@@ -210,6 +211,19 @@ struct LocalShellConfiguration: Equatable, Sendable {
 private final class WorkbenchTerminalView: LocalProcessTerminalView {
     var serialSend: ((Data) -> Void)?
     var ended: ((Int32?) -> Void)?
+    var onAttached: (() -> Void)?
+    var onFontShortcut: ((TerminalFontShortcut) -> Void)?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { onAttached?() }
+    }
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let window, window.isKeyWindow, window.attachedSheet == nil,
+           window.firstResponder === self, let shortcut = TerminalFontShortcut.resolve(event), let onFontShortcut {
+            onFontShortcut(shortcut); return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
     override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
         if let serialSend { serialSend(Data(data)) } else { super.send(source: source, data: data) }
     }
@@ -230,8 +244,19 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
     private let serialConfigurationProvider: (() throws -> SerialPortConfiguration)?
     private let localConfiguration: LocalShellConfiguration?
     private var transport: SerialPortTransport?
-    private var generation = UUID()
-    init(record: SerialConnectionRecord) {
+    private(set) var connectionGeneration = UUID()
+    let displaySearch = TerminalDisplaySearch()
+    @Published private(set) var appearanceProfile = TerminalAppearanceProfile.default
+    private var initialAppearanceProfile = TerminalAppearanceProfile.default
+    private var appearanceObservation: AnyCancellable?
+    private var appliedProfile: TerminalAppearanceProfile?
+    private var appliedDarkAppearance: Bool?
+    private var appliedReduceMotion: Bool?
+    private var pendingFocus = false
+    var usesDarkAppearance: Bool {
+        appliedDarkAppearance ?? (terminal.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+    }
+    init(record: SerialConnectionRecord, appearanceStore: TerminalAppearanceStore? = nil) {
         recordID = record.id; name = record.displayName; kind = .serial
         let container = record.modelContext?.container
         let machineID = record.id
@@ -245,30 +270,30 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
             return latest.configuration
         }
         localConfiguration = nil
-        terminal = WorkbenchTerminalView(frame: .zero); hostView = terminal; configureAppearance()
+        terminal = WorkbenchTerminalView(frame: .zero); hostView = terminal; configureAppearance(store: appearanceStore ?? .shared)
     }
-    init(local: LocalShellConfiguration = .current()) {
+    init(local: LocalShellConfiguration = .current(), appearanceStore: TerminalAppearanceStore? = nil) {
         recordID = UUID(); name = "本地终端"; kind = .local
         serialConfigurationProvider = nil; localConfiguration = local
-        terminal = WorkbenchTerminalView(frame: .zero); hostView = terminal; configureAppearance()
+        terminal = WorkbenchTerminalView(frame: .zero); hostView = terminal; configureAppearance(store: appearanceStore ?? .shared)
     }
     func reconnect() {
-        close(); status = .connecting; lastError = nil; let current = UUID(); generation = current
+        close(); status = .connecting; lastError = nil; let current = UUID(); connectionGeneration = current
         do {
             if let serialConfigurationProvider {
                 let configuration = try serialConfigurationProvider()
                 let port = SerialPortTransport()
                 terminal.serialSend = { [weak port] in port?.write($0) }
                 try port.open(configuration, output: { [weak self] bytes in
-                    Task { @MainActor in guard let self, self.generation == current else { return }; self.terminal.feed(byteArray: Array(bytes)[...]) }
+                    Task { @MainActor in guard let self, self.connectionGeneration == current else { return }; self.terminal.feed(byteArray: Array(bytes)[...]) }
                 }, ended: { [weak self] error in
-                    Task { @MainActor in guard let self, self.generation == current else { return }; self.lastError = error; self.status = error == nil ? .disconnected : .failed }
+                    Task { @MainActor in guard let self, self.connectionGeneration == current else { return }; self.lastError = error; self.status = error == nil ? .disconnected : .failed }
                 })
                 transport = port
             } else if let local = localConfiguration {
                 try local.validate()
                 terminal.ended = { [weak self] code in
-                    guard let self, self.generation == current else { return }
+                    guard let self, self.connectionGeneration == current else { return }
                     self.status = code == 0 ? .disconnected : .failed
                     self.lastError = code == 0 ? nil : "本地 Shell 已结束（\(code ?? -1)）。"
                 }
@@ -281,20 +306,76 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
         } catch { lastError = error.localizedDescription; status = .failed }
     }
     func close() {
-        generation = UUID(); transport?.close(); transport = nil; terminal.serialSend = nil
+        connectionGeneration = UUID(); transport?.close(); transport = nil; terminal.serialSend = nil
         if terminal.process.running { terminal.replaceProcess() }
         status = .disconnected
     }
-    func focus() { guard let window = terminal.window, window.isKeyWindow, window.attachedSheet == nil else { return }; window.makeFirstResponder(terminal) }
-    private func configureAppearance() {
-        let profile = TerminalAppearanceStore.shared.profile.validated()
-        terminal.font = TerminalFontCatalog.font(name: profile.fontPostScriptName, size: profile.fontSize)
-        terminal.lineHeightMultiplier = profile.lineHeight; terminal.characterSpacing = profile.letterSpacing
-        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let theme = TerminalAppearanceStore.shared.theme(dark: dark)
-        terminal.nativeBackgroundColor = theme.background.nsColor; terminal.nativeForegroundColor = theme.foreground.nsColor
-        terminal.caretColor = theme.cursor.nsColor
+    /// Explicit tab selection/open is the only source of deferred focus requests.
+    func requestFocus() { pendingFocus = true; fulfillFocusRequest() }
+    private func fulfillFocusRequest() {
+        guard pendingFocus, terminal.window != nil else { return }
+        pendingFocus = false; focus()
     }
+    func focus() {
+        guard let window = terminal.window, window.isKeyWindow, window.attachedSheet == nil,
+              window.sheetParent == nil, NSApp.modalWindow == nil,
+              (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true else { return }
+        window.makeFirstResponder(terminal)
+    }
+    private func configureAppearance(store: TerminalAppearanceStore) {
+        initialAppearanceProfile = store.profile.validated()
+        appearanceProfile = initialAppearanceProfile
+        displaySearch.terminal = terminal
+        terminal.onAttached = { [weak self] in self?.fulfillFocusRequest() }
+        terminal.onFontShortcut = { [weak self] in self?.performFontShortcut($0) }
+        applyAppearance(appearanceProfile, dark: terminal.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+        appearanceObservation = store.$profile.dropFirst().sink { [weak self] profile in
+            guard let self else { return }
+            self.applyAppearance(profile, dark: self.usesDarkAppearance)
+        }
+    }
+    func applyAppearance(_ value: TerminalAppearanceProfile, dark: Bool) {
+        let profile = value == appearanceProfile ? appearanceProfile : value.validated()
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard appliedProfile != profile || appliedDarkAppearance != dark || appliedReduceMotion != reduceMotion else { return }
+        let previous = appliedProfile
+        let previousTheme = appliedDarkAppearance == true ? previous?.darkThemeID : previous?.lightThemeID
+        let themeID = dark ? profile.darkThemeID : profile.lightThemeID
+        if appearanceProfile != profile { appearanceProfile = profile }
+        if previous?.fontPostScriptName != profile.fontPostScriptName || previous?.fontSize != profile.fontSize {
+            terminal.font = TerminalFontCatalog.font(name: profile.fontPostScriptName, size: profile.fontSize)
+        }
+        if previous?.lineHeight != profile.lineHeight { terminal.lineHeightMultiplier = profile.lineHeight }
+        if previous?.letterSpacing != profile.letterSpacing { terminal.characterSpacing = profile.letterSpacing }
+        if previous?.scrollbarMode != profile.scrollbarMode { terminal.scrollbarVisibility = TerminalHostView.scrollbarVisibility(profile.scrollbarMode) }
+        if previousTheme != themeID || appliedDarkAppearance != dark {
+            let theme = TerminalThemeCatalog.shared.theme(id: themeID, dark: dark)
+            terminal.nativeBackgroundColor = theme.background.nsColor; terminal.nativeForegroundColor = theme.foreground.nsColor
+            terminal.caretColor = theme.cursor.nsColor; terminal.caretTextColor = theme.background.nsColor
+            terminal.selectedTextBackgroundColor = theme.selectionBackground.nsColor
+            terminal.selectedTextForegroundColor = theme.selectionForeground.nsColor
+            terminal.installColors(theme.ansiColors.map(TerminalHostView.swiftTermColor))
+        }
+        if previous?.activeCursorStyle != profile.activeCursorStyle || previous?.cursorBlinkEnabled != profile.cursorBlinkEnabled || appliedReduceMotion != reduceMotion {
+            terminal.applyCursorStyle(TerminalHostView.cursorStyle(shape: profile.activeCursorStyle, blinking: profile.cursorBlinkEnabled && !reduceMotion))
+        }
+        if previous?.inactiveCursorStyle != profile.inactiveCursorStyle { terminal.inactiveCursorStyle = TerminalHostView.inactiveCursorStyle(profile.inactiveCursorStyle) }
+        terminal.bellEnabled = profile.terminalBellEnabled
+        appliedProfile = profile; appliedDarkAppearance = dark; appliedReduceMotion = reduceMotion
+        terminal.needsDisplay = true
+    }
+    func applyGlobalAppearance(dark: Bool) { applyAppearance(TerminalAppearanceStore.shared.profile, dark: dark) }
+    func resetAppearance(dark: Bool) { applyAppearance(initialAppearanceProfile, dark: dark) }
+    func performFontShortcut(_ shortcut: TerminalFontShortcut) {
+        var profile = appearanceProfile
+        switch shortcut {
+        case .increase: profile.fontSize = min(48, profile.fontSize + 1)
+        case .decrease: profile.fontSize = max(8, profile.fontSize - 1)
+        case .reset: profile.fontSize = initialAppearanceProfile.fontSize
+        }
+        applyAppearance(profile, dark: usesDarkAppearance)
+    }
+
 }
 
 @MainActor final class WorkbenchSessionRegistry: ObservableObject {
@@ -303,7 +384,7 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
     func open(_ controller: WorkbenchSessionController, workspace: TerminalWorkspace) {
         controllers[controller.id] = controller
         workspace.add(sessionID: controller.id, serverID: controller.recordID, title: controller.name, kind: controller.kind)
-        controller.reconnect()
+        controller.reconnect(); controller.requestFocus()
     }
     func close(_ id: UUID) { controllers.removeValue(forKey: id)?.close() }
     func closeAll() { controllers.values.forEach { $0.close() }; controllers.removeAll() }
@@ -311,6 +392,7 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
 
 @MainActor enum WorkbenchConnectionLauncher {
     static func openVNC(_ record: VNCConnectionRecord) async throws {
+        if MacUIFixture.isEnabled { throw WorkbenchConnectionError.unavailable("隔离验收不启动真实连接。") }
         let url = try record.connectionURL()
         guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.ScreenSharing") else { throw WorkbenchConnectionError.unavailable("未找到系统屏幕共享应用。") }
         _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: .init())
@@ -318,6 +400,7 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
         try record.modelContext?.save()
     }
     static func openSerial(_ record: SerialConnectionRecord, appState: AppState, reconnect: Bool = false) throws {
+        if MacUIFixture.isEnabled { throw WorkbenchConnectionError.unavailable("隔离验收不启动真实连接。") }
         try record.configuration.validate()
         if let tab = appState.terminalRegistry.workspace.tabs.reversed().first(where: { $0.kind == .serial && $0.serverID == record.id }),
            let existing = appState.workbenchSessions.controller(for: tab.activePane) {
@@ -325,7 +408,7 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
                 existing.reconnect()
                 if existing.status == .connected { record.lastConnectedAt = .now; try record.modelContext?.save() }
             }
-            appState.terminalRegistry.workspace.select(pane: existing.id); appState.route = .section(.terminal); return
+            appState.terminalRegistry.workspace.select(pane: existing.id); appState.route = .section(.terminal); existing.requestFocus(); return
         }
         let controller = WorkbenchSessionController(record: record)
         appState.workbenchSessions.open(controller, workspace: appState.terminalRegistry.workspace)
@@ -333,6 +416,7 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
         if controller.status == .connected { record.lastConnectedAt = .now; try record.modelContext?.save() }
     }
     static func openLocal(appState: AppState) throws {
+        if MacUIFixture.isEnabled { throw WorkbenchConnectionError.unavailable("隔离验收不启动真实连接。") }
         let config = LocalShellConfiguration.current(); try config.validate()
         appState.workbenchSessions.open(.init(local: config), workspace: appState.terminalRegistry.workspace)
         appState.route = .section(.terminal)
@@ -349,12 +433,23 @@ struct WorkbenchSessionPane: View {
                 if controller.status != .connected { Button("重新连接") { controller.reconnect() } }
             }.padding(10).background(.bar)
             if let error = controller.lastError { Text(error).foregroundStyle(.red).font(.caption).padding(8) }
+            TerminalDisplaySearchBar(search: controller.displaySearch, onClose: controller.focus)
             WorkbenchTerminalRepresentable(controller: controller)
         }
     }
 }
-private struct WorkbenchTerminalRepresentable: NSViewRepresentable {
-    let controller: WorkbenchSessionController
-    func makeNSView(context: Context) -> NSView { controller.hostView }
-    func updateNSView(_ nsView: NSView, context: Context) { DispatchQueue.main.async { controller.focus() } }
+struct WorkbenchTerminalRepresentable: NSViewRepresentable {
+    @ObservedObject var controller: WorkbenchSessionController
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeNSView(context: Context) -> NSView {
+        controller.applyAppearance(controller.appearanceProfile, dark: colorScheme == .dark)
+        return controller.hostView
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        controller.applyAppearance(controller.appearanceProfile, dark: colorScheme == .dark)
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: .zero)
+    }
 }

@@ -581,7 +581,9 @@ final class TerminalHostView: NSView {
     }
 
     func focusTerminal() {
-        guard let window, window.isKeyWindow, window.attachedSheet == nil else { return }
+        guard let window, window.isKeyWindow, window.attachedSheet == nil,
+              window.sheetParent == nil, NSApp.modalWindow == nil,
+              (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true else { return }
         window.makeFirstResponder(terminalView)
     }
 
@@ -677,7 +679,7 @@ final class TerminalHostView: NSView {
         terminalView.startProcess(executable: plan.executable, args: plan.arguments, environment: environment, execName: "ssh")
     }
 
-    private static func swiftTermColor(_ color: TerminalColor) -> SwiftTerm.Color {
+    static func swiftTermColor(_ color: TerminalColor) -> SwiftTerm.Color {
         let rgb = color.nsColor.usingColorSpace(.sRGB) ?? color.nsColor
         return SwiftTerm.Color(
             red: UInt16(max(0, min(65_535, rgb.redComponent * 65_535))),
@@ -686,7 +688,7 @@ final class TerminalHostView: NSView {
         )
     }
 
-    private static func cursorStyle(
+    static func cursorStyle(
         shape: TerminalCursorShape,
         blinking: Bool
     ) -> SwiftTerm.CursorStyle {
@@ -700,7 +702,7 @@ final class TerminalHostView: NSView {
         }
     }
 
-    private static func inactiveCursorStyle(
+    static func inactiveCursorStyle(
         _ style: TerminalInactiveCursorStyle
     ) -> SwiftTerm.InactiveCursorStyle {
         switch style {
@@ -712,7 +714,7 @@ final class TerminalHostView: NSView {
         }
     }
 
-    private static func scrollbarVisibility(
+    static func scrollbarVisibility(
         _ mode: TerminalScrollbarMode
     ) -> SwiftTerm.ScrollbarVisibility {
         switch mode {

@@ -187,25 +187,7 @@ struct TerminalTunnelManagerView: View {
     }
 }
 
-struct TerminalWindowWidthReader: NSViewRepresentable {
-    let update: (CGFloat) -> Void
-    func makeNSView(context: Context) -> WidthView { WidthView(update: update) }
-    func updateNSView(_ view: WidthView, context: Context) { view.update = update }
-    final class WidthView: NSView {
-        var update: (CGFloat) -> Void
-        private var observer: NSObjectProtocol?
-        init(update: @escaping (CGFloat) -> Void) { self.update = update; super.init(frame: .zero) }
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let observer { NotificationCenter.default.removeObserver(observer) }
-            guard let window else { return }
-            publish(window)
-            observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self, weak window] _ in
-                if let self, let window { self.publish(window) }
-            }
-        }
-        private func publish(_ window: NSWindow) { let width = window.contentLayoutRect.width; DispatchQueue.main.async { [weak self] in self?.update(width) } }
-        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
-    }
+/// Uses the workspace proposal, after the app sidebar has consumed its width.
+enum TerminalInspectorLayout {
+    static func usesSidebar(contentWidth: CGFloat) -> Bool { contentWidth >= 950 }
 }

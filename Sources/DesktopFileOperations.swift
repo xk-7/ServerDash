@@ -68,6 +68,7 @@ enum DesktopFilePreferences {
         max(1, min(100, UserDefaults.standard.object(forKey: "sftpEditorTotalMB") as? Int ?? 10)) * 1_024 * 1_024
     }
     static var root: URL {
+        if MacUIFixture.isEnabled { return MacUIFixture.root.appendingPathComponent("RemoteFiles", isDirectory: true) }
         // Hosted UI tests may initialize shared stores; never read or rewrite real drafts/bindings.
         if NSClassFromString("XCTestCase") != nil ||
             ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||

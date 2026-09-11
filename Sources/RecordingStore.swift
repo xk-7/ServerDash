@@ -36,7 +36,8 @@ final class RecordingSettings: ObservableObject {
         set { defaults.set(newValue, forKey: "recordingOutputConsent") }
     }
     static var defaultDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if MacUIFixture.isEnabled { return MacUIFixture.root.appendingPathComponent("Recordings", isDirectory: true) }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ServerDash/recordings", isDirectory: true)
     }
     init(defaults: UserDefaults = .standard) {

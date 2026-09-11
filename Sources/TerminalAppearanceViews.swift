@@ -97,7 +97,7 @@ struct TerminalSessionAppearanceView: View {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("终端外观")
                         .font(.title2.weight(.bold))
-                    Text("调整只作用于当前会话，不会重新连接 SSH。")
+                    Text("调整只作用于当前会话，立即生效且不会重新连接。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -108,7 +108,7 @@ final class DesktopFileOperationsTests: XCTestCase {
         XCTAssertThrowsError(try RemoteTextEncoding.decode(Data([0,1,2,3])))
         XCTAssertThrowsError(try RemoteTextEncoding.decode(Data([0xFF,0xA2])))
     }
-    @MainActor func testLocalCopyTracksOriginalVersionAndForgettingPreservesFile() throws {
+    @MainActor func testLocalCopyTracksOriginalVersionAndForgettingPreservesFile() async throws {
         let root=try fixture(),file=root.appendingPathComponent("document.txt"),originalData=Data("original".utf8)
         try originalData.write(to:file)
         let revision=RemoteFileRevision(size:Int64(originalData.count),modifiedNS:1,inode:42,mode:0o644,uid:1,gid:1,sha256:DesktopFileOperations.digest(originalData))
@@ -118,7 +118,7 @@ final class DesktopFileOperationsTests: XCTestCase {
         let changed=Data("edited in a local application".utf8);try changed.write(to:file)
         XCTAssertEqual(try copy.modifiedContents(),changed);XCTAssertEqual(copy.revision,revision)
         let drafts=root.appendingPathComponent("drafts.json"),store=RemoteEditorStore(persistURL:drafts,restore:false)
-        store.localCopies=[copy];store.persist()
+        store.localCopies=[copy];_ = await store.flushDrafts()
         let restored=RemoteEditorStore(persistURL:drafts)
         XCTAssertEqual(restored.localCopies.first?.revision,revision)
         XCTAssertEqual(restored.localCopies.first?.endpointIdentity,copy.endpointIdentity)
@@ -128,7 +128,7 @@ final class DesktopFileOperationsTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at:link,withDestinationURL:file)
         var linked=copy;linked.localPath=link.path
         XCTAssertThrowsError(try linked.modifiedContents())
-        store.shutdown();restored.shutdown()
+        _ = await store.shutdownAndFlush();_ = await restored.shutdownAndFlush()
     }
     func testThreeWaySyncRequiresExplicitDeletionResolutionAndFlagsConflicts() {
         let a=DirectoryManifestEntry(path:"file",kind:"file",size:1,sha256:"a",modifiedNS:1)

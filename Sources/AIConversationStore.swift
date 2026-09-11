@@ -3,7 +3,8 @@ import SwiftUI
 
 actor AIConversationDisk {
     static var defaultDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if MacUIFixture.isEnabled { return MacUIFixture.root.appendingPathComponent("AI", isDirectory: true) }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ServerDash/AI", isDirectory: true)
     }
     let directory: URL

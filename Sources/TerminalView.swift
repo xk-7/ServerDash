@@ -2,8 +2,26 @@ import AppKit
 import SwiftData
 import SwiftUI
 
+struct TerminalCommandCapabilities: Equatable {
+    let canClose: Bool
+    let canSearch: Bool
+    let canChangeAppearance: Bool
+    let canSplit: Bool
+    let canUseSSHTools: Bool
+    let canInspect: Bool
+    init(kind: WorkspaceTabKind?, hasController: Bool, splitAvailable: Bool = true) {
+        canClose = kind != nil
+        let terminal = kind.map { [.terminal, .local, .serial].contains($0) } ?? false
+        canSearch = terminal && hasController
+        canChangeAppearance = terminal && hasController
+        canSplit = kind == .terminal && hasController && splitAvailable
+        canUseSSHTools = kind == .terminal && hasController
+        canInspect = (kind == .terminal || kind == .rdp) && hasController
+    }
+}
+
 struct TerminalShortcutActions {
-    let hasSession: Bool
+    let capabilities: TerminalCommandCapabilities
     let canSwitchTabs: Bool
     let newTab: () -> Void
     let font: (TerminalFontShortcut) -> Void
@@ -45,36 +63,36 @@ struct TerminalCommands: Commands {
             Divider()
             Button("垂直分屏（右侧）") { perform { $0.splitRight() } }
                 .keyboardShortcut("d", modifiers: [.control, .shift])
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canSplit != true)
             Button("水平分屏（下方）") { perform { $0.splitBelow() } }
                 .keyboardShortcut("e", modifiers: [.control, .shift])
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canSplit != true)
             Button("关闭活跃面板") { perform { $0.closePane() } }
                 .keyboardShortcut("w", modifiers: [.control, .shift])
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canClose != true)
             Button("搜索当前终端") { perform { $0.find() } }
                 .keyboardShortcut("f", modifiers: .control)
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canSearch != true)
             Divider()
             Button("增大字号") { perform { $0.font(.increase) } }
                 .keyboardShortcut("+", modifiers: .command)
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canChangeAppearance != true)
             Button("减小字号") { perform { $0.font(.decrease) } }
                 .keyboardShortcut("-", modifiers: .command)
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canChangeAppearance != true)
             Button("恢复初始字号") { perform { $0.font(.reset) } }
                 .keyboardShortcut("0", modifiers: .command)
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canChangeAppearance != true)
             Divider()
             Button("查找终端内容…") { perform { $0.find() } }
                 .keyboardShortcut("f", modifiers: .command)
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canSearch != true)
             Button("终端外观…") { perform { $0.appearance() } }
                 .keyboardShortcut(",", modifiers: [.command, .shift])
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canChangeAppearance != true)
             Button("显示 / 隐藏检查器") { perform { $0.inspector() } }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                .disabled(actions?.hasSession != true)
+                .disabled(actions?.capabilities.canInspect != true)
             Divider()
             Button("下一个标签页") { perform { $0.switchTab(1) } }
                 .keyboardShortcut(.tab, modifiers: .control)
@@ -108,12 +126,13 @@ private struct TerminalWorkspaceContent: View {
     @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
     @SceneStorage("terminal.inspector.visible") private var showingInspector = false
-    @State private var inspectorTab = "status"
+    @SceneStorage("terminal.inspector.tab") private var inspectorTab = "status"
+    @SceneStorage("terminal.inspector.width") private var inspectorWidth = 390.0
     @Environment(\.openWindow) private var openWindow
 
     @State private var showingBatch = false
     @State private var showingTunnels = false
-    @State private var workspaceWidth: CGFloat = 1200
+    @State private var workspaceWidth: CGFloat = 0
     @State private var showingServerPicker = false
     @State private var pendingRDPClose: [WorkspaceTab] = []
     @ObservedObject var registry: TerminalSessionRegistry
@@ -129,10 +148,39 @@ private struct TerminalWorkspaceContent: View {
         return registry.controller(for: id)
     }
 
+    private var selectedWorkbenchController: WorkbenchSessionController? {
+        guard let tab = workspace.selectedTab, tab.kind == .local || tab.kind == .serial else { return nil }
+        return appState.workbenchSessions.controller(for: tab.activePane)
+    }
+    private var capabilities: TerminalCommandCapabilities {
+        let hasController = selectedController != nil || selectedWorkbenchController != nil ||
+            (workspace.selectedTab?.kind == .rdp && workspace.activePane.flatMap { appState.rdpControllers[$0] } != nil)
+        return .init(kind: workspace.selectedTab?.kind, hasController: hasController,
+                     splitAvailable: workspace.activePane.map(workspace.canSplit) ?? false)
+    }
+    private func performFont(_ action: TerminalFontShortcut) {
+        selectedController?.performFontShortcut(action)
+        selectedWorkbenchController?.performFontShortcut(action)
+    }
+    private func showSearch() {
+        let search = selectedController?.hostView.tools.displaySearch ?? selectedWorkbenchController?.displaySearch
+        if search?.isVisible == true { search?.close(); focusSelectedTerminal() }
+        else { search?.isVisible = true }
+    }
+    private func focusSelectedTerminal() {
+        selectedController?.hostView.focusTerminal()
+        selectedWorkbenchController?.focus()
+    }
+    private func closeActivePane() {
+        if let selectedSession { appState.closeTerminal(selectedSession, context: modelContext) }
+        else if let tab = workspace.selectedTab { requestClose([tab]) }
+    }
+
     private var shortcutActions: TerminalShortcutActions? {
-        guard !showingAppearance, snippetPendingExecution == nil else { return nil }
+        guard !showingAppearance, !showingBatch, !showingTunnels, !showingServerPicker, !showingSerialEditor,
+              snippetPendingExecution == nil, pendingRDPClose.isEmpty, workspaceError == nil else { return nil }
         return TerminalShortcutActions(
-            hasSession: selectedController != nil,
+            capabilities: capabilities,
             canSwitchTabs: workspace.tabs.count > 1,
             newTab: {
                 if workspace.selectedTab?.kind == .local {
@@ -141,14 +189,14 @@ private struct TerminalWorkspaceContent: View {
                     appState.openRDP(record, newTab: true)
                 } else if let activeServer { appState.newTerminal(for: activeServer) } else { showingServerPicker = true }
             },
-            font: { selectedController?.performFontShortcut($0) },
-            find: { selectedController?.hostView.tools.searchVisible.toggle() },
+            font: performFont,
+            find: showSearch,
             appearance: { showingAppearance = true },
             inspector: { showingInspector.toggle() },
             switchTab: switchTab,
-            splitRight: { if let activeServer { split(.right, server: activeServer) } },
-            splitBelow: { if let activeServer { split(.below, server: activeServer) } },
-            closePane: { if let selectedSession { appState.closeTerminal(selectedSession, context: modelContext) } }
+            splitRight: { if capabilities.canSplit, let activeServer { split(.right, server: activeServer) } },
+            splitBelow: { if capabilities.canSplit, let activeServer { split(.below, server: activeServer) } },
+            closePane: closeActivePane
         )
     }
 
@@ -169,6 +217,8 @@ private struct TerminalWorkspaceContent: View {
         if let controller = registry.controller(for: tab.activePane) {
             appState.selectTerminal(controller.session)
             controller.hostView.focusTerminal()
+        } else if let controller = appState.workbenchSessions.controller(for: tab.activePane) {
+            controller.requestFocus()
         }
     }
     private func close(_ tab: WorkspaceTab) { requestClose([tab]) }
@@ -181,6 +231,13 @@ private struct TerminalWorkspaceContent: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
+            workspaceContent
+                .onChange(of: geometry.size.width, initial: true) { _, width in workspaceWidth = width }
+        }
+    }
+
+    private var workspaceContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: AppleDesign.Spacing.xs) {
                 WorkspaceTabStrip(workspace: workspace, onSelect: select, onClose: close, onCloseMultiple: requestClose,
@@ -192,8 +249,8 @@ private struct TerminalWorkspaceContent: View {
                 if workspaceWidth >= 1180 { Button("选择机器") { showingServerPicker = true } }
                 Menu {
                     Button("选择机器…") { showingServerPicker = true }
-                    if let selectedController {
-                        Button("查找终端内容…") { selectedController.hostView.tools.searchVisible.toggle() }
+                    if capabilities.canSearch {
+                        Button("查找终端内容…", action: showSearch)
                         Button("终端外观…") { showingAppearance = true }
                     }
                     Button("本地终端", systemImage: "terminal") {
@@ -214,10 +271,8 @@ private struct TerminalWorkspaceContent: View {
                                 selectedController.hostView.focusTerminal()
                             }
                         }
-                        Button("关闭活跃面板", role: .destructive) {
-                            appState.closeTerminal(selectedController.session, context: modelContext)
-                        }
                     }
+                    if capabilities.canClose { Button("关闭活跃面板", role: .destructive, action: closeActivePane) }
                     Divider()
                     ForEach(rdpMachines) { target in
                         Button("RDP · \(target.displayName)", systemImage: "desktopcomputer") { appState.openRDP(target, newTab: true) }
@@ -229,8 +284,8 @@ private struct TerminalWorkspaceContent: View {
                             Button("监控新标签") { workspace.add(serverID: target.id, title: target.displayName, kind: .monitor) }
                             if workspace.selectedTab?.kind == .terminal {
                                 Divider()
-                                Button("右侧分屏") { split(.right, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
-                                Button("下方分屏") { split(.below, server: target) }.disabled(!workspace.canSplit(workspace.activePane ?? UUID()))
+                                Button("右侧分屏") { split(.right, server: target) }.disabled(!capabilities.canSplit)
+                                Button("下方分屏") { split(.below, server: target) }.disabled(!capabilities.canSplit)
                             }
                         }
                     }
@@ -241,26 +296,28 @@ private struct TerminalWorkspaceContent: View {
                 .frame(width: 32, height: 32)
                 .help("新建标签（⌘T）、分屏与面板操作")
                 .accessibilityLabel("新建标签与面板操作")
-                if let selectedController, let activeServer, workspaceWidth >= 1180 {
+                if selectedController != nil, let activeServer, workspaceWidth >= 1180 {
                     Button { split(.right, server: activeServer) } label: { Image(systemName: "rectangle.split.2x1") }
                         .buttonStyle(.borderless).help("右侧分屏").accessibilityLabel("右侧分屏")
-                        .disabled(!workspace.canSplit(selectedController.id))
+                        .disabled(!capabilities.canSplit)
                     Button { split(.below, server: activeServer) } label: { Image(systemName: "rectangle.split.1x2") }
                         .buttonStyle(.borderless).help("下方分屏").accessibilityLabel("下方分屏")
-                        .disabled(!workspace.canSplit(selectedController.id))
+                        .disabled(!capabilities.canSplit)
+                }
+                if capabilities.canChangeAppearance, workspaceWidth >= 950 {
                     Menu {
                         Button("终端外观…", systemImage: "paintpalette") {
                             showingAppearance = true
                         }
                         Divider()
                         Button("增大字号") {
-                            selectedController.performFontShortcut(.increase)
+                            performFont(.increase)
                         }
                         Button("减小字号") {
-                            selectedController.performFontShortcut(.decrease)
+                            performFont(.decrease)
                         }
                         Button("恢复初始字号") {
-                            selectedController.performFontShortcut(.reset)
+                            performFont(.reset)
                         }
                         Divider()
                         Text("放大 ⌘+ / ⌘=　缩小 ⌘−　恢复 ⌘0")
@@ -271,9 +328,7 @@ private struct TerminalWorkspaceContent: View {
                     .frame(width: 32, height: 32)
                     .help("终端外观")
                     .accessibilityLabel("终端外观与字号")
-                    Button {
-                        selectedController.hostView.tools.searchVisible.toggle()
-                    } label: {
+                    Button(action: showSearch) {
                         Image(systemName: "magnifyingglass")
                     }
                     .buttonStyle(.borderless)
@@ -321,6 +376,7 @@ private struct TerminalWorkspaceContent: View {
                 .frame(width: 32, height: 32)
                 .help(workspace.selectedTab?.kind == .rdp ? "显示 RDP 状态" : "显示资源监控、文件、AI 和代码片段（⌘⌥I）")
                 .accessibilityLabel(showingInspector ? "隐藏终端检查器" : "显示终端检查器")
+                .disabled(!capabilities.canInspect)
             }
             .controlSize(.regular)
             .frame(height: 44)
@@ -374,7 +430,7 @@ private struct TerminalWorkspaceContent: View {
                 }
             }
             }
-            if let selectedController {
+            if capabilities.canUseSSHTools, let selectedController {
                 Divider()
                 TerminalToolsBar(tools: selectedController.hostView.tools,
                     connected: selectedController.status == .connected,
@@ -386,7 +442,6 @@ private struct TerminalWorkspaceContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background { TerminalWindowWidthReader { workspaceWidth = $0 } }
         .sheet(isPresented: $showingSerialEditor) { SerialEditorView() }
         .alert("无法打开会话", isPresented: Binding(get: { workspaceError != nil }, set: { if !$0 { workspaceError = nil } })) {
             Button("好") { workspaceError = nil }
@@ -403,10 +458,18 @@ private struct TerminalWorkspaceContent: View {
             RDPSessionPicker(servers: servers, rdpMachines: rdpMachines,
                 onSSH: { appState.openTerminal(for: $0) }, onRDP: { appState.openRDP($0) })
         }
-        .inspector(isPresented: Binding(get: { showingInspector && workspaceWidth >= 1180 }, set: { if workspaceWidth >= 1180 { showingInspector = $0 } })) {
+        .inspector(isPresented: Binding(get: { showingInspector && capabilities.canInspect && TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) }, set: { if TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) { showingInspector = $0 } })) {
             inspectorContent
+                .inspectorColumnWidth(min: 300, ideal: inspectorWidth, max: 560)
+                .background { GeometryReader { geometry in
+                    Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in
+                        if TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth), width >= 280 {
+                            inspectorWidth = min(560, max(300, width))
+                        }
+                    }
+                } }
         }
-        .popover(isPresented: Binding(get: { showingInspector && workspaceWidth < 1180 }, set: { if workspaceWidth < 1180 { showingInspector = $0 } })) {
+        .popover(isPresented: Binding(get: { showingInspector && capabilities.canInspect && !TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) }, set: { if !TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) { showingInspector = $0 } })) {
             inspectorContent.frame(width: min(440, max(300, workspaceWidth - 40)), height: 520)
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalShowAI)) { notification in
@@ -435,7 +498,7 @@ private struct TerminalWorkspaceContent: View {
         }
         .onChange(of: appState.selectedTerminalID) { _, _ in snippetPendingExecution = nil }
         .sheet(isPresented: $showingAppearance, onDismiss: {
-            selectedController?.hostView.focusTerminal()
+            focusSelectedTerminal()
         }) {
             if let selectedController {
                 TerminalSessionAppearanceView(
@@ -458,6 +521,13 @@ private struct TerminalWorkspaceContent: View {
                         )
                     }
                 )
+            } else if let controller = selectedWorkbenchController {
+                TerminalSessionAppearanceView(
+                    profile: controller.appearanceProfile, isDark: colorScheme == .dark,
+                    onApply: { controller.applyAppearance($0, dark: colorScheme == .dark) },
+                    onApplyGlobal: { controller.applyGlobalAppearance(dark: colorScheme == .dark) },
+                    onReset: { controller.resetAppearance(dark: colorScheme == .dark) }
+                )
             }
         }
     }
@@ -469,7 +539,7 @@ private struct TerminalWorkspaceContent: View {
                     Text(controller.configuration.name)
                     Text("NLA/CredSSP · TLS 1.2+")
                     Text("远程桌面不提供 SSH AI、命令片段或终端录制。")
-                }.padding().inspectorColumnWidth(min: 280, ideal: 320, max: 400)
+                }.padding()
             } else if let selectedController, let activeServer {
                 TerminalInspectorView(
                     server: activeServer, controller: selectedController,
@@ -480,7 +550,7 @@ private struct TerminalWorkspaceContent: View {
                     onRun: { requestSnippet($0, into: selectedController.id, execute: true) },
                     isActivePane: { workspace.selectedTab?.kind == .terminal && workspace.activePane == selectedController.id }
                 )
-                .inspectorColumnWidth(min: 340, ideal: 390, max: 600)
+
             } else {
                 ContentUnavailableView {
                     Label("AI 助手", systemImage: "sparkles")
@@ -488,7 +558,7 @@ private struct TerminalWorkspaceContent: View {
                     Text("选择 SSH 面板使用运维模式，或打开独立通用对话。")
                 } actions: {
                     Button("打开通用对话") { openWindow(id: "ai-general") }
-                }.inspectorColumnWidth(min: 340, ideal: 390, max: 600)
+                }
             }
     }
 

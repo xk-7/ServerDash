@@ -40,7 +40,7 @@ final class TrustedHostKey {
 
 enum TrustedHostStore {
     static var knownHostsURL: URL = {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let root = PersistenceController.applicationSupportDirectory()
             .appendingPathComponent("ServerDash", isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root.appendingPathComponent("known_hosts")

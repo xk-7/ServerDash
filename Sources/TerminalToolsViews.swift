@@ -17,24 +17,14 @@ struct TerminalToolsBar: View {
     @State private var pendingCommand: String?
     @State private var historySearch = ""
     @State private var showingShellIntegration = false
-    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            if tools.searchVisible {
-                HStack {
-                    TextField("搜索终端内容", text: $tools.searchText).focused($searchFocused)
-                        .textFieldStyle(.roundedBorder).onSubmit { tools.search() }
-                        .onChange(of: tools.searchText) { _, _ in tools.search() }
-                    if tools.searchFound == false { Text("无匹配").font(.caption).foregroundStyle(.secondary) }
-                    Button { tools.search(backwards: true) } label: { Image(systemName: "chevron.up").frame(width: 44, height: 44) }
-                        .accessibilityLabel("上一个匹配")
-                    Button { tools.search() } label: { Image(systemName: "chevron.down").frame(width: 44, height: 44) }
-                        .accessibilityLabel("下一个匹配")
-                    Button { tools.searchText = ""; tools.searchVisible = false; tools.search() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                        .accessibilityLabel("关闭搜索")
-                }.padding(.horizontal, 8).onAppear { searchFocused = true }
-            }
+            TerminalDisplaySearchBar(search: tools.displaySearch, onClose: {
+                #if os(macOS)
+                recordingController?.hostView.focusTerminal()
+                #endif
+            })
             if tools.composerVisible || !tools.promptCommand.isEmpty {
                 let suggestions = TerminalCompletion.suggestions(prefix: tools.composerVisible ? tools.command : tools.promptCommand,
                     history: history.entries.filter { $0.serverID == tools.serverID }.map(\.command), snippets: snippets.map(\.command))
@@ -246,4 +236,31 @@ private struct TerminalHighlightEditor: View {
     private var colors: some View {
         ForEach(0..<12) { index in Text(TerminalHighlightRule.colorNames[index]).foregroundStyle(TerminalHighlightRule.colors[index]).tag(index) }
     }
+}
+
+/// Shared display-only UI, also used by local and serial terminals.
+struct TerminalDisplaySearchBar: View {
+    @ObservedObject var search: TerminalDisplaySearch
+    var onClose: () -> Void = {}
+    @FocusState private var focused: Bool
+    var body: some View {
+        if search.isVisible {
+            HStack(spacing: 8) {
+                TextField("搜索终端内容", text: $search.text).focused($focused)
+                    .textFieldStyle(.roundedBorder).onSubmit { search.search() }
+                    .onChange(of: search.text) { _, _ in search.search() }
+                    #if os(macOS)
+                    .onExitCommand { close() }
+                    #endif
+                if search.found == false { Text("无匹配").font(.caption).foregroundStyle(.secondary) }
+                Button { search.search(backwards: true) } label: { Image(systemName: "chevron.up").frame(width: 28, height: 30) }
+                    .accessibilityLabel("上一个匹配")
+                Button { search.search() } label: { Image(systemName: "chevron.down").frame(width: 28, height: 30) }
+                    .accessibilityLabel("下一个匹配")
+                Button(action: close) { Image(systemName: "xmark").frame(width: 28, height: 30) }
+                    .accessibilityLabel("关闭搜索")
+            }.padding(.horizontal, 8).padding(.vertical, 4).onAppear { focused = true }
+        }
+    }
+    private func close() { search.close(); onClose() }
 }
