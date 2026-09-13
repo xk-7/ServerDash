@@ -718,9 +718,9 @@ extension ServerRecord {
     }
 }
 
-struct SessionImportCredentialStore {
-    var savePassword: (_ password: String, _ credentialID: UUID) throws -> Void
-    var deletePassword: (_ credentialID: UUID) throws -> Void
+struct SessionImportCredentialStore: Sendable {
+    var savePassword: @MainActor @Sendable (_ password: String, _ credentialID: UUID) throws -> Void
+    var deletePassword: @MainActor @Sendable (_ credentialID: UUID) throws -> Void
 
     static let keychain = SessionImportCredentialStore(
         savePassword: { password, credentialID in

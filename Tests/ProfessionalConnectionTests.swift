@@ -627,6 +627,43 @@ final class PortForwardSupervisorTests: XCTestCase {
         XCTAssertTrue(LocalPortAvailability.isAvailable(address: "127.0.0.1", port: secondPort))
     }
 
+    func testStopAllUsesOneAbsoluteDeadlineAndEscalatesAllHandles() async throws {
+        let firstPort = try availablePort()
+        let secondPort = try availablePort(excluding: [firstPort])
+        let launcher = TestTunnelLauncher(ignoreTerminate: true)
+        let supervisor = PortForwardSupervisor(
+            provider: TestConnectionProvider(),
+            launcher: launcher,
+            maxReconnectAttempts: 0,
+            readinessTimeout: 1
+        )
+        let serverID = UUID()
+        for port in [firstPort, secondPort] {
+            _ = try await supervisor.start(
+                rule: PortForwardRule(
+                    name: "Deadline tunnel \(port)",
+                    serverID: serverID,
+                    direction: .dynamic,
+                    listenPort: port
+                ),
+                config: directConfig(id: serverID)
+            )
+        }
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let stopped = await supervisor.stopAll(
+            until: started.advanced(by: .milliseconds(700))
+        )
+
+        XCTAssertTrue(stopped)
+        XCTAssertLessThan(started.duration(to: clock.now), .milliseconds(800))
+        let snapshots = await supervisor.snapshots()
+        XCTAssertEqual(snapshots.filter { $0.state == .stopped }.count, 2)
+        XCTAssertTrue(LocalPortAvailability.isAvailable(address: "127.0.0.1", port: firstPort))
+        XCTAssertTrue(LocalPortAvailability.isAvailable(address: "127.0.0.1", port: secondPort))
+    }
+
     private func directConfig(id: UUID) -> ServerConnectionConfig {
         ServerConnectionConfig(
             id: id,

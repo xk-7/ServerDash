@@ -516,7 +516,7 @@ enum SFTPService {
             if let commandError = firstCommandError(in: result.output + "\n" + result.error) {
                 throw SFTPError.commandFailed(commandError)
             }
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: config.id,
                 module: .sftp,
                 message: "SFTP 命令完成"
@@ -528,7 +528,7 @@ enum SFTPService {
             if error == .cancelled {
                 throw SFTPError.cancelled
             }
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: config.id,
                 module: .sftp,
                 level: "error",

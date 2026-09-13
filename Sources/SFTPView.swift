@@ -301,7 +301,14 @@ final class MacSFTPController: ObservableObject {
         started = true
         Task { [self] in await loadDirectory(currentPath) }
     }
-    func close() {
+    func close() { _ = beginShutdown() }
+
+    /// Freezes this controller, invalidates late UI callbacks, and returns the
+    /// active work so the application shutdown coordinator can drain it under
+    /// the same absolute deadline as connection processes and other services.
+    @discardableResult
+    func beginShutdown() -> [Task<Void, Never>] {
+        let tasks = [directoryTask, transferTask].compactMap { $0 }
         closed = true
         generation = UUID()
         directoryTask?.cancel()
@@ -309,6 +316,7 @@ final class MacSFTPController: ObservableObject {
         pendingUploads = []
         pendingDownloads = []
         progress = nil
+        return tasks
     }
     func loadDirectory(_ path: String) async {
         guard !closed, transferTask == nil || busyMessage == nil else { return }
@@ -345,7 +353,7 @@ final class MacSFTPController: ObservableObject {
             directoryError = error.localizedDescription
             failedDirectoryPath = path
             statusMessage = "无法读取远程目录"
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: server.id,
                 module: .sftp,
                 level: "error",

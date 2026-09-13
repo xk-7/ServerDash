@@ -120,7 +120,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
             self.outputLog?.close(); self.outputLog = nil
             self.status = code == 0 ? .disconnected : .failed
             self.lastError = code == 0 ? "会话已结束" : "SSH 进程退出，代码 \(code ?? -1)"
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: self.serverID,
                 module: .terminal,
                 level: "warn",
@@ -174,7 +174,7 @@ final class TerminalSessionController: ObservableObject, Identifiable {
                 try Task.checkCancellation()
                 guard self.connectionGeneration == current else { return }
                 self.status = .connected
-                EventLogStore.shared.append(serverID: self.serverID, module: .terminal, message: "SSH 身份认证成功，终端已连接")
+                EventLogStore.append(serverID: self.serverID, module: .terminal, message: "SSH 身份认证成功，终端已连接")
                 if settings?.commandsEnabled == true {
                     do {
                         let output = try await SSHSessionBootstrap.runLocalCommand(settings?.afterConnectCommand ?? "", serverID: self.serverID)
@@ -198,17 +198,17 @@ final class TerminalSessionController: ObservableObject, Identifiable {
         hostView.updateConfig(config)
     }
 
-    func terminate() {
+    @discardableResult
+    func terminate(recordingReason: String = "closed") -> PTYShutdownHandle? {
         startupTask?.cancel(); startupTask = nil
         outputLog?.close(); outputLog = nil
-        recording.stop(reason: "closed")
+        recording.stop(reason: recordingReason)
         connectionGeneration = UUID()
         connectionTask?.cancel()
         connectionTask = nil
-        if attachProcess {
-            hostView.stop()
-        }
+        let process = attachProcess ? hostView.stop() : nil
         status = .disconnected
+        return process
     }
 
     func startRecording() {
@@ -304,10 +304,12 @@ final class TerminalSessionRegistry: ObservableObject {
         for tab in workspace.tabs where tab.serverID == serverID && tab.kind != .terminal { workspace.remove(tab: tab.id) }
     }
 
-    func terminateAll() {
-        controllers.forEach { $0.terminate() }
+    @discardableResult
+    func terminateAll(recordingReason: String = "closed") -> [PTYShutdownHandle] {
+        let processes = controllers.compactMap { $0.terminate(recordingReason: recordingReason) }
         controllers.removeAll()
         for tab in workspace.tabs { workspace.remove(tab: tab.id) }
+        return processes
     }
 
     func registerForTesting(_ controller: TerminalSessionController) {
@@ -462,6 +464,32 @@ struct TerminalHostKeyFailureDetector {
     }
 }
 
+/// Foundation's observer token is not `Sendable`. This wrapper owns it behind a
+/// lock so an AppKit view can release the observation from its nonisolated
+/// deinitializer without leaking the callback.
+private final class TerminalCommandObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: NSObjectProtocol?
+
+    init(_ token: NSObjectProtocol) {
+        self.token = token
+    }
+
+    func cancel() {
+        let token: NSObjectProtocol? = lock.withLock {
+            defer { self.token = nil }
+            return self.token
+        }
+        if let token {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
 final class TerminalHostView: NSView {
     private let terminalView = ServerDashTerminalView(frame: .zero)
     private let sessionID: UUID
@@ -478,7 +506,7 @@ final class TerminalHostView: NSView {
     }
     var onFocus: (() -> Void)?
     private var didStart = false
-    private var commandObserver: NSObjectProtocol?
+    private var commandObserver: TerminalCommandObservation?
     private var appearanceProfile: TerminalAppearanceProfile
     private var appliedDarkAppearance: Bool?
     private var appliedReduceMotion: Bool?
@@ -532,30 +560,30 @@ final class TerminalHostView: NSView {
             appearanceProfile,
             dark: NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         )
-        commandObserver = NotificationCenter.default.addObserver(
+        let commandObserver = NotificationCenter.default.addObserver(
             forName: TerminalCommandBus.notification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self,
-                  notification.userInfo?["sessionID"] as? UUID == self.sessionID,
+            guard let targetSessionID = notification.userInfo?["sessionID"] as? UUID,
                   let command = notification.userInfo?["command"] as? String else {
                 return
             }
-            self.terminalView.send(txt: command)
-            self.focusTerminal()
+            MainActor.assumeIsolated {
+                guard let self,
+                      targetSessionID == self.sessionID else {
+                    return
+                }
+                self.terminalView.send(txt: command)
+                self.focusTerminal()
+            }
         }
+        self.commandObserver = TerminalCommandObservation(commandObserver)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        if let commandObserver {
-            NotificationCenter.default.removeObserver(commandObserver)
-        }
     }
 
     override func layout() {
@@ -662,11 +690,16 @@ final class TerminalHostView: NSView {
 
     func updateConfig(_ config: ServerConnectionConfig) { self.config = config }
 
-    func stop() {
+    @discardableResult
+    func stop() -> PTYShutdownHandle? {
+        let process = didStart && terminalView.process.running
+            ? PTYShutdownHandle(processIdentifier: terminalView.process.shellPid)
+            : nil
         if didStart {
             terminalView.replaceProcess()
         }
         didStart = false
+        return process
     }
 
     func feedLocalOutput(_ output: String) { terminalView.feed(text: output) }

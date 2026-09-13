@@ -38,13 +38,123 @@ final class TrustedHostKey {
     }
 }
 
-enum TrustedHostStore {
-    static var knownHostsURL: URL = {
+/// Lock-protected operations for one OpenSSH known-hosts file. Production uses
+/// one shared instance; tests inject instances backed by isolated temporary URLs.
+final class TrustedHostFileStore: @unchecked Sendable {
+    static let production: TrustedHostFileStore = {
         let root = PersistenceController.applicationSupportDirectory()
             .appendingPathComponent("ServerDash", isDirectory: true)
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        return root.appendingPathComponent("known_hosts")
+        return TrustedHostFileStore(
+            knownHostsURL: root.appendingPathComponent("known_hosts")
+        )
     }()
+
+    let knownHostsURL: URL
+    private let lock = NSLock()
+
+    init(knownHostsURL: URL) {
+        self.knownHostsURL = knownHostsURL
+    }
+
+    func existingKeys(
+        host: String,
+        port: Int
+    ) -> [(algorithm: String, fingerprint: String, line: String)] {
+        locked {
+            TrustedHostStore.existingKeys(host: host, port: port, at: knownHostsURL)
+        }
+    }
+
+    func allKeys() -> [(algorithm: String, fingerprint: String, line: String)] {
+        locked { TrustedHostStore.allKeys(at: knownHostsURL) }
+    }
+
+    func existingFingerprint(host: String, port: Int) -> String? {
+        existingKeys(host: host, port: port).first?.fingerprint
+    }
+
+    func hasUsableHostName(host: String, port: Int) -> Bool {
+        let expected = port == 22 ? host : "[\(host)]:\(port)"
+        return existingKeys(host: host, port: port).contains { key in
+            let names = key.line.split(separator: " ").first.map(String.init)?
+                .split(separator: ",").map(String.init) ?? []
+            return names.contains(expected)
+        }
+    }
+
+    func inspect(
+        _ config: ServerConnectionConfig,
+        forceScan: Bool = false
+    ) async throws -> HostTrustDecision {
+        try await inspect(config, forceScan: forceScan) { host, port, preferredAlgorithm in
+            try TrustedHostStore.scan(
+                host: host,
+                port: port,
+                preferredAlgorithm: preferredAlgorithm
+            )
+        }
+    }
+
+    func inspect(
+        _ config: ServerConnectionConfig,
+        forceScan: Bool,
+        scanProvider: @escaping @Sendable (String, Int, String?) throws -> SSHHostKeyProbe
+    ) async throws -> HostTrustDecision {
+        let interval = PerformanceTrace.begin(.hostKeyInspect)
+        defer { PerformanceTrace.end(interval) }
+        return try await Task.detached(priority: .utility) { [self] in
+            let stored = existingKeys(host: config.host, port: config.port)
+            if !forceScan, let probe = TrustedHostStore.probeFromStoredKeys(
+                stored,
+                host: config.host,
+                port: config.port
+            ) {
+                return HostTrustDecision.trusted(probe)
+            }
+
+            let probe = try scanProvider(
+                config.host,
+                config.port,
+                stored.first?.algorithm
+            )
+            if stored.isEmpty {
+                // Trust is scoped to a normalized host and port, not a fingerprint globally.
+                return .unknown(probe)
+            }
+            if let matching = stored.first(where: {
+                $0.algorithm == TrustedHostStore.rawAlgorithm(from: probe)
+            }) ?? stored.first(where: { $0.fingerprint == probe.fingerprint }) {
+                if matching.fingerprint == probe.fingerprint {
+                    return HostTrustDecision.trusted(probe)
+                }
+                return .changed(oldFingerprint: matching.fingerprint, probe: probe)
+            }
+            return .changed(oldFingerprint: stored[0].fingerprint, probe: probe)
+        }.value
+    }
+
+    func trust(_ probe: SSHHostKeyProbe, replacing: Bool = false) throws {
+        try locked {
+            try TrustedHostStore.trust(probe, replacing: replacing, at: knownHostsURL)
+        }
+    }
+
+    func remove(host: String, port: Int) throws {
+        try locked {
+            try TrustedHostStore.remove(host: host, port: port, at: knownHostsURL)
+        }
+    }
+
+    private func locked<T>(_ operation: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try operation()
+    }
+}
+
+enum TrustedHostStore {
+    static let knownHostsURL = TrustedHostFileStore.production.knownHostsURL
 
     static func fingerprint(for keyLine: String) -> String? {
         let fields = keyLine.split(separator: " ")
@@ -82,6 +192,14 @@ enum TrustedHostStore {
     }
 
     static func existingKeys(host: String, port: Int) -> [(algorithm: String, fingerprint: String, line: String)] {
+        TrustedHostFileStore.production.existingKeys(host: host, port: port)
+    }
+
+    fileprivate static func existingKeys(
+        host: String,
+        port: Int,
+        at knownHostsURL: URL
+    ) -> [(algorithm: String, fingerprint: String, line: String)] {
         guard let contents = try? String(contentsOf: knownHostsURL, encoding: .utf8) else {
             return []
         }
@@ -95,10 +213,16 @@ enum TrustedHostStore {
         if !parsed.isEmpty {
             return parsed
         }
-        return keysFromKeygen(host: host, port: port)
+        return keysFromKeygen(host: host, port: port, at: knownHostsURL)
     }
 
     static func allKeys() -> [(algorithm: String, fingerprint: String, line: String)] {
+        TrustedHostFileStore.production.allKeys()
+    }
+
+    fileprivate static func allKeys(
+        at knownHostsURL: URL
+    ) -> [(algorithm: String, fingerprint: String, line: String)] {
         guard let contents = try? String(contentsOf: knownHostsURL, encoding: .utf8) else {
             return []
         }
@@ -109,16 +233,11 @@ enum TrustedHostStore {
     }
 
     static func existingFingerprint(host: String, port: Int) -> String? {
-        existingKeys(host: host, port: port).first?.fingerprint
+        TrustedHostFileStore.production.existingFingerprint(host: host, port: port)
     }
 
     static func hasUsableHostName(host: String, port: Int) -> Bool {
-        let expected = port == 22 ? host : "[\(host)]:\(port)"
-        return existingKeys(host: host, port: port).contains { key in
-            let names = key.line.split(separator: " ").first.map(String.init)?
-                .split(separator: ",").map(String.init) ?? []
-            return names.contains(expected)
-        }
+        TrustedHostFileStore.production.hasUsableHostName(host: host, port: port)
     }
 
     static func scan(host: String, port: Int, preferredAlgorithm: String? = nil) throws -> SSHHostKeyProbe {
@@ -169,9 +288,7 @@ enum TrustedHostStore {
         _ config: ServerConnectionConfig,
         forceScan: Bool = false
     ) async throws -> HostTrustDecision {
-        try await inspect(config, forceScan: forceScan) { host, port, preferredAlgorithm in
-            try scan(host: host, port: port, preferredAlgorithm: preferredAlgorithm)
-        }
+        try await TrustedHostFileStore.production.inspect(config, forceScan: forceScan)
     }
 
     static func inspect(
@@ -179,40 +296,14 @@ enum TrustedHostStore {
         forceScan: Bool,
         scanProvider: @escaping @Sendable (String, Int, String?) throws -> SSHHostKeyProbe
     ) async throws -> HostTrustDecision {
-        let interval = PerformanceTrace.begin(.hostKeyInspect)
-        defer { PerformanceTrace.end(interval) }
-        return try await Task.detached(priority: .utility) {
-            let stored = existingKeys(host: config.host, port: config.port)
-            if !forceScan, let probe = probeFromStoredKeys(
-                stored,
-                host: config.host,
-                port: config.port
-            ) {
-                return HostTrustDecision.trusted(probe)
-            }
-
-            let probe = try scanProvider(
-                config.host,
-                config.port,
-                stored.first?.algorithm
-            )
-            if stored.isEmpty {
-                // A key is trusted for a normalized host and port, not globally by fingerprint.
-                // Reusing the same key on another endpoint still requires an explicit decision.
-                return .unknown(probe)
-            }
-            if let matching = stored.first(where: { $0.algorithm == rawAlgorithm(from: probe) })
-                ?? stored.first(where: { $0.fingerprint == probe.fingerprint }) {
-                if matching.fingerprint == probe.fingerprint {
-                    return HostTrustDecision.trusted(probe)
-                }
-                return .changed(oldFingerprint: matching.fingerprint, probe: probe)
-            }
-            return .changed(oldFingerprint: stored[0].fingerprint, probe: probe)
-        }.value
+        try await TrustedHostFileStore.production.inspect(
+            config,
+            forceScan: forceScan,
+            scanProvider: scanProvider
+        )
     }
 
-    private static func probeFromStoredKeys(
+    fileprivate static func probeFromStoredKeys(
         _ stored: [(algorithm: String, fingerprint: String, line: String)],
         host: String,
         port: Int
@@ -233,6 +324,14 @@ enum TrustedHostStore {
     }
 
     static func trust(_ probe: SSHHostKeyProbe, replacing: Bool = false) throws {
+        try TrustedHostFileStore.production.trust(probe, replacing: replacing)
+    }
+
+    fileprivate static func trust(
+        _ probe: SSHHostKeyProbe,
+        replacing: Bool,
+        at knownHostsURL: URL
+    ) throws {
         var contents = (try? String(contentsOf: knownHostsURL, encoding: .utf8)) ?? ""
         contents = contents
             .split(whereSeparator: \.isNewline)
@@ -258,6 +357,10 @@ enum TrustedHostStore {
     }
 
     static func remove(host: String, port: Int) throws {
+        try TrustedHostFileStore.production.remove(host: host, port: port)
+    }
+
+    fileprivate static func remove(host: String, port: Int, at knownHostsURL: URL) throws {
         guard FileManager.default.fileExists(atPath: knownHostsURL.path) else { return }
         let contents = try String(contentsOf: knownHostsURL, encoding: .utf8)
         let filtered = contents
@@ -295,7 +398,11 @@ enum TrustedHostStore {
         }
     }
 
-    private static func keysFromKeygen(host: String, port: Int) -> [(algorithm: String, fingerprint: String, line: String)] {
+    private static func keysFromKeygen(
+        host: String,
+        port: Int,
+        at knownHostsURL: URL
+    ) -> [(algorithm: String, fingerprint: String, line: String)] {
 #if os(macOS)
         hostMarkers(host, port: port).flatMap { lookup -> [(algorithm: String, fingerprint: String, line: String)] in
             let result = run(

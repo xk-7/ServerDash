@@ -83,14 +83,17 @@ struct AIConfiguration: Codable, Equatable, Sendable {
 }
 
 enum AIKeychain {
-    private static let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "com.serverdash.ai.api-key",
-        kSecAttrAccount as String: "active-provider",
-        kSecAttrSynchronizable as String: false
-    ]
+    private static func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.serverdash.ai.api-key",
+            kSecAttrAccount as String: "active-provider",
+            kSecAttrSynchronizable as String: false
+        ]
+    }
+
     static func read() throws -> String {
-        var query = query
+        var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -100,6 +103,7 @@ enum AIKeychain {
         return value
     }
     static func save(_ key: String) throws {
+        let query = baseQuery()
         if key.isEmpty {
             let status = SecItemDelete(query as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else { throw AIError.keychain }

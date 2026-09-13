@@ -73,9 +73,6 @@ struct ServerDashApp: App {
             ) { _ in
                 appState.refreshMonitoringPowerMode()
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                AIWorkspace.shared.stopAll()
-            }
             .preferredColorScheme(appAppearance.colorScheme)
             .frame(minWidth: 900, minHeight: 620)
             .background(MacFixtureWindowSetup())

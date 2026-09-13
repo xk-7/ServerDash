@@ -150,6 +150,7 @@ final class LaunchPerformanceTracker {
 enum DiagnosticRedactor {
     private static let secretPatterns: [NSRegularExpression] = {
         let raw = [
+            #"(?i)\bauthorization\s*:\s*[^\r\n]+"#,
             #"(?i)(password|passphrase|secret|token|authorization)[=:\s]+\S+"#,
             #"(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----"#,
             #"\b(?:\d{1,3}\.){3}\d{1,3}\b"#
@@ -237,12 +238,13 @@ struct DiagnosticEvent: Identifiable, Hashable, Sendable {
     }
 }
 
+@MainActor
 final class EventLogStore: ObservableObject {
     static let shared = EventLogStore()
 
     @Published private(set) var events: [DiagnosticEvent] = []
 
-    func append(
+    nonisolated static func append(
         serverID: UUID?,
         module: DiagnosticModule,
         level: String = "info",
@@ -255,15 +257,21 @@ final class EventLogStore: ObservableObject {
             message: message
         )
         DiagnosticLog.logger(for: module).info("\(event.message, privacy: .public)")
-        if Thread.isMainThread {
-            events.append(event)
-            events = Array(events.suffix(300))
-        } else {
-            DispatchQueue.main.async {
-                self.events.append(event)
-                self.events = Array(self.events.suffix(300))
-            }
+        Task { @MainActor in
+            shared.events.append(event)
+            shared.events = Array(shared.events.suffix(300))
         }
+    }
+
+    /// Main-actor owners may retain the observable store and use the same
+    /// background-safe ingress without reaching through the singleton.
+    nonisolated func append(
+        serverID: UUID?,
+        module: DiagnosticModule,
+        level: String = "info",
+        message: String
+    ) {
+        Self.append(serverID: serverID, module: module, level: level, message: message)
     }
 
     func events(for serverID: UUID) -> [DiagnosticEvent] {
@@ -271,17 +279,10 @@ final class EventLogStore: ObservableObject {
     }
 
     func clear(serverID: UUID? = nil) {
-        let update = {
-            if let serverID {
-                self.events.removeAll { $0.serverID == serverID }
-            } else {
-                self.events.removeAll()
-            }
-        }
-        if Thread.isMainThread {
-            update()
+        if let serverID {
+            events.removeAll { $0.serverID == serverID }
         } else {
-            DispatchQueue.main.async(execute: update)
+            events.removeAll()
         }
     }
 }

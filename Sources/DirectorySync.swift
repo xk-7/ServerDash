@@ -178,6 +178,7 @@ enum DirectorySyncPlanner {
     private let standalone:Bool
     private var context:ModelContext?
     private var persistenceReady:Bool
+    private var shuttingDown = false
     init(url:URL?=nil) {
         standalone=url != nil
         persistenceReady=url != nil
@@ -216,6 +217,7 @@ enum DirectorySyncPlanner {
         }catch{self.error="目录同步任务尚未载入，自动上传保持暂停：\(error.localizedDescription)";persistenceReady=false}
     }
     func register(_ access:DesktopFileAccess) {
+        guard !shuttingDown else { return }
         accesses[access.server.id]=access
         if automaticTask == nil {
             automaticTask=Task { [weak self] in
@@ -232,24 +234,56 @@ enum DirectorySyncPlanner {
         if activeServerID==serverID { cancel() }
         for index in pairs.indices where pairs[index].serverID==serverID { pairs[index].automaticUpload=false };persist()
     }
-    func shutdown(){operation?.cancel();automaticTask?.cancel();automaticTask=nil;persist()}
-    func shutdownAndDrain() async {
-        let activeOperation = operation
-        shutdown()
-        await activeOperation?.value
+    func shutdown(){
+        shuttingDown = true
+        operation?.cancel()
+        automaticTask?.cancel()
+        automaticTask=nil
         persist()
     }
+    @discardableResult
+    func shutdownAndDrain(until deadline: ContinuousClock.Instant) async -> Bool {
+        let activeOperation = operation
+        shutdown()
+        guard let activeOperation else {
+            persist()
+            return true
+        }
+        let drained = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let completion = OneShotContinuation<Bool>(continuation)
+            let timeoutTask = Task.detached(priority: .utility) {
+                let clock = ContinuousClock()
+                if clock.now < deadline {
+                    do { try await clock.sleep(until: deadline) }
+                    catch { return }
+                }
+                guard !Task.isCancelled else { return }
+                completion.resume(returning: false)
+            }
+            Task {
+                await activeOperation.value
+                timeoutTask.cancel()
+                completion.resume(returning: true)
+            }
+        }
+        persist()
+        return drained
+    }
+    func shutdownAndDrain() async {
+        _ = await shutdownAndDrain(until: ContinuousClock().now.advanced(by: .seconds(8)))
+    }
     func add(local:URL,remote:String,access:DesktopFileAccess) {
+        guard !shuttingDown else { return }
         guard persistenceReady else{error="目录同步数据库尚未就绪。";return}
         register(access)
         guard !pairs.contains(where:{$0.serverID==access.server.id && $0.localPath==local.path && $0.remotePath==remote}) else {return}
         let pair=DirectorySyncPair(serverID:access.server.id,serverName:access.server.displayName,localPath:local.path,remotePath:remote,endpointIdentity:access.endpointIdentity)
         pairs.append(pair);selectedPairID=pair.id;persist();preview(pair.id)
     }
-    func remove(_ id:UUID){guard !busy else{return};pairs.removeAll{$0.id==id};lastLocal[id]=nil;if selectedPairID==id {selectedPairID=nil;plan=[]};persist()}
-    func setAutomatic(_ enabled:Bool,id:UUID){guard let i=pairs.firstIndex(where:{$0.id==id}),!pairs[i].localPath.isEmpty else{return};pairs[i].automaticUpload=enabled;lastLocal[id]=nil;if !enabled && activePairID==id {cancel()};persist()}
+    func remove(_ id:UUID){guard !shuttingDown,!busy else{return};pairs.removeAll{$0.id==id};lastLocal[id]=nil;if selectedPairID==id {selectedPairID=nil;plan=[]};persist()}
+    func setAutomatic(_ enabled:Bool,id:UUID){guard !shuttingDown,let i=pairs.firstIndex(where:{$0.id==id}),!pairs[i].localPath.isEmpty else{return};pairs[i].automaticUpload=enabled;lastLocal[id]=nil;if !enabled && activePairID==id {cancel()};persist()}
     func preview(_ id:UUID) {
-        guard !busy,let pair=pairs.first(where:{$0.id==id}),let access=accesses[pair.serverID] else{return}
+        guard !shuttingDown,!busy,let pair=pairs.first(where:{$0.id==id}),let access=accesses[pair.serverID] else{return}
         guard validEndpoint(pair,access:access) else{return}
         selectedPairID=id;busy=true;error=nil;plan=[];activeServerID=pair.serverID;activePairID=pair.id
         operation=Task {
@@ -258,6 +292,8 @@ enum DirectorySyncPlanner {
                 let local=try await Task.detached {try DirectorySyncPlanner.localManifest(root:URL(fileURLWithPath:pair.localPath))}.value
                 try Task.checkCancellation()
                 let remote=try await access.perform(matching:pair.endpointIdentity){try await DesktopFileOperations.manifest(path:pair.remotePath,config:$0)}
+                try Task.checkCancellation()
+                guard !shuttingDown else { return }
                 plan=DirectorySyncPlanner.plan(local:local,remote:remote,baseline:pair.baseline)
                 lastLocal[id]=local
                 if plan.isEmpty, let index=pairs.firstIndex(where:{$0.id==id}) {
@@ -268,19 +304,19 @@ enum DirectorySyncPlanner {
                     pairs[index].lastSyncedAt=Date();persist()
                 }
                 message=plan.isEmpty ? "两个目录内容一致。" : "\(plan.count) 项差异；删除与双边修改默认跳过。"
-            }catch{self.error=error.localizedDescription}
+            }catch{if !shuttingDown {self.error=error.localizedDescription}}
         }
     }
     func synchronize(confirmDeletions:Bool = false) {
-        guard !busy,let id=selectedPairID,let pair=pairs.first(where:{$0.id==id}),let access=accesses[pair.serverID] else{return}
+        guard !shuttingDown,!busy,let id=selectedPairID,let pair=pairs.first(where:{$0.id==id}),let access=accesses[pair.serverID] else{return}
         guard validEndpoint(pair,access:access) else{return}
         guard confirmDeletions || !plan.contains(where:{$0.selectedAction.isDeletion}) else{error="所选操作包含删除，请核对删除项目并确认。";return}
         let selected=plan;busy=true;error=nil;activeServerID=pair.serverID;activePairID=pair.id
         operation=Task {
             defer{busy=false;operation=nil;activeServerID=nil;activePairID=nil}
-            do {try await apply(selected,pair:pair,access:access);plan=[];message="同步完成。未选择的冲突与链接保持原状。"}
-            catch is CancellationError{message="同步已取消，已完成项目保留。请重新预览。";plan=[]}
-            catch{self.error=error.localizedDescription;plan=[]}
+            do {try await apply(selected,pair:pair,access:access);guard !shuttingDown else{return};plan=[];message="同步完成。未选择的冲突与链接保持原状。"}
+            catch is CancellationError{if !shuttingDown {message="同步已取消，已完成项目保留。请重新预览。";plan=[]}}
+            catch{if !shuttingDown {self.error=error.localizedDescription;plan=[]}}
         }
     }
     func cancel(){operation?.cancel()}
@@ -330,6 +366,8 @@ enum DirectorySyncPlanner {
                 }
             }else{
                 let (data,revision)=try await access.perform(matching:pair.endpointIdentity){try await DesktopFileOperations.read(path:remote,config:$0,limit:536_870_912)}
+                try Task.checkCancellation()
+                guard !shuttingDown else { throw CancellationError() }
                 guard revision.sha256==item.remote?.sha256 else{throw DesktopFileError.conflict}
                 if let previous=item.local {
                     guard FileManager.default.fileExists(atPath:local.path),DesktopFileOperations.digest(try Data(contentsOf:local))==previous.sha256 else{throw DesktopFileError.conflict}
@@ -343,6 +381,8 @@ enum DirectorySyncPlanner {
         let local=try await Task.detached {try DirectorySyncPlanner.localManifest(root:root)}.value
         try Task.checkCancellation()
         let remote=try await access.perform(matching:pair.endpointIdentity){try await DesktopFileOperations.manifest(path:pair.remotePath,config:$0)}
+        try Task.checkCancellation()
+        guard !shuttingDown else { throw CancellationError() }
         let remoteMap=Dictionary(uniqueKeysWithValues:remote.map{($0.path,$0)})
         if let index=pairs.firstIndex(where:{$0.id==pair.id}){
             let surviving=Set(local.map(\.path)).union(remote.map(\.path))
@@ -356,7 +396,7 @@ enum DirectorySyncPlanner {
         }
     }
     private func checkAutomatic() async {
-        guard persistenceReady,!busy,NSApplication.shared.isActive else{return}
+        guard !shuttingDown,persistenceReady,!busy,NSApplication.shared.isActive else{return}
         busy=true
         let task=Task { await performAutomatic() }
         operation=task
@@ -382,8 +422,8 @@ enum DirectorySyncPlanner {
                 if !uploads.isEmpty{try await apply(uploads,pair:pair,access:access)}
                 try Task.checkCancellation()
                 if changes.contains(where:{$0.action == .conflict || $0.action == .deletionConflict}) {message="\(pair.serverName)：自动上传遇到冲突，请手动预览处理。"}
-            }catch is CancellationError{message="自动上传已取消，已完成项目保留。";return}
-            catch{self.error="自动上传已暂停本次操作：\(error.localizedDescription)"}
+            }catch is CancellationError{if !shuttingDown {message="自动上传已取消，已完成项目保留。"};return}
+            catch{if !shuttingDown {self.error="自动上传已暂停本次操作：\(error.localizedDescription)"}}
         }
     }
     private func validEndpoint(_ pair:DirectorySyncPair,access:DesktopFileAccess)->Bool {

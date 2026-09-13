@@ -3,16 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${1:-1.0.2}"
+VERSION="${1:-1.0.3}"
 BUILD_ROOT="${ROOT_DIR}/.build/release-${VERSION}"
 DIST_DIR="${ROOT_DIR}/dist/v${VERSION}"
 MAC_DERIVED_DATA="${BUILD_ROOT}/macOS"
-IPHONE_DERIVED_DATA="${BUILD_ROOT}/iPhone"
-IPAD_DERIVED_DATA="${BUILD_ROOT}/iPad"
-DEVICE_DERIVED_DATA="${BUILD_ROOT}/iOS-device-verify"
+MOBILE_DERIVED_DATA="${BUILD_ROOT}/mobile"
 MAC_APP="${MAC_DERIVED_DATA}/Build/Products/Release/ServerDash.app"
-IPHONE_APP="${IPHONE_DERIVED_DATA}/Build/Products/Release-iphonesimulator/ServerDashMobile.app"
-IPAD_APP="${IPAD_DERIVED_DATA}/Build/Products/Release-iphonesimulator/ServerDashMobile.app"
+IPHONE_APP="${MOBILE_DERIVED_DATA}/Build/Products/Release-iphonesimulator/ServerDashMobile.app"
+IPAD_APP="${IPHONE_APP}"
 MAC_DMG="${DIST_DIR}/ServerDash-${VERSION}-macOS.dmg"
 IPHONE_ZIP="${DIST_DIR}/ServerDash-${VERSION}-iPhone-Simulator.zip"
 IPAD_ZIP="${DIST_DIR}/ServerDash-${VERSION}-iPad-Simulator.zip"
@@ -20,7 +18,7 @@ CHECKSUMS="${DIST_DIR}/ServerDash-${VERSION}-SHA256SUMS.txt"
 RELEASE_NOTICE="${DIST_DIR}/ServerDash-${VERSION}-Release-Notice.md"
 SOURCE_RELEASE_NOTICE="${ROOT_DIR}/Docs/RELEASE_NOTES_${VERSION}.md"
 
-for tool in xcodegen xcodebuild codesign hdiutil ditto shasum; do
+for tool in xcodegen xcodebuild codesign hdiutil ditto shasum lipo; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "Missing required tool: ${tool}" >&2
         exit 1
@@ -81,7 +79,7 @@ xcodebuild \
     -scheme ServerDashMobile \
     -configuration Release \
     -destination "platform=iOS Simulator,name=iPhone 17 Pro" \
-    -derivedDataPath "${IPHONE_DERIVED_DATA}" \
+    -derivedDataPath "${MOBILE_DERIVED_DATA}" \
     -skipPackagePluginValidation \
     build
 
@@ -90,7 +88,7 @@ xcodebuild \
     -scheme ServerDashMobile \
     -configuration Release \
     -destination "platform=iOS Simulator,name=iPad Air 11-inch (M3)" \
-    -derivedDataPath "${IPAD_DERIVED_DATA}" \
+    -derivedDataPath "${MOBILE_DERIVED_DATA}" \
     -skipPackagePluginValidation \
     build
 
@@ -99,7 +97,7 @@ xcodebuild \
     -scheme ServerDashMobile \
     -configuration Release \
     -destination "generic/platform=iOS" \
-    -derivedDataPath "${DEVICE_DERIVED_DATA}" \
+    -derivedDataPath "${MOBILE_DERIVED_DATA}" \
     -skipPackagePluginValidation \
     CODE_SIGNING_ALLOWED=NO \
     build

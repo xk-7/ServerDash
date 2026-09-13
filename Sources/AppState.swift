@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 import SwiftData
 
 enum MonitoringRequestPriority: Int, Comparable, Sendable {
@@ -201,10 +202,32 @@ actor MonitoringCoordinator {
     }
 
     func stopAndDrain() async {
+        _ = await stopAndDrain(until: ContinuousClock().now.advanced(by: .seconds(8)))
+    }
+
+    @discardableResult
+    func stopAndDrain(until deadline: ContinuousClock.Instant) async -> Bool {
         stop()
         let activeTasks = Array(running.values)
-        for task in activeTasks {
-            await task.value
+        guard !activeTasks.isEmpty else { return true }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let completion = OneShotContinuation<Bool>(continuation)
+            let timeoutTask = Task.detached(priority: .utility) {
+                let clock = ContinuousClock()
+                if clock.now < deadline {
+                    do { try await clock.sleep(until: deadline) }
+                    catch { return }
+                }
+                guard !Task.isCancelled else { return }
+                completion.resume(returning: false)
+            }
+            Task {
+                for task in activeTasks {
+                    await task.value
+                }
+                timeoutTask.cancel()
+                completion.resume(returning: true)
+            }
         }
     }
 
@@ -559,6 +582,181 @@ final class FleetMonitoringSummaryState: ObservableObject {
     }
 }
 
+enum ShutdownComponent: String, CaseIterable, Sendable {
+    case interactiveSessions = "interactive_sessions"
+    case fileTransfers = "file_transfers"
+    case directorySync = "directory_sync"
+    case monitoring
+    case tunnels
+    case processes
+    case recordings
+    case temporaryKeyMaterial = "temporary_key_material"
+}
+
+enum ShutdownOutcome: String, Sendable {
+    case completed
+    case timedOut = "timed_out"
+    case forced
+    case skipped
+}
+
+struct ShutdownComponentResult: Sendable {
+    let component: ShutdownComponent
+    let outcome: ShutdownOutcome
+    let duration: Duration
+}
+
+struct AppShutdownReport: Sendable {
+    let startedAt: Date
+    let finishedAt: Date
+    let results: [ShutdownComponentResult]
+
+    var reachedDeadline: Bool {
+        results.contains { $0.outcome == .timedOut || $0.outcome == .forced }
+    }
+}
+
+struct AppShutdownOperation: Sendable {
+    let component: ShutdownComponent
+    let drain: @Sendable (ContinuousClock.Instant) async -> ShutdownOutcome
+}
+
+/// Collects unstructured drain operations behind one lock so the application
+/// can honor its absolute deadline even if a component accidentally ignores
+/// cancellation. Late component completions are discarded after expiration.
+private final class ShutdownResultCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: Set<ShutdownComponent>
+    private var results: [ShutdownComponentResult] = []
+    private var completion: OneShotContinuation<[ShutdownComponentResult]>?
+    private var operationTasks: [Task<Void, Never>] = []
+    private var timeoutTask: Task<Void, Never>?
+    private var finished = false
+
+    init(components: [ShutdownComponent]) {
+        pending = Set(components)
+    }
+
+    func installCompletion(_ value: OneShotContinuation<[ShutdownComponentResult]>) {
+        lock.lock()
+        completion = value
+        let shouldFinish = pending.isEmpty && !finished
+        if shouldFinish { finished = true }
+        let output = results
+        lock.unlock()
+        if shouldFinish { value.resume(returning: output) }
+    }
+
+    func installTasks(_ tasks: [Task<Void, Never>], timeout: Task<Void, Never>) {
+        lock.lock()
+        let alreadyFinished = finished
+        if !alreadyFinished {
+            operationTasks = tasks
+            timeoutTask = timeout
+        }
+        lock.unlock()
+        if alreadyFinished {
+            tasks.forEach { $0.cancel() }
+            timeout.cancel()
+        }
+    }
+
+    func record(_ result: ShutdownComponentResult) {
+        lock.lock()
+        guard !finished, pending.remove(result.component) != nil else {
+            lock.unlock()
+            return
+        }
+        results.append(result)
+        let shouldFinish = pending.isEmpty
+        if shouldFinish { finished = true }
+        let completion = shouldFinish ? self.completion : nil
+        let output = results
+        let timeout = shouldFinish ? timeoutTask : nil
+        if shouldFinish {
+            self.completion = nil
+            timeoutTask = nil
+            operationTasks.removeAll()
+        }
+        lock.unlock()
+        timeout?.cancel()
+        completion?.resume(returning: output)
+    }
+
+    func expire(after duration: Duration) {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        results.append(contentsOf: pending.map {
+            ShutdownComponentResult(component: $0, outcome: .timedOut, duration: duration)
+        })
+        pending.removeAll()
+        let completion = self.completion
+        let output = results
+        let tasks = operationTasks
+        self.completion = nil
+        timeoutTask = nil
+        operationTasks.removeAll()
+        lock.unlock()
+        tasks.forEach { $0.cancel() }
+        completion?.resume(returning: output)
+    }
+}
+
+enum AppShutdownCoordinator {
+    /// Every operation receives the same absolute deadline. The collector also
+    /// owns a final deadline race, cancels unfinished operations, and returns
+    /// without retaining cancellation-insensitive work.
+    static func run(
+        operations: [AppShutdownOperation],
+        timeout: Duration = .seconds(8),
+        initialResults: [ShutdownComponentResult] = [],
+        startedAt: Date = Date(),
+        deadline suppliedDeadline: ContinuousClock.Instant? = nil
+    ) async -> AppShutdownReport {
+        let clock = ContinuousClock()
+        let started = clock.now
+        let deadline = suppliedDeadline ?? started.advanced(by: timeout)
+        let drained: [ShutdownComponentResult]
+        if operations.isEmpty {
+            drained = []
+        } else {
+            drained = await withCheckedContinuation { continuation in
+                let collector = ShutdownResultCollector(components: operations.map(\.component))
+                collector.installCompletion(OneShotContinuation(continuation))
+                let tasks = operations.map { operation in
+                    Task.detached(priority: .utility) {
+                        let componentStart = clock.now
+                        let outcome = await operation.drain(deadline)
+                        collector.record(ShutdownComponentResult(
+                            component: operation.component,
+                            outcome: outcome,
+                            duration: componentStart.duration(to: clock.now)
+                        ))
+                    }
+                }
+                let timeoutTask = Task.detached(priority: .utility) {
+                    if clock.now < deadline {
+                        do { try await clock.sleep(until: deadline) }
+                        catch { return }
+                    }
+                    guard !Task.isCancelled else { return }
+                    collector.expire(after: started.duration(to: clock.now))
+                }
+                collector.installTasks(tasks, timeout: timeoutTask)
+            }
+        }
+        let order = Dictionary(uniqueKeysWithValues: ShutdownComponent.allCases.enumerated().map { ($1, $0) })
+        let results = (initialResults + drained).sorted {
+            order[$0.component, default: .max] < order[$1.component, default: .max]
+        }
+        return AppShutdownReport(startedAt: startedAt, finishedAt: Date(), results: results)
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
     @Published var selectedServerID: UUID? {
@@ -615,6 +813,9 @@ final class AppState: ObservableObject {
 
     private let fileServicesEnabled: Bool
     private var didShutdown = false
+    private var shutdownTask: Task<AppShutdownReport, Never>?
+    private var shutdownGeneration: UUID?
+    private(set) var lastShutdownReport: AppShutdownReport?
 
     convenience init() {
         self.init(
@@ -1108,18 +1309,9 @@ final class AppState: ObservableObject {
     private func beginShutdown() -> Bool {
         guard !didShutdown else { return false }
         didShutdown = true
-        RemoteEditorStore.shared.shutdown()
-        DirectorySyncStore.shared.shutdown()
+        RemoteEditorStore.shared.commitApplicationTermination()
         AIWorkspace.shared.stopAll()
-        workbenchSessions.closeAll()
-        inspectorFileControllers.values.forEach { $0.close() }
-        inspectorFileControllers.removeAll()
-        rdpControllers.values.forEach { $0.close() }
-        rdpControllers.removeAll()
         connectivityMonitor.cancel()
-        fileControllers.values.forEach { $0.close() }
-        fileControllers.removeAll()
-        terminalRegistry.terminateAll()
         guard !MacUIFixture.isEnabled else { return true }
         do {
             try monitoringHistory?.beginLifecycleGap(
@@ -1133,35 +1325,146 @@ final class AppState: ObservableObject {
         return true
     }
 
-    func shutdownAndDrain() async {
-        guard beginShutdown() else { return }
-        guard !MacUIFixture.isEnabled else { return }
-        _ = await RemoteEditorStore.shared.shutdownAndFlush()
-        await DirectorySyncStore.shared.shutdownAndDrain()
-        await monitoringCoordinator.stopAndDrain()
-        await portForwardSupervisor.stopAll()
-        _ = await ConnectionProcessController.shared.terminateAllAndWait(timeout: 4)
-        // Keep DispatchGroup waiting off the main actor so final window updates remain responsive.
-        _ = await Task.detached(priority: .utility) {
-            RecordingWriter.pendingWrites.wait(timeout: .now() + 3) == .success
-        }.value
-        KeyMaterialStore.cleanupAll()
-        RouteKeyMaterialStore.cleanupAll()
+    func shutdownAndDrain(timeout: Duration = .seconds(8)) async -> AppShutdownReport {
+        if let shutdownTask { return await shutdownTask.value }
+
+        let generation = UUID()
+        shutdownGeneration = generation
+        let task = Task { @MainActor [self] in
+            let draftsSaved = await RemoteEditorStore.shared.prepareForApplicationTermination()
+            guard draftsSaved else {
+                return AppShutdownReport(startedAt: Date(), finishedAt: Date(), results: [])
+            }
+            guard beginShutdown() else {
+                return lastShutdownReport ?? AppShutdownReport(startedAt: Date(), finishedAt: Date(), results: [])
+            }
+            return await performShutdownDrain(timeout: timeout)
+        }
+        shutdownTask = task
+        let report = await task.value
+        guard shutdownGeneration == generation else { return report }
+        if didShutdown {
+            if lastShutdownReport == nil {
+                lastShutdownReport = report
+                logShutdownReport(report)
+            }
+        } else {
+            // Draft persistence failed before the irreversible phase. Let a
+            // retry create a fresh operation while all services remain live.
+            shutdownTask = nil
+            shutdownGeneration = nil
+        }
+        return report
     }
 
-    func shutdown() {
-        guard beginShutdown() else { return }
-        Task {
-            guard !MacUIFixture.isEnabled else { return }
-            await DirectorySyncStore.shared.shutdownAndDrain()
-            await monitoringCoordinator.stopAndDrain()
-            await portForwardSupervisor.stopAll()
-            _ = await ConnectionProcessController.shared.terminateAllAndWait(timeout: 4)
-            _ = await Task.detached(priority: .utility) {
-                RecordingWriter.pendingWrites.wait(timeout: .now() + 3) == .success
-            }.value
-            KeyMaterialStore.cleanupAll()
-            RouteKeyMaterialStore.cleanupAll()
+    private func performShutdownDrain(timeout: Duration) async -> AppShutdownReport {
+        let clock = ContinuousClock()
+        let started = clock.now
+        let startedAt = Date()
+        let deadline = started.advanced(by: timeout)
+
+        workbenchSessions.beginShutdown()
+        var shutdownFileControllers: [ObjectIdentifier: MacSFTPController] = [:]
+        for controller in inspectorFileControllers.values {
+            shutdownFileControllers[ObjectIdentifier(controller)] = controller
+        }
+        for controller in fileControllers.values {
+            shutdownFileControllers[ObjectIdentifier(controller)] = controller
+        }
+        let fileTransferTasks = shutdownFileControllers.values.flatMap { $0.beginShutdown() }
+        inspectorFileControllers.removeAll()
+        rdpControllers.values.forEach { $0.close() }
+        rdpControllers.removeAll()
+        fileControllers.removeAll()
+        let terminalProcesses = terminalRegistry.terminateAll(recordingReason: "interrupted")
+        // Recording controllers synchronously enqueue their last frame and end
+        // marker from terminateAll(). Seal only after those submissions exist.
+        RecordingWriter.sealPendingWritesForShutdown()
+
+        guard !MacUIFixture.isEnabled else {
+            let skipped = ShutdownComponent.allCases
+                .filter { $0 != .interactiveSessions }
+                .map { ShutdownComponentResult(component: $0, outcome: .skipped, duration: .zero) }
+            let interactive = ShutdownComponentResult(
+                component: .interactiveSessions,
+                outcome: .completed,
+                duration: started.duration(to: clock.now)
+            )
+            return AppShutdownReport(startedAt: startedAt, finishedAt: Date(), results: [interactive] + skipped)
+        }
+
+        let workbenchSessions = self.workbenchSessions
+        let directorySync = DirectorySyncStore.shared
+        let monitoring = monitoringCoordinator
+        let tunnels = portForwardSupervisor
+        let operations = [
+            AppShutdownOperation(component: .interactiveSessions) { deadline in
+                var outcome = await workbenchSessions.stopAndDrain(until: deadline)
+                for process in terminalProcesses {
+                    let result = await process.stopAndDrain(until: deadline)
+                    if result == .timedOut { outcome = .timedOut }
+                    else if result == .forced, outcome == .completed { outcome = .forced }
+                }
+                return outcome
+            },
+            AppShutdownOperation(component: .fileTransfers) { deadline in
+                let clock = ContinuousClock()
+                for task in fileTransferTasks {
+                    guard clock.now < deadline else { return .timedOut }
+                    await task.value
+                }
+                return clock.now < deadline ? .completed : .timedOut
+            },
+            AppShutdownOperation(component: .directorySync) { deadline in
+                await directorySync.shutdownAndDrain(until: deadline) ? .completed : .timedOut
+            },
+            AppShutdownOperation(component: .monitoring) { deadline in
+                await monitoring.stopAndDrain(until: deadline) ? .completed : .timedOut
+            },
+            AppShutdownOperation(component: .tunnels) { deadline in
+                await tunnels.shutdownAndDrain(until: deadline)
+            },
+            AppShutdownOperation(component: .processes) { deadline in
+                await ConnectionProcessController.shared.shutdownAndDrain(until: deadline)
+            },
+            AppShutdownOperation(component: .recordings) { deadline in
+                await RecordingWriter.drainPendingWrites(until: deadline) ? .completed : .timedOut
+            }
+        ]
+        var report = await AppShutdownCoordinator.run(
+            operations: operations,
+            timeout: timeout,
+            startedAt: startedAt,
+            deadline: deadline
+        )
+
+        let cleanupStart = clock.now
+        KeyMaterialStore.cleanupAll()
+        RouteKeyMaterialStore.cleanupAll()
+        let cleanup = ShutdownComponentResult(
+            component: .temporaryKeyMaterial,
+            outcome: .completed,
+            duration: cleanupStart.duration(to: clock.now)
+        )
+        report = AppShutdownReport(
+            startedAt: report.startedAt,
+            finishedAt: Date(),
+            results: (report.results + [cleanup]).sorted {
+                let order = Dictionary(uniqueKeysWithValues: ShutdownComponent.allCases.enumerated().map { ($1, $0) })
+                return order[$0.component, default: .max] < order[$1.component, default: .max]
+            }
+        )
+        return report
+    }
+
+    private func logShutdownReport(_ report: AppShutdownReport) {
+        let logger = DiagnosticLog.logger(for: .app)
+        for result in report.results {
+            let components = result.duration.components
+            let milliseconds = components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000
+            logger.info(
+                "shutdown component=\(result.component.rawValue, privacy: .public) outcome=\(result.outcome.rawValue, privacy: .public) elapsed_ms=\(milliseconds, privacy: .public)"
+            )
         }
     }
 

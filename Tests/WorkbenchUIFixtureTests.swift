@@ -4,17 +4,25 @@ import SwiftUI
 import XCTest
 @testable import ServerDash
 
+@MainActor
+private final class WorkbenchFixtureContainerRetention {
+    static let shared = WorkbenchFixtureContainerRetention()
+    private(set) var containers: [ModelContainer] = []
+
+    func retain(_ container: ModelContainer) {
+        containers.append(container)
+    }
+}
+
 /// Generates review artifacts from isolated, synthetic data. No connections are opened.
 @MainActor final class WorkbenchUIFixtureTests: XCTestCase {
     private let output = URL(fileURLWithPath: "/tmp/serverdash-workbench-ui-qa", isDirectory: true)
     // SwiftUI can release Query observers after a hosted XCTest window disappears.
     // Keep the handful of isolated stores alive for the test process, matching the
     // application's container lifetime instead of leaving observers with a dead store.
-    private static var retainedContainers: [ModelContainer] = []
-
     private func fixtureContainer() throws -> ModelContainer {
         let container = try PersistenceController.makeInMemoryContainer()
-        Self.retainedContainers.append(container)
+        WorkbenchFixtureContainerRetention.shared.retain(container)
         return container
     }
 
@@ -288,6 +296,61 @@ import XCTest
         try JSONEncoder().encode(checkpoints).write(to: output.appendingPathComponent("terminal-lifecycle-checkpoints.json"), options: .atomic)
     }
 
+    func testShutdownProgressSheetAcrossWindowSizesInLightAndDark() async throws {
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        for dark in [false, true] {
+            for size in [NSSize(width: 900, height: 620), NSSize(width: 1440, height: 900), NSSize(width: 1920, height: 1080)] {
+                let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                let host = NSWindow(
+                    contentRect: NSRect(origin: .zero, size: size),
+                    styleMask: [.titled, .closable, .resizable],
+                    backing: .buffered,
+                    defer: false
+                )
+                host.isReleasedWhenClosed = false
+                host.appearance = appearance
+                host.contentView = NSVisualEffectView(frame: host.contentLayoutRect)
+                host.makeKeyAndOrderFront(nil)
+                defer {
+                    host.orderOut(nil)
+                    host.contentView = nil
+                    host.close()
+                }
+
+                let progress = ShutdownProgressPanel()
+                progress.inspectionPanel.appearance = appearance
+                progress.update("正在安全关闭 ServerDash…")
+                progress.present(relativeTo: host)
+                try await Task.sleep(for: .milliseconds(120))
+                let panel = progress.inspectionPanel
+                XCTAssertTrue(panel.isVisible)
+                // XCTest does not activate the host process, so a sheet is not reliably
+                // reported as the key window. Verify the AppKit focus contract instead:
+                // it is a key-capable modal sheet with no cancel/default control.
+                XCTAssertTrue(panel.canBecomeKey, "退出进度层应能接收键盘事件")
+                XCTAssertTrue(panel.sheetParent === host)
+                XCTAssertFalse(panel.styleMask.contains(.closable), "退出进度层不能提供关闭按钮")
+                XCTAssertNil(panel.standardWindowButton(.closeButton), "退出进度层不能提供关闭按钮")
+                XCTAssertNil(panel.defaultButtonCell, "退出进度层不能提供可取消的默认按钮")
+                let content = try XCTUnwrap(panel.contentView)
+                let nodes = accessibilityNodes(in: content)
+                XCTAssertTrue(nodes.contains { $0.label == "退出进度" })
+                XCTAssertTrue(nodes.contains { $0.label == "退出状态" || $0.label.contains("正在安全关闭") })
+                content.layoutSubtreeIfNeeded()
+                let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+                content.cacheDisplay(in: content.bounds, to: bitmap)
+                let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                XCTAssertGreaterThan(data.count, 1_000)
+                try data.write(
+                    to: output.appendingPathComponent("shutdown-progress-\(Int(size.width))-\(dark ? "dark" : "light").png"),
+                    options: .atomic
+                )
+                progress.dismiss()
+                XCTAssertFalse(panel.isVisible)
+            }
+        }
+    }
+
     private func fixtureApp() -> AppState {
         let trust = HostTrustCoordinator(inspector: { _, _ in throw URLError(.notConnectedToInternet) },
                                         truster: { _, _ in throw URLError(.notConnectedToInternet) })
@@ -425,22 +488,30 @@ import XCTest
             func firstNonempty(_ values: [String?]) -> String {
                 values.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? ""
             }
-            // SwiftUI's virtual accessibility children may implement AppKit's informal
-            // NSObject accessibility API without conforming to NSAccessibilityProtocol.
+            // SwiftUI's virtual accessibility children may expose the modern
+            // accessibility selectors without declaring NSAccessibilityProtocol.
             let formalRole = accessible?.accessibilityRole()?.rawValue
-            let legacyRole = object.accessibilityAttributeValue(.role) as? String
-            let role = firstNonempty([formalRole == NSAccessibility.Role.unknown.rawValue ? nil : formalRole, legacyRole])
+            let informalRole = accessibilityValue("accessibilityRole", from: object) as? String
+            let role = firstNonempty([formalRole == NSAccessibility.Role.unknown.rawValue ? nil : formalRole, informalRole])
             let label = firstNonempty([accessible?.accessibilityLabel(), accessible?.accessibilityTitle(),
-                object.accessibilityAttributeValue(.title) as? String,
-                object.accessibilityAttributeValue(.description) as? String,
-                accessible?.accessibilityHelp(), object.accessibilityAttributeValue(.help) as? String])
+                accessibilityValue("accessibilityLabel", from: object) as? String,
+                accessibilityValue("accessibilityTitle", from: object) as? String,
+                accessible?.accessibilityHelp(),
+                accessibilityValue("accessibilityHelp", from: object) as? String])
             if !role.isEmpty && role != NSAccessibility.Role.unknown.rawValue { result.append(.init(role: role, label: label)) }
-            let children = (accessible?.accessibilityChildren() ?? []) + (object.accessibilityAttributeValue(.children) as? [Any] ?? [])
+            let children = (accessible?.accessibilityChildren() ?? [])
+                + (accessibilityValue("accessibilityChildren", from: object) as? [Any] ?? [])
             pending.append(contentsOf: NSAccessibility.unignoredChildren(from: children))
             pending.append(contentsOf: children)
             if let view = object as? NSView { pending.append(contentsOf: view.subviews) }
         }
         return result
+    }
+
+    private func accessibilityValue(_ selectorName: String, from object: NSObject) -> Any? {
+        let selector = NSSelectorFromString(selectorName)
+        guard object.responds(to: selector) else { return nil }
+        return object.perform(selector)?.takeUnretainedValue()
     }
 
     private func nativeTableRows(in view: NSView) -> [Int] {

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SwiftUI
 
-enum TerminalCursorShape: String, CaseIterable, Codable, Identifiable {
+enum TerminalCursorShape: String, CaseIterable, Codable, Identifiable, Sendable {
     case block
     case underline
     case bar
@@ -18,7 +18,7 @@ enum TerminalCursorShape: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-enum TerminalInactiveCursorStyle: String, CaseIterable, Codable, Identifiable {
+enum TerminalInactiveCursorStyle: String, CaseIterable, Codable, Identifiable, Sendable {
     case outline
     case block
     case bar
@@ -38,7 +38,7 @@ enum TerminalInactiveCursorStyle: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-enum TerminalScrollbarMode: String, CaseIterable, Codable, Identifiable {
+enum TerminalScrollbarMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case automatic
     case visible
     case hidden
@@ -54,7 +54,7 @@ enum TerminalScrollbarMode: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct TerminalAppearanceProfile: Codable, Equatable {
+struct TerminalAppearanceProfile: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
 
     var schemaVersion: Int
@@ -107,7 +107,7 @@ struct TerminalAppearanceProfile: Codable, Equatable {
     }
 }
 
-struct TerminalColor: Codable, Hashable {
+struct TerminalColor: Codable, Hashable, Sendable {
     let hex: String
 
     init(_ hex: String) {
@@ -143,7 +143,7 @@ struct TerminalColor: Codable, Hashable {
     }
 }
 
-struct TerminalColorTheme: Codable, Identifiable, Hashable {
+struct TerminalColorTheme: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let isDark: Bool
@@ -164,7 +164,7 @@ struct TerminalColorTheme: Codable, Identifiable, Hashable {
     }
 }
 
-private struct TerminalThemeSeed: Codable {
+private struct TerminalThemeSeed: Codable, Sendable {
     let id: String
     let name: String
     let isDark: Bool
@@ -175,7 +175,7 @@ private struct TerminalThemeSeed: Codable {
     let palette: String
 }
 
-final class TerminalThemeCatalog {
+struct TerminalThemeCatalog: Sendable {
     static let shared = TerminalThemeCatalog()
 
     let themes: [TerminalColorTheme]
@@ -290,7 +290,7 @@ final class TerminalThemeCatalog {
     ]
 }
 
-struct TerminalFontOption: Identifiable, Hashable {
+struct TerminalFontOption: Identifiable, Hashable, Sendable {
     let postScriptName: String
     let displayName: String
     let isTargetFont: Bool

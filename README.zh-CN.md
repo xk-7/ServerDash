@@ -159,6 +159,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 - 三端浏览器每次视图更新只计算一次筛选与排序，排序字段预先读取，避免列表逐行重新排序和比较时反复读取 SwiftData。移动端监控响应解析在主线程之外执行。
 - stdout/stderr 以受限的 32 KiB 分块消费，输出超限、超时、用户取消和自然退出保持不同结果语义。
 - 取消针对应用拥有的进程组执行 TERM → KILL 升级，也可以只终止一台服务器的工作而不影响其他服务器。
+- 1.0.3 的 macOS 退出流程先冻结远程编辑并按版本保存本地草稿。草稿写入失败时可以重试或取消退出；进入不可逆关闭阶段前，连接和后台服务保持运行。
+- 草稿安全落盘后，单一协调器让同步、监控、隧道、受管进程、交互会话、文件传输和录制共享 8 秒绝对期限；退出超过 300 毫秒才显示原生进度层。
 - 监控连接容量使用 continuation/FIFO 等待队列，不再轮询；任一槽位释放后立即补位。
 - 中央调度器优先处理手动、选中和可见服务器，限制新连接启动速率，错峰重试，并在睡眠或断网时暂停监控。
 - 固定名称且无运行时元数据的 OS Signpost 覆盖启动、数据库、监控、主机信任、子进程、仪表盘、终端和 SFTP 边界。
@@ -189,6 +191,8 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 ## 开发与验证状态
 
+1.0.3 继续使用 Swift 5.9，并为 macOS 应用和测试启用完整严格并发检查。最终干净门禁报告 0 个第一方编译告警，411 项 macOS 测试全部通过。macOS 与模拟器通用 Release、无签名 iOS Device 兼容构建、发布附件、签名、归档、校验值和隔离 UI 夹具均已完成验证。详见 [1.0.3 发布通知](Docs/RELEASE_NOTES_1.0.3.md)和[macOS 工作台验收记录](Docs/WORKBENCH_UI_QA.md)。
+
 通用 `ServerDashMobile` Target 已通过 iPhone 与 iPad Simulator 构建。移动端专项套件现有 65 项测试，其中 41 项为三端共用的会话迁移测试，覆盖格式映射、畸形输入处理、重复识别、跳过原因、ZIP 路径穿越与符号链接防护、敏感信息排除、Keychain 授权、取消与事务回滚；其余用例覆盖连接协议、本地 Citadel 密码/密钥/PTY 集成、可操作的认证错误映射、主机信任及取消、监控并发与退避、后台恢复和删除清理、跨字段筛选、状态汇总、卡片截图、平台能力门控和凭据脱敏。Vendored NIOSSH 另有两项畸形 ECDSA 签名安全回归测试。实体设备 SSH/SFTP 与辅助功能检查尚未执行，详见[移动端实机检查清单](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md)。
 
 已有 macOS S11 专业 SSH 路线与隧道保持可用，并继续使用系统 OpenSSH。生产多跳、认证代理、Remote Forward、硬件密钥和长时间稳定性仍需隔离环境或实机验证。
@@ -197,7 +201,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
-最新正式版本：[ServerDash 1.0.2](https://github.com/xk-7/ServerDash/releases/tag/v1.0.2)（Build 7）。安装与平台附件说明见[正式发布通知](Docs/RELEASE_NOTES_1.0.2.md)。macOS 附件使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
+最新正式版本为 [ServerDash 1.0.3](https://github.com/xk-7/ServerDash/releases/tag/v1.0.3)（Build 8）。macOS 附件继续使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
 
 ## 运行
 
@@ -265,10 +269,10 @@ DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 
 构建正式 GitHub Release 的 macOS、iPhone Simulator、iPad Simulator 产物，并验证无签名 iOS Device Release 编译：
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.2
+./Scripts/build-release-artifacts.sh 1.0.3
 ```
 
-产物和 SHA-256 校验文件输出到 `dist/v1.0.2/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)。
+产物和 SHA-256 校验文件输出到 `dist/v1.0.3/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)，已完成的验收结果见[1.0.3 发布通知](Docs/RELEASE_NOTES_1.0.3.md)。
 
 ## 项目结构
 

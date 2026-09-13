@@ -1,6 +1,30 @@
 import Foundation
 import os
 
+/// A lock-protected bridge for callback APIs that may report completion from
+/// multiple racing paths. The continuation is removed before it is resumed, so
+/// every caller after the winner is a no-op.
+final class OneShotContinuation<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Never>?
+
+    init(_ continuation: CheckedContinuation<Value, Never>) {
+        self.continuation = continuation
+    }
+
+    @discardableResult
+    func resume(returning value: Value) -> Bool {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+
+        guard let pending else { return false }
+        pending.resume(returning: value)
+        return true
+    }
+}
+
 enum ConnectionPhase: String, Sendable {
     case idle
     case resolving
@@ -130,7 +154,8 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
         _ text: String,
         fallback: String = "",
         host: String? = nil,
-        port: Int? = nil
+        port: Int? = nil,
+        trustedHostStore: TrustedHostFileStore = .production
     ) -> ConnectionError {
         let lowered = text.lowercased()
         if lowered.contains("could not resolve hostname") || lowered.contains("nodename nor servname") {
@@ -148,7 +173,7 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
         if lowered.contains("remote host identification has changed") ||
             (lowered.contains("host key") && lowered.contains("has changed")) {
             let oldFingerprint = host.flatMap {
-                TrustedHostStore.existingFingerprint(host: $0, port: port ?? 22)
+                trustedHostStore.existingFingerprint(host: $0, port: port ?? 22)
             }
             return .hostKeyChanged(
                 oldFingerprint: oldFingerprint,
@@ -158,7 +183,10 @@ enum ConnectionError: LocalizedError, Sendable, Equatable {
         if lowered.contains("host key verification failed") {
             if let host {
                 let resolvedPort = port ?? 22
-                let existing = TrustedHostStore.existingFingerprint(host: host, port: resolvedPort)
+                let existing = trustedHostStore.existingFingerprint(
+                    host: host,
+                    port: resolvedPort
+                )
                 if let existing {
                     let newFingerprint = extractedFingerprint(from: text)
                     if newFingerprint == existing {
@@ -418,6 +446,7 @@ actor ConnectionProcessController {
     private var recentRuns: [ProcessRunSummary] = []
     private var cancellationIntervals: [UUID: PerformanceInterval] = [:]
     private var escalationTasks: [UUID: Task<Void, Never>] = [:]
+    private var acceptingNewRuns = true
     private let limiter: ConnectionLimiter
     private let terminationGrace: TimeInterval
 
@@ -432,10 +461,14 @@ actor ConnectionProcessController {
     func run(_ request: ProcessRunRequest) async throws -> ProcessRunResult {
         let interval = PerformanceTrace.begin(.processRun)
         defer { PerformanceTrace.end(interval) }
-        guard !Task.isCancelled else { throw ConnectionError.cancelled }
+        guard acceptingNewRuns, !Task.isCancelled else { throw ConnectionError.cancelled }
         do {
             try await limiter.acquire(serverID: request.serverID)
         } catch is CancellationError {
+            throw ConnectionError.cancelled
+        }
+        guard acceptingNewRuns, !Task.isCancelled else {
+            await limiter.release(serverID: request.serverID)
             throw ConnectionError.cancelled
         }
 
@@ -475,21 +508,56 @@ actor ConnectionProcessController {
 
     @discardableResult
     func terminateAllAndWait(for serverID: UUID? = nil, timeout: TimeInterval = 3) async -> Bool {
+        let clock = ContinuousClock()
+        return await terminateAllAndWait(
+            for: serverID,
+            until: clock.now.advanced(by: .seconds(max(0.1, timeout)))
+        )
+    }
+
+    /// Stops matching children without extending the caller's absolute shutdown
+    /// budget. A short tail is reserved for SIGKILL and process reaping.
+    @discardableResult
+    func terminateAllAndWait(
+        for serverID: UUID? = nil,
+        until deadline: ContinuousClock.Instant
+    ) async -> Bool {
+        await drainProcesses(for: serverID, until: deadline) != .timedOut
+    }
+
+    /// Permanently closes the process admission gate before taking the active
+    /// snapshot. The second check in `run` covers requests already waiting in
+    /// the limiter when application shutdown begins.
+    func shutdownAndDrain(until deadline: ContinuousClock.Instant) async -> ShutdownOutcome {
+        acceptingNewRuns = false
+        return await drainProcesses(for: nil, until: deadline)
+    }
+
+    private func drainProcesses(
+        for serverID: UUID?,
+        until deadline: ContinuousClock.Instant
+    ) async -> ShutdownOutcome {
         terminateAll(for: serverID)
-        let deadline = Date().addingTimeInterval(max(0.1, timeout))
-        while activeProcessCount(for: serverID) > 0, Date() < deadline {
+        let clock = ContinuousClock()
+        let naturalEscalation = clock.now.advanced(by: .seconds(terminationGrace))
+        let reservedForceWindow = deadline.advanced(by: .milliseconds(-250))
+        let forceAt = min(naturalEscalation, reservedForceWindow)
+        while activeProcessCount(for: serverID) > 0,
+              clock.now < forceAt,
+              !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(20))
         }
-        guard activeProcessCount(for: serverID) > 0 else { return true }
+        guard activeProcessCount(for: serverID) > 0 else { return .completed }
         let remaining = processes.compactMap { runID, active in
             serverID == nil || active.summary.serverID == serverID ? runID : nil
         }
         remaining.forEach { forceKill(runID: $0) }
-        let forceDeadline = Date().addingTimeInterval(1)
-        while activeProcessCount(for: serverID) > 0, Date() < forceDeadline {
+        while activeProcessCount(for: serverID) > 0,
+              clock.now < deadline,
+              !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(20))
         }
-        return activeProcessCount(for: serverID) == 0
+        return activeProcessCount(for: serverID) == 0 ? .forced : .timedOut
     }
 
     func activeProcessSummaries() -> [ProcessRunSummary] {
@@ -689,18 +757,12 @@ actor ConnectionProcessController {
 
     private func waitForExit(_ process: Process) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let lock = NSLock()
-            var resumed = false
-            let resumeOnce = {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume()
+            let completion = OneShotContinuation(continuation)
+            process.terminationHandler = { terminatedProcess in
+                completion.resume(returning: ())
             }
-            process.terminationHandler = { _ in resumeOnce() }
             if !process.isRunning {
-                resumeOnce()
+                completion.resume(returning: ())
             }
         }
     }
@@ -815,7 +877,7 @@ enum SSHConnectionTester {
         guard result.output.contains("serverdash-ok") else {
             throw ConnectionError.commandFailed(result.error)
         }
-        EventLogStore.shared.append(
+        EventLogStore.append(
             serverID: config.id,
             module: .ssh,
             message: "SSH 测试成功"

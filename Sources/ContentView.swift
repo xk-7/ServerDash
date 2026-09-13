@@ -231,45 +231,48 @@ struct ContentView: View {
     }
 
     private var lifecycleView: some View {
+        lifecycleObserversView
+            .modifier(hostTrustAlert)
+    }
+
+    private var lifecycleObserversView: some View {
         presentationView
-        .task {
-            synchronizeIdentityConnections()
-            appState.bootstrap(servers: servers, context: modelContext)
-            LaunchPerformanceTracker.shared.markInteractive()
-        }
-        .onChange(of: servers.count) {
-            appState.bootstrap(servers: servers, context: modelContext)
-        }
-        .onChange(of: identities.count) {
-            synchronizeIdentityConnections()
-        }
-        .onChange(of: sshKeys.count) {
-            synchronizeIdentityConnections()
-        }
-        .onChange(of: connectionRoutes.map(\.revision)) {
-            synchronizeIdentityConnections()
-        }
-        .onChange(of: servers.map(\.id)) { _, serverIDs in
-            handleServerListChange(serverIDs)
-        }
-        .modifier(
-            HostTrustAlertModifier(
-                pendingTrust: appState.pendingTrust,
-                isSuppressed: showingNewServer || editingServer != nil,
-                message: appState.pendingTrust.map(trustMessage) ?? "",
-                onCancel: { requestID in appState.cancelTrust(requestID) },
-                onAccept: { prompt in
-                    Task {
-                        if let probe = await appState.resolveTrust(prompt.id) {
-                            TrustedHostCatalog.upsert(probe: probe, in: modelContext)
-                        }
+            .task {
+                synchronizeIdentityConnections()
+                appState.bootstrap(servers: servers, context: modelContext)
+                LaunchPerformanceTracker.shared.markInteractive()
+            }
+            .onChange(of: servers.count) {
+                appState.bootstrap(servers: servers, context: modelContext)
+            }
+            .onChange(of: identities.count) {
+                synchronizeIdentityConnections()
+            }
+            .onChange(of: sshKeys.count) {
+                synchronizeIdentityConnections()
+            }
+            .onChange(of: connectionRoutes.map(\.revision)) {
+                synchronizeIdentityConnections()
+            }
+            .onChange(of: servers.map(\.id)) { _, serverIDs in
+                handleServerListChange(serverIDs)
+            }
+    }
+
+    private var hostTrustAlert: HostTrustAlertModifier {
+        HostTrustAlertModifier(
+            pendingTrust: appState.pendingTrust,
+            isSuppressed: showingNewServer || editingServer != nil,
+            message: appState.pendingTrust.map(trustMessage) ?? "",
+            onCancel: { requestID in appState.cancelTrust(requestID) },
+            onAccept: { prompt in
+                Task {
+                    if let probe = await appState.resolveTrust(prompt.id) {
+                        TrustedHostCatalog.upsert(probe: probe, in: modelContext)
                     }
                 }
-            )
+            }
         )
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            appState.shutdown()
-        }
     }
 
     private func handleServerListChange(_ serverIDs: [UUID]) {
@@ -437,13 +440,13 @@ struct ContentView: View {
             if route.serverID == server.id {
                 route = route.returningToOrigin
             }
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: server.id,
                 module: .data,
                 message: "已删除服务器配置及连接引用"
             )
         } catch {
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: server.id,
                 module: .data,
                 level: "error",

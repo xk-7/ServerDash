@@ -67,3 +67,43 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 发布脚本成功完成 macOS 通用 Release、iPhone Simulator Release、iPad Simulator Release 和无签名 iOS Device Release 兼容构建。macOS 与两份模拟器应用均包含 arm64、x86_64，设备兼容构建为 arm64；三端 `CFBundleShortVersionString` 均为 1.0.2，`CFBundleVersion` 均为 7。macOS ad-hoc 签名通过 `codesign --verify --deep --strict`，DMG 通过 `hdiutil verify`，四项发布文件通过 SHA-256 校验。构建日志为 `/tmp/serverdash-v102-release-build.log`，产物位于 `dist/v1.0.2/`。
 
 本轮没有修改 SwiftData V5、同步包、凭据格式、连接协议或移动端能力白名单。实体 iPhone/iPad、VoiceOver 实际朗读、实体串口、真实 VNC/RDP/SSH 服务及真实 WebDAV 双设备同步未执行，仍列为设备验收项。
+
+## 2026-09-13 v1.0.3 并发与退出可靠性验收
+
+本轮使用 `codex/mac-concurrency-stability` 分支，版本元数据为 1.0.3（Build 8），Swift 语言模式保持 5.9。macOS 应用和测试目标启用 `SWIFT_STRICT_CONCURRENCY=complete`；SwiftData V5、同步包、凭据格式、连接协议及移动端能力白名单未改变。
+
+### 最终自动化证据
+
+- `Scripts/check-app-concurrency.sh` 在清空 DerivedData 后执行严格并发 `build-for-testing`，当前提交的第一方源码、测试及宏展开编译告警为 **0**。最终日志为 `/tmp/serverdash-v103-concurrency-final.log`。
+- 同一门禁内记录的第三方告警实例为 SwiftTerm 87、ZIPFoundation 4、FreeRDP/WinPR 42，NIOSSH 0、Citadel 0。它们来自 vendored 或二进制依赖，只作信息记录，本轮没有修改依赖源码。
+- 当前最终源码执行 macOS 全量测试 **411 项，全部通过、零失败**，测试用时 86.631 秒。日志为 `/tmp/serverdash-v103-mac-release-final.log`；结果包为 `.build/concurrency-gate/Logs/Test/Test-ServerDash-2026.09.13_15-49-42-+0800.xcresult`。
+- 新增回归覆盖一次性 continuation 的自然退出/回调/超时竞争和单次恢复，退出草稿冻结、保存失败重试/取消、300 毫秒进度门限、共享 8 秒截止、强制终止、迟到回调、`.partial` 录制、并发日志脱敏、终端通知释放、RDP 启停、可信主机隔离及监控排序。
+
+### 当前实现检查点
+
+- 退出入口统一到 `MacTerminationDelegate`；草稿保存失败时先关闭进度层，再提供重试保存或取消退出。取消发生在全局关闭前，编辑状态可以恢复。
+- 草稿保存成功后开始计算 8 秒绝对期限。目录同步、监控、隧道、受管进程、交互会话、文件传输和录制并行收尾；期限到达后取消剩余任务，迟到结果不再更新关闭报告。
+- 进程和隧道在关闭时停止接收新任务，并区分正常完成、TERM/KILL 后强制完成及超时。录制排空使用通知和一次性 continuation，不阻塞 GCD 工作线程。
+- 退出报告只包含固定组件、结果和耗时；事件写入在进入 OSLog 和最多 300 条的界面列表前脱敏。临时密钥材料在关闭收尾后清理。
+- 隔离应用夹具输出 59 张 PNG 到 `/tmp/serverdash-workbench-ui-qa/`。退出进度层在 900×620、1440×900 与 1920×1080 三种窗口尺寸下分别验证浅色和深色，共六个组合；检查其作为无取消控件的 AppKit 模态键盘窗口、无关闭/默认按钮，并读取到“退出进度”和“退出状态”辅助功能标签。
+
+### 发布构建与附件
+
+- [x] `Scripts/build-release-artifacts.sh 1.0.3` 完成 macOS 通用 Release、iPhone Simulator Release、iPad Simulator Release 与无签名 iOS Device Release 兼容构建。最终产物位于 `dist/v1.0.3/`。
+- [x] macOS、模拟器与设备兼容 App 的 `CFBundleShortVersionString` 均为 1.0.3，`CFBundleVersion` 均为 8。
+- [x] macOS 与模拟器二进制均包含 arm64、x86_64；无签名 iOS Device 兼容二进制为 arm64。两份模拟器 App 均声明 `iPhoneSimulator`，`UIDeviceFamily` 同时包含 1 与 2。
+- [x] macOS 构建目录和挂载 DMG 内的 `ServerDash.app` 均通过 `codesign --verify --deep --strict`；签名为 ad-hoc，`TeamIdentifier=not set`。DMG 通过 `hdiutil verify`，并包含 App 与 Applications 符号链接。
+- [x] iPhone/iPad ZIP 均通过完整性测试；解包后顶层目录、`ServerDashMobile.app`、安装说明、版本、平台、设备族与架构均通过复核。
+- [x] macOS DMG、两份模拟器 ZIP 与离线发布通知共四项文件均通过 `ServerDash-1.0.3-SHA256SUMS.txt` 回读校验。
+
+首次完整发布构建日志 `/tmp/serverdash-v103-release-build.log` 跨架构/目标记录 SwiftTerm 16、NIOSSH 135、Citadel 54、FreeRDP/WinPR 84 次依赖告警，另有 4 次无 AppIntents 依赖的元数据跳过提示和 1 次既有移动端方向验证提示；ZIPFoundation 为 0。这些计数包含多个目标的重复编译。随后修正第一方原生 BOOL 与移动端日志调用告警，并用全部四种构建重新生成附件；最终重建日志 `/tmp/serverdash-v103-release-rebuild.log` 没有第一方源码告警。本轮按范围不改变移动端方向或功能。
+
+### 现场验收
+
+以下项目需要设备或真实服务，保持未通过状态：
+
+- [ ] 实际 VoiceOver 朗读、顺序与完整键盘导航。
+- [ ] 实体串口拔插、端口占用、异常断开、恢复和不同驱动/高波特率。
+- [ ] 真实 SSH 多因素认证、VNC 系统屏幕共享、RDP Windows 互操作及长时间会话退出。
+- [ ] 真实 WebDAV 强 ETag、双设备同步、冲突、断网恢复与恢复密钥交换。
+- [ ] 实体 iPhone/iPad 的兼容性、前后台行为和辅助功能。

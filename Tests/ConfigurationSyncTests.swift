@@ -487,31 +487,48 @@ import XCTest
 
 }
 
-private final class ConfigurationSyncConditionalProbe {
+private final class ConfigurationSyncConditionalProbe: @unchecked Sendable {
+    private let lock = NSLock()
     private var exists = false
     private let ignoredExistingHeader: String?
     init(ignoredExistingHeader: String? = nil) { self.ignoredExistingHeader = ignoredExistingHeader }
     func reply(to request: URLRequest) -> (Int, [String: String], Data)? {
-        guard request.url?.lastPathComponent.hasPrefix(".serverdash-condition-") == true else { return nil }
-        if request.httpMethod == "DELETE" { exists = false; return (204, [:], Data()) }
-        if request.value(forHTTPHeaderField: "If-Match") != nil {
-            return (exists && ignoredExistingHeader == "If-Match" ? 204 : 412, [:], Data())
+        lock.withLock {
+            guard request.url?.lastPathComponent.hasPrefix(".serverdash-condition-") == true else { return nil }
+            if request.httpMethod == "DELETE" { exists = false; return (204, [:], Data()) }
+            if request.value(forHTTPHeaderField: "If-Match") != nil {
+                return (exists && ignoredExistingHeader == "If-Match" ? 204 : 412, [:], Data())
+            }
+            if exists { return (ignoredExistingHeader == "If-None-Match" ? 204 : 412, [:], Data()) }
+            exists = true
+            return (201, [:], Data())
         }
-        if exists { return (ignoredExistingHeader == "If-None-Match" ? 204 : 412, [:], Data()) }
-        exists = true
-        return (201, [:], Data())
+    }
+}
+
+private final class ConfigurationSyncURLProtocolHandlerStore: @unchecked Sendable {
+    typealias Handler = @Sendable (URLRequest) throws -> (Int, [String: String], Data)
+
+    private let lock = NSLock()
+    private var handler: Handler?
+
+    func install(_ value: Handler?) {
+        lock.withLock { handler = value }
+    }
+
+    func current() -> Handler? {
+        lock.withLock { handler }
     }
 }
 
 private final class ConfigurationSyncURLProtocol: URLProtocol {
-    typealias Handler = (URLRequest) throws -> (Int, [String: String], Data)
-    private static let lock = NSLock()
-    private static var handler: Handler?
-    static func install(_ value: Handler?) { lock.lock(); defer { lock.unlock() }; handler = value }
+    typealias Handler = ConfigurationSyncURLProtocolHandlerStore.Handler
+    private static let handlers = ConfigurationSyncURLProtocolHandlerStore()
+    static func install(_ value: Handler?) { handlers.install(value) }
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "fixture.invalid" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Self.lock.lock(); let handler = Self.handler; Self.lock.unlock()
+        let handler = Self.handlers.current()
         do {
             guard let handler, let url = request.url else { throw URLError(.badURL) }
             let (status, headers, body) = try handler(request)

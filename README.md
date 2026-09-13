@@ -174,6 +174,8 @@ Export flow:
 - Server browsers compute filtering/sorting once per view update and read sort keys before comparing, avoiding per-row re-sorts and repeated SwiftData reads. Mobile monitoring responses are parsed off the main actor.
 - stdout and stderr are consumed in bounded 32 KiB chunks; output-limit, timeout, cancellation, and natural exit remain distinct outcomes.
 - Cancellation targets the owned process group, escalates from TERM to KILL, and can be scoped to one server without affecting another server's work.
+- The 1.0.3 macOS termination path first freezes and versions local editor drafts. A failed draft write can be retried or the quit can be cancelled before connections and background services enter irreversible shutdown.
+- After drafts are safe, one coordinator drains sync, monitoring, tunnels, managed processes, interactive sessions, file transfers, and recordings against a shared eight-second deadline. A native progress sheet appears only after 300 ms.
 - Monitoring capacity uses continuation-backed FIFO waiters instead of polling and refills immediately when a slot becomes available.
 - The central scheduler prioritizes manual, selected, and visible-server work, rate-limits new starts, staggers retries, and suspends monitoring across sleep or network loss.
 - Fixed-name, metadata-free OS Signposts cover launch, database, monitoring, host trust, subprocess, dashboard, terminal, and SFTP boundaries.
@@ -204,6 +206,8 @@ The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, `Vendor/swift-nio-s
 
 ## Development Status
 
+Version 1.0.3 keeps Swift 5.9 and enables complete strict-concurrency checking for the macOS app and tests. The final clean gate reports zero first-party compiler warnings, and all 411 macOS tests pass. Universal macOS and Simulator Release builds, the unsigned iOS Device compatibility build, artifacts, signatures, archives, checksums, and isolated UI fixtures have completed verification. See the [1.0.3 release notes](Docs/RELEASE_NOTES_1.0.3.md) and [macOS workbench acceptance record](Docs/WORKBENCH_UI_QA.md).
+
 The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 65 tests, including 41 shared session-migration cases for format mapping, malformed-input handling, duplicate detection, skipped-session reporting, ZIP traversal/symlink hardening, secret omission, Keychain authorization, cancellation, and rollback; the remaining tests cover connection contracts, local Citadel password/key/PTY integration, actionable authentication-error mapping, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
 
 The existing macOS S11 professional SSH routes and tunnels remain available and continue to use system OpenSSH. Production multi-hop, authenticated proxies, Remote Forward, hardware keys, and long-running stability still require isolated or real-device validation.
@@ -212,7 +216,7 @@ See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for r
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
-Latest stable release: [ServerDash 1.0.2](https://github.com/xk-7/ServerDash/releases/tag/v1.0.2) (build 7). See the [release announcement](Docs/RELEASE_NOTES_1.0.2.md) for installation and artifact details. The macOS artifact is ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
+Latest stable release: [ServerDash 1.0.3](https://github.com/xk-7/ServerDash/releases/tag/v1.0.3) (build 8). The macOS artifact remains ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run
 
@@ -289,10 +293,10 @@ The DMG is written to `dist/`. On another Mac, open the app with Control-click â
 Build the macOS, iPhone Simulator, and iPad Simulator GitHub Release artifacts, plus an unsigned iOS Device Release compile check:
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.2
+./Scripts/build-release-artifacts.sh 1.0.3
 ```
 
-Artifacts and SHA-256 checksums are written to `dist/v1.0.2/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files.
+Artifacts and SHA-256 checksums are written to `dist/v1.0.3/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files and the [1.0.3 release notes](Docs/RELEASE_NOTES_1.0.3.md) for the completed verification record.
 
 ## Project Layout
 

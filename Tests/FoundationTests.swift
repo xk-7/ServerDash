@@ -206,6 +206,10 @@ final class DiagnosticRedactorTests: XCTestCase {
                 "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----"
             ).contains("abc")
         )
+        XCTAssertFalse(
+            DiagnosticRedactor.redact("Authorization: Bearer top-secret-value")
+                .contains("top-secret-value")
+        )
     }
 
     func testSSHReportDoesNotRecordConnectionIdentifiersOrFingerprints() {
@@ -244,20 +248,19 @@ final class DiagnosticRedactorTests: XCTestCase {
 }
 
 final class TrustedHostStoreTests: XCTestCase {
-    private var originalURL: URL!
     private var temporaryURL: URL!
+    private var store: TrustedHostFileStore!
 
     override func setUp() {
         super.setUp()
-        originalURL = TrustedHostStore.knownHostsURL
         temporaryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ServerDash-known-hosts-\(UUID().uuidString)")
-        TrustedHostStore.knownHostsURL = temporaryURL
+        store = TrustedHostFileStore(knownHostsURL: temporaryURL)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: temporaryURL)
-        TrustedHostStore.knownHostsURL = originalURL
+        store = nil
         super.tearDown()
     }
 
@@ -277,14 +280,14 @@ final class TrustedHostStoreTests: XCTestCase {
             keyLine: "vps.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9NEW1 new"
         )
 
-        try TrustedHostStore.trust(old)
-        try TrustedHostStore.trust(new, replacing: true)
+        try store.trust(old)
+        try store.trust(new, replacing: true)
         let contents = try String(contentsOf: temporaryURL, encoding: .utf8)
         XCTAssertFalse(contents.contains("old"))
         XCTAssertTrue(contents.contains("NEW1"))
         XCTAssertNotNil(TrustedHostStore.fingerprint(for: old.keyLine))
         XCTAssertEqual(
-            TrustedHostStore.existingFingerprint(host: "vps.example.com", port: 22),
+            store.existingFingerprint(host: "vps.example.com", port: 22),
             TrustedHostStore.fingerprint(for: new.keyLine)
         )
     }
@@ -297,8 +300,8 @@ final class TrustedHostStoreTests: XCTestCase {
             fingerprint: "SHA256:old",
             keyLine: "changed.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
         )
-        try TrustedHostStore.trust(old)
-        let stored = TrustedHostStore.existingFingerprint(host: "changed.example.com", port: 22)
+        try store.trust(old)
+        let stored = store.existingFingerprint(host: "changed.example.com", port: 22)
         XCTAssertEqual(
             ConnectionError.classify(
                 """
@@ -307,7 +310,8 @@ final class TrustedHostStoreTests: XCTestCase {
                 SHA256:newFingerprintValue
                 """,
                 host: "changed.example.com",
-                port: 22
+                port: 22,
+                trustedHostStore: store
             ),
             .hostKeyChanged(oldFingerprint: stored, newFingerprint: "SHA256:newFingerprintValue")
         )
@@ -322,8 +326,8 @@ final class TrustedHostStoreTests: XCTestCase {
             fingerprint: "SHA256:test",
             keyLine: "other.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
         )
-        try TrustedHostStore.trust(probe)
-        XCTAssertNotNil(TrustedHostStore.existingFingerprint(host: "10.0.0.8", port: 22))
+        try store.trust(probe)
+        XCTAssertNotNil(store.existingFingerprint(host: "10.0.0.8", port: 22))
         let contents = try String(contentsOf: temporaryURL, encoding: .utf8)
         XCTAssertTrue(contents.contains("10.0.0.8"))
     }
@@ -338,10 +342,10 @@ final class TrustedHostStoreTests: XCTestCase {
             keyLine: "ports.example.test ssh-ed25519 \(key)"
         )
 
-        try TrustedHostStore.trust(probe)
+        try store.trust(probe)
 
-        XCTAssertTrue(TrustedHostStore.hasUsableHostName(host: probe.host, port: 2222))
-        XCTAssertFalse(TrustedHostStore.hasUsableHostName(host: probe.host, port: 22))
+        XCTAssertTrue(store.hasUsableHostName(host: probe.host, port: 2222))
+        XCTAssertFalse(store.hasUsableHostName(host: probe.host, port: 22))
         let contents = try String(contentsOf: temporaryURL, encoding: .utf8)
         XCTAssertTrue(contents.contains("[ports.example.test]:2222"))
         XCTAssertFalse(contents.contains("[ports.example.test]:22,"))
@@ -356,11 +360,11 @@ final class TrustedHostStoreTests: XCTestCase {
             fingerprint: "unused-by-store",
             keyLine: "trusted.example.test ssh-ed25519 \(key)"
         )
-        try TrustedHostStore.trust(probe)
+        try store.trust(probe)
         let config = makeConfig(host: probe.host, port: probe.port)
 
         for _ in 0..<100 {
-            let decision = try await TrustedHostStore.inspect(
+            let decision = try await store.inspect(
                 config,
                 forceScan: false
             ) { _, _, _ in
@@ -385,10 +389,10 @@ final class TrustedHostStoreTests: XCTestCase {
         )
         let newLine = "[changed.example.test]:2222 ssh-ed25519 \(newKey)"
         let newFingerprint = try XCTUnwrap(TrustedHostStore.fingerprint(for: newLine))
-        try TrustedHostStore.trust(oldProbe)
+        try store.trust(oldProbe)
         let config = makeConfig(host: oldProbe.host, port: oldProbe.port)
 
-        let decision = try await TrustedHostStore.inspect(
+        let decision = try await store.inspect(
             config,
             forceScan: true
         ) { host, port, _ in
@@ -410,7 +414,7 @@ final class TrustedHostStoreTests: XCTestCase {
 
     func testSameFingerprintOnDifferentHostStillRequiresExplicitTrust() async throws {
         let key = Data("shared-host-key".utf8).base64EncodedString()
-        try TrustedHostStore.trust(
+        try store.trust(
             SSHHostKeyProbe(
                 host: "first.example.test",
                 port: 22,
@@ -420,7 +424,7 @@ final class TrustedHostStoreTests: XCTestCase {
             )
         )
         let second = makeConfig(host: "second.example.test", port: 22)
-        let decision = try await TrustedHostStore.inspect(
+        let decision = try await store.inspect(
             second,
             forceScan: true
         ) { host, port, _ in
@@ -439,7 +443,65 @@ final class TrustedHostStoreTests: XCTestCase {
             return XCTFail("Trust must remain scoped to host and port")
         }
         XCTAssertEqual(probe.host, "second.example.test")
-        XCTAssertFalse(TrustedHostStore.hasUsableHostName(host: probe.host, port: probe.port))
+        XCTAssertFalse(store.hasUsableHostName(host: probe.host, port: probe.port))
+    }
+
+    func testInjectedStoresDoNotShareKnownHostFiles() throws {
+        let secondURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ServerDash-known-hosts-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: secondURL) }
+        let secondStore = TrustedHostFileStore(knownHostsURL: secondURL)
+        let host = "isolated.example.test"
+        let firstKey = Data("first-key".utf8).base64EncodedString()
+        let secondKey = Data("second-key".utf8).base64EncodedString()
+
+        try store.trust(
+            SSHHostKeyProbe(
+                host: host,
+                port: 22,
+                algorithm: "ED25519",
+                fingerprint: "unused-by-store",
+                keyLine: "\(host) ssh-ed25519 \(firstKey)"
+            )
+        )
+        try secondStore.trust(
+            SSHHostKeyProbe(
+                host: host,
+                port: 22,
+                algorithm: "ED25519",
+                fingerprint: "unused-by-store",
+                keyLine: "\(host) ssh-ed25519 \(secondKey)"
+            )
+        )
+
+        XCTAssertNotEqual(
+            store.existingFingerprint(host: host, port: 22),
+            secondStore.existingFingerprint(host: host, port: 22)
+        )
+    }
+
+    func testConcurrentTrustUpdatesPreserveEveryHost() async throws {
+        let isolatedStore = try XCTUnwrap(store)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<24 {
+                group.addTask {
+                    let host = "host-\(index).example.test"
+                    let key = Data("host-key-\(index)".utf8).base64EncodedString()
+                    try isolatedStore.trust(
+                        SSHHostKeyProbe(
+                            host: host,
+                            port: 22,
+                            algorithm: "ED25519",
+                            fingerprint: "unused-by-store",
+                            keyLine: "\(host) ssh-ed25519 \(key)"
+                        )
+                    )
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        XCTAssertEqual(store.allKeys().count, 24)
     }
 
     private func makeConfig(host: String, port: Int) -> ServerConnectionConfig {
@@ -1565,6 +1627,21 @@ final class MonitorPresentationTests: XCTestCase {
 }
 
 final class ConnectionProcessControllerTests: XCTestCase {
+    func testOneShotContinuationResumesExactlyOnceAcrossConcurrentCallbacks() async {
+        let attempts = LockedBooleanRecorder()
+        let result: Int = await withCheckedContinuation { continuation in
+            let oneShot = OneShotContinuation(continuation)
+            DispatchQueue.concurrentPerform(iterations: 64) { value in
+                attempts.append(oneShot.resume(returning: value))
+            }
+        }
+
+        let outcomes = attempts.values
+        XCTAssertTrue((0..<64).contains(result))
+        XCTAssertEqual(outcomes.filter { $0 }.count, 1)
+        XCTAssertEqual(outcomes.filter { !$0 }.count, 63)
+    }
+
     func testTerminateAllAndWaitDrainsActiveProcessesBeforeReturning() async throws {
         let controller = ConnectionProcessController(
             limiter: ConnectionLimiter(maxGlobal: 2, maxPerServer: 2),
@@ -1580,6 +1657,38 @@ final class ConnectionProcessControllerTests: XCTestCase {
         await assertCancelled(task)
         let activeCount = await controller.activeProcessCount()
         XCTAssertEqual(activeCount, 0)
+    }
+
+    func testShutdownRejectsRunAlreadyWaitingForAdmission() async throws {
+        let limiter = ConnectionLimiter(maxGlobal: 1, maxPerServer: 1)
+        let controller = ConnectionProcessController(
+            limiter: limiter,
+            terminationGrace: 0.1
+        )
+        try await limiter.acquire(serverID: nil)
+        let waiting = Task {
+            try await controller.run(ProcessRunRequest(
+                executable: "/usr/bin/printf",
+                arguments: ["must-not-run"],
+                environment: ProcessInfo.processInfo.environment,
+                totalTimeout: 2,
+                maxOutputBytes: 1_024,
+                module: .ssh
+            ))
+        }
+        let queued = await waitUntil {
+            await limiter.waitingCount() == 1
+        }
+        XCTAssertTrue(queued)
+
+        let outcome = await controller.shutdownAndDrain(
+            until: ContinuousClock().now.advanced(by: .milliseconds(100))
+        )
+        XCTAssertEqual(outcome, .completed)
+        await limiter.release(serverID: nil)
+        await assertCancelled(waiting)
+        let active = await controller.activeProcessCount()
+        XCTAssertEqual(active, 0)
     }
 
     func testReturnsOutputBelowConfiguredLimit() async throws {
@@ -1791,6 +1900,40 @@ final class ConnectionProcessControllerTests: XCTestCase {
         XCTAssertEqual(recent.last?.terminationReason, .cancelled)
     }
 
+    func testAbsoluteShutdownDeadlineEscalatesBeforeTheBudgetExpires() async throws {
+        let controller = ConnectionProcessController(
+            limiter: ConnectionLimiter(maxGlobal: 1, maxPerServer: 1),
+            terminationGrace: 10
+        )
+        let serverID = UUID()
+        let task = Task {
+            try await controller.run(
+                ProcessRunRequest(
+                    executable: "/bin/sh",
+                    arguments: ["-c", "trap '' TERM; sleep 30"],
+                    environment: ProcessInfo.processInfo.environment,
+                    totalTimeout: 60,
+                    maxOutputBytes: 1_024,
+                    serverID: serverID,
+                    module: .ssh
+                )
+            )
+        }
+        let startedRunning = await waitUntil { await controller.activeProcessCount() == 1 }
+        XCTAssertTrue(startedRunning)
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let stopped = await controller.terminateAllAndWait(
+            for: serverID,
+            until: started.advanced(by: .milliseconds(650))
+        )
+
+        XCTAssertTrue(stopped)
+        XCTAssertLessThan(started.duration(to: clock.now), .milliseconds(750))
+        await assertCancelled(task)
+    }
+
     private func longRunningTask(
         controller: ConnectionProcessController,
         serverID: UUID
@@ -1833,6 +1976,23 @@ final class ConnectionProcessControllerTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return await condition()
+    }
+}
+
+private final class LockedBooleanRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Bool] = []
+
+    var values: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: Bool) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
     }
 }
 
@@ -1994,9 +2154,12 @@ final class PerformanceInstrumentationTests: XCTestCase {
 
 @MainActor
 final class SessionNavigationRegressionTests: XCTestCase {
-    func testReuseDisconnectedMRUDoesNotAuthorizeOrChangeMonitorSelection() {
-        var scans = 0
-        let trust = HostTrustCoordinator(inspector: { _, _ in scans += 1; throw CancellationError() }, truster: { _, _ in })
+    func testReuseDisconnectedMRUDoesNotAuthorizeOrChangeMonitorSelection() async {
+        let scans = IntegerRecorder()
+        let trust = HostTrustCoordinator(inspector: { _, _ in
+            await scans.append(1)
+            throw CancellationError()
+        }, truster: { _, _ in })
         let app = AppState(trustCoordinator: trust, terminalRegistry: TerminalSessionRegistry(attachProcess: false))
         let monitor = ServerRecord(name: "Monitor", host: "monitor.test", username: "test")
         app.select(monitor)
@@ -2009,7 +2172,8 @@ final class SessionNavigationRegressionTests: XCTestCase {
         XCTAssertEqual(app.selectedTerminalID, first.id)
         XCTAssertEqual(app.terminalRegistry.controllers.count, 2)
         XCTAssertEqual(first.status, .disconnected)
-        XCTAssertEqual(scans, 0)
+        let recordedScans = await scans.values()
+        XCTAssertEqual(recordedScans.count, 0)
         XCTAssertEqual(app.selectedServerID, monitor.id)
         XCTAssertEqual(app.route, .section(.terminal))
         app.closeTerminal(first.session)

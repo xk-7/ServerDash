@@ -76,12 +76,27 @@ protocol RDPConnectionEngine: AnyObject, Sendable {
 
 extension RDPConnectionEngine { var hasActiveFileTransfers: Bool { false } }
 
+/// `SDRDPClient` is an Objective-C boundary whose native implementation owns
+/// its lifetime, command and frame locks. This box permits only the blocking
+/// `run` call to cross onto the engine's dedicated serial worker.
+private final class NativeRDPWorkerBox: @unchecked Sendable {
+    private let client: SDRDPClient
+
+    init(_ client: SDRDPClient) {
+        self.client = client
+    }
+
+    func run() {
+        client.run()
+    }
+}
+
 final class NativeRDPConnectionEngine: RDPConnectionEngine, @unchecked Sendable {
     private let connectionID = UUID()
     private let lock = NSLock()
     private var client: SDRDPClient?
     private var cancelled = false
-    var clipboard: RDPClipboardSession?
+    private var clipboard: RDPClipboardSession?
     private let worker = DispatchQueue(label: "com.serverdash.rdp.connection", qos: .userInitiated)
 
     func start(configuration: RDPConnectionConfiguration, password: String,
@@ -89,10 +104,22 @@ final class NativeRDPConnectionEngine: RDPConnectionEngine, @unchecked Sendable 
                event: @escaping @Sendable (RDPConnectionEvent) -> Void) {
         worker.async { self.prepare(configuration: configuration, password: password, trust: trust, event: event) }
     }
+    /// Called by the main-actor session controller before `start`. Keeping the
+    /// reference behind the engine lock preserves the Objective-C worker's
+    /// narrow sendability contract even if cancellation races setup.
+    func attachClipboard(_ clipboard: RDPClipboardSession) {
+        lock.lock()
+        guard client == nil, !cancelled else {
+            lock.unlock()
+            return
+        }
+        self.clipboard = clipboard
+        lock.unlock()
+    }
     private func prepare(configuration: RDPConnectionConfiguration, password: String,
                          trust: @escaping @Sendable (RDPCertificateEvidence) -> Bool,
                          event: @escaping @Sendable (RDPConnectionEvent) -> Void) {
-        lock.lock(); let shouldCancel = cancelled; lock.unlock()
+        lock.lock(); let shouldCancel = cancelled; let clipboard = self.clipboard; lock.unlock()
         if shouldCancel { event(.ended(.init(kind: .cancelled, message: "连接已取消。"))); return }
         let settings = configuration.settings
         var scopedDirectories: [URL] = []
@@ -139,13 +166,14 @@ final class NativeRDPConnectionEngine: RDPConnectionEngine, @unchecked Sendable 
         client = native
         lock.unlock()
         let leases = scopedDirectories; scopedDirectories = []
+        let workerBox = NativeRDPWorkerBox(native)
         worker.async {
-            native.run()
+            workerBox.run()
             leases.forEach { $0.stopAccessingSecurityScopedResource() }
         }
     }
     func cancel() {
-        lock.lock(); cancelled = true; let native = client; lock.unlock()
+        lock.lock(); cancelled = true; let native = client; let clipboard = self.clipboard; lock.unlock()
         clipboard?.cancel()
         native?.cancel()
     }
@@ -247,7 +275,7 @@ final class RDPSessionController: ObservableObject, Identifiable {
             supportsResize = false; keyboardCaptured = true
             let requestID = generation
             let next = factory(); engine = next
-            if let native = next as? NativeRDPConnectionEngine { native.clipboard = clipboard }
+            if let native = next as? NativeRDPConnectionEngine { native.attachClipboard(clipboard) }
             clipboard.reset(settings: latest.settings)
             let gate = RDPTrustGate(); trustGate = gate
             next.start(configuration: latest, password: password, trust: { [weak self] evidence in

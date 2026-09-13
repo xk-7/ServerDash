@@ -436,9 +436,9 @@ private struct SessionImportCandidateRow: View {
     let importsDuplicate: Bool
     let identities: [IdentityRecord]
     let mappedIdentityID: UUID?
-    let onToggle: (Bool) -> Void
-    let onImportDuplicate: () -> Void
-    let onIdentityChange: (UUID?) -> Void
+    let onToggle: @MainActor @Sendable (Bool) -> Void
+    let onImportDuplicate: @MainActor @Sendable () -> Void
+    let onIdentityChange: @MainActor @Sendable (UUID?) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {

@@ -208,11 +208,17 @@ private final class AIFakeCredentials: AICredentialStore {
 
 @MainActor
 final class AIProviderSettingsTests: XCTestCase {
-    private var defaults: UserDefaults!
-    private var suite: String!
-    override func setUp() { suite = "serverdash.ai.providers.tests.\(UUID())"; defaults = UserDefaults(suiteName: suite)! }
-    override func tearDown() { defaults.removePersistentDomain(forName: suite) }
+    private func makeDefaults() -> UserDefaults {
+        let suite = "serverdash.ai.providers.tests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        return defaults
+    }
+
     func testLegacyMigrationPreservesCredentialsAndNoParameterOverrides() throws {
+        let defaults = makeDefaults()
         let old = AIConfiguration(baseURL: "https://fixture.invalid/v1", model: "old-model", contextMessages: 100)
         defaults.set(try JSONEncoder().encode(old), forKey: "ai.configuration.v1")
         let keys = AIFakeCredentials(); keys.entries["active-provider"] = sentinelKey
@@ -226,6 +232,7 @@ final class AIProviderSettingsTests: XCTestCase {
         XCTAssertEqual(try reload.key(for: reload.profile(.custom)), sentinelKey)
     }
     func testFailedMigrationCanRetryWithoutDiscardingOldKey() throws {
+        let defaults = makeDefaults()
         defaults.set(try JSONEncoder().encode(AIConfiguration(model: "old")), forKey: "ai.configuration.v1")
         let keys = AIFakeCredentials(); keys.entries["active-provider"] = sentinelKey; keys.failVerify = true
         let settings = AISettings(defaults: defaults, keys: keys)
@@ -234,6 +241,7 @@ final class AIProviderSettingsTests: XCTestCase {
         XCTAssertTrue(settings.isReady); XCTAssertEqual(try settings.key(for: settings.profile(.custom)), sentinelKey)
     }
     func testKeysAreIsolatedAndURLChangesDoNotReuseThem() throws {
+        let defaults = makeDefaults()
         let keys = AIFakeCredentials(), settings = AISettings(defaults: defaults, keys: keys)
         for provider in AIProviderID.allCases { try settings.save(fixtureProfile(provider), key: "fake-\(provider.rawValue)") }
         for provider in AIProviderID.allCases { XCTAssertEqual(try settings.key(for: settings.profile(provider)), "fake-\(provider.rawValue)") }
@@ -247,6 +255,7 @@ final class AIProviderSettingsTests: XCTestCase {
         XCTAssertEqual(try settings.key(for: settings.profile(.gemini)), "fake-gemini")
     }
     func testSaveFailureRollsBackAndParameterOnlySaveKeepsAuthorization() throws {
+        let defaults = makeDefaults()
         let keys = AIFakeCredentials(), settings = AISettings(defaults: defaults, keys: keys)
         try settings.save(fixtureProfile(.openAI), key: "ORIGINAL")
         let original = settings.profile(.openAI), persisted = defaults.data(forKey: "ai.configuration.v2")
@@ -261,6 +270,7 @@ final class AIProviderSettingsTests: XCTestCase {
         XCTAssertEqual(settings.profile(.openAI).options.maxTokens, 1000)
     }
     func testUnreadableConfigNotOverwrittenAndStaleModelCacheRejected() throws {
+        let defaults = makeDefaults()
         let bad = Data("{\"version\":999}".utf8); defaults.set(bad, forKey: "ai.configuration.v2")
         let keys = AIFakeCredentials(), blocked = AISettings(defaults: defaults, keys: keys)
         XCTAssertFalse(blocked.isReady); XCTAssertThrowsError(try blocked.save(fixtureProfile(.custom), key: nil))
@@ -274,6 +284,7 @@ final class AIProviderSettingsTests: XCTestCase {
         XCTAssertTrue(settings.models(for: settings.profile(.openAI)).isEmpty)
     }
     func testProviderSwitchNewChatAndOldHistoryNeverCrossesDestination() async throws {
+        let defaults = makeDefaults()
         let keys = AIFakeCredentials(), settings = AISettings(defaults: defaults, keys: keys)
         try settings.save(fixtureProfile(.custom), key: nil, makeDefault: true)
         try settings.save(fixtureProfile(.ollama), key: nil)
@@ -298,6 +309,7 @@ final class AIProviderSettingsTests: XCTestCase {
         await workspace.flushWrites(); try FileManager.default.removeItem(at: dir)
     }
     func testLegacyConversationLoadsIntoCustomDestination() async throws {
+        let defaults = makeDefaults()
         defaults.set(try JSONEncoder().encode(AIConfiguration(baseURL: "https://legacy.invalid/v1", model: "legacy-model")), forKey: "ai.configuration.v1")
         let keys = AIFakeCredentials(), settings = AISettings(defaults: defaults, keys: keys)
         try settings.save(fixtureProfile(.custom), key: nil, makeDefault: true)
@@ -314,6 +326,7 @@ final class AIProviderSettingsTests: XCTestCase {
         try FileManager.default.removeItem(at: dir)
     }
     func testSettingsLightDarkLayouts() async throws {
+        let defaults = makeDefaults()
         let settings = AISettings(defaults: defaults, keys: AIFakeCredentials())
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("serverdash-ai-provider-qa")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -329,6 +342,7 @@ final class AIProviderSettingsTests: XCTestCase {
         }
     }
     func testHiddenPaneSecurityChangesCancelOnlyAffectedProvider() async throws {
+        let defaults = makeDefaults()
         let keys = AIFakeCredentials(), settings = AISettings(defaults: defaults, keys: keys)
         try settings.save(fixtureProfile(.custom), key: "custom-key", makeDefault: true)
         try settings.save(fixtureProfile(.ollama), key: nil)

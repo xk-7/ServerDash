@@ -14,6 +14,46 @@ struct SerialDevice: Identifiable, Equatable {
     var id: String { path }
 }
 
+/// Observes a SwiftTerm-owned child without taking over reaping. SwiftTerm
+/// performs its normal TERM/KILL sequence; this handle makes that asynchronous
+/// cleanup part of the application-wide shutdown deadline and provides a final
+/// process-group KILL if the child is still present.
+struct PTYShutdownHandle: Sendable {
+    let processIdentifier: pid_t
+
+    func stopAndDrain(until deadline: ContinuousClock.Instant) async -> ShutdownOutcome {
+        guard processIdentifier > 0 else { return .completed }
+        signal(SIGTERM)
+        let clock = ContinuousClock()
+        let forceAt = min(
+            clock.now.advanced(by: .milliseconds(250)),
+            deadline.advanced(by: .milliseconds(-100))
+        )
+        while exists, clock.now < forceAt, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        guard exists else { return .completed }
+        signal(SIGKILL)
+        while exists, clock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return exists ? .timedOut : .forced
+    }
+
+    private var exists: Bool {
+        if Darwin.kill(processIdentifier, 0) == 0 { return true }
+        return errno != ESRCH
+    }
+
+    private func signal(_ value: Int32) {
+        if getpgid(processIdentifier) == processIdentifier {
+            _ = Darwin.kill(-processIdentifier, value)
+        } else {
+            _ = Darwin.kill(processIdentifier, value)
+        }
+    }
+}
+
 enum SerialDeviceDiscovery {
     static func devices() -> [SerialDevice] {
         var iterator: io_iterator_t = 0
@@ -102,9 +142,28 @@ final class SerialPortTransport: @unchecked Sendable {
     }
 
     func close() {
-        if DispatchQueue.getSpecific(key: queueKey) == true { finish(nil); return }
-        let lease = queue.sync { finish(nil); return descriptorLease }
-        lease?.waitUntilClosed()
+        beginClose()?.waitUntilClosed()
+    }
+
+    func beginShutdownClose() {
+        _ = beginClose()
+    }
+
+    @discardableResult
+    private func beginClose() -> SerialDescriptorLease? {
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            finish(nil)
+            return descriptorLease
+        }
+        return queue.sync {
+            finish(nil)
+            return descriptorLease
+        }
+    }
+
+    func closeAndDrain(until deadline: ContinuousClock.Instant) async -> Bool {
+        guard let lease = beginClose() else { return true }
+        return await lease.waitUntilClosed(until: deadline)
     }
     deinit { reader?.cancel(); writer?.cancel() }
 
@@ -172,6 +231,13 @@ private final class SerialDescriptorLease: @unchecked Sendable {
         Darwin.close(descriptor); closed = true; lock.unlock(); completion.leave()
     }
     func waitUntilClosed() { completion.wait() }
+    func waitUntilClosed(until deadline: ContinuousClock.Instant) async -> Bool {
+        let clock = ContinuousClock()
+        while !isClosed, clock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return isClosed
+    }
 }
 
 struct LocalShellConfiguration: Equatable, Sendable {
@@ -305,8 +371,25 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
             status = .connected
         } catch { lastError = error.localizedDescription; status = .failed }
     }
+    @discardableResult
+    func beginShutdownClose() -> (SerialPortTransport?, PTYShutdownHandle?) {
+        connectionGeneration = UUID()
+        let closingTransport = transport
+        closingTransport?.beginShutdownClose()
+        transport = nil
+        terminal.serialSend = nil
+        let process = terminal.process.running
+            ? PTYShutdownHandle(processIdentifier: terminal.process.shellPid)
+            : nil
+        if process != nil { terminal.replaceProcess() }
+        status = .disconnected
+        return (closingTransport, process)
+    }
     func close() {
-        connectionGeneration = UUID(); transport?.close(); transport = nil; terminal.serialSend = nil
+        connectionGeneration = UUID()
+        transport?.close()
+        transport = nil
+        terminal.serialSend = nil
         if terminal.process.running { terminal.replaceProcess() }
         status = .disconnected
     }
@@ -380,6 +463,8 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
 
 @MainActor final class WorkbenchSessionRegistry: ObservableObject {
     @Published private(set) var controllers: [UUID: WorkbenchSessionController] = [:]
+    private var shutdownTransports: [SerialPortTransport] = []
+    private var shutdownProcesses: [PTYShutdownHandle] = []
     func controller(for id: UUID) -> WorkbenchSessionController? { controllers[id] }
     func open(_ controller: WorkbenchSessionController, workspace: TerminalWorkspace) {
         controllers[controller.id] = controller
@@ -388,6 +473,31 @@ private final class WorkbenchTerminalView: LocalProcessTerminalView {
     }
     func close(_ id: UUID) { controllers.removeValue(forKey: id)?.close() }
     func closeAll() { controllers.values.forEach { $0.close() }; controllers.removeAll() }
+    func beginShutdown() {
+        for controller in controllers.values {
+            let (transport, process) = controller.beginShutdownClose()
+            if let transport { shutdownTransports.append(transport) }
+            if let process { shutdownProcesses.append(process) }
+        }
+        controllers.removeAll()
+    }
+    func stopAndDrain(until deadline: ContinuousClock.Instant) async -> ShutdownOutcome {
+        beginShutdown()
+        let transports = shutdownTransports
+        let processes = shutdownProcesses
+        var outcome = ShutdownOutcome.completed
+        for transport in transports {
+            if !(await transport.closeAndDrain(until: deadline)) { outcome = .timedOut }
+        }
+        for process in processes {
+            let result = await process.stopAndDrain(until: deadline)
+            if result == .timedOut { outcome = .timedOut }
+            else if result == .forced, outcome == .completed { outcome = .forced }
+        }
+        shutdownTransports.removeAll()
+        shutdownProcesses.removeAll()
+        return outcome
+    }
 }
 
 @MainActor enum WorkbenchConnectionLauncher {

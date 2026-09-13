@@ -45,7 +45,7 @@ struct CitadelRemoteConnectionEngine: RemoteConnectionEngine {
 
         do {
             let client = try await SSHClient.connect(to: settings)
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: config.id,
                 module: .ssh,
                 message: "移动端原生 SSH 连接成功"
@@ -54,7 +54,7 @@ struct CitadelRemoteConnectionEngine: RemoteConnectionEngine {
         } catch let error as RemoteConnectionFailure {
             throw error
         } catch {
-            EventLogStore.shared.append(
+            EventLogStore.append(
                 serverID: config.id,
                 module: .ssh,
                 level: "error",

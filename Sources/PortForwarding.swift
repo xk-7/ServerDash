@@ -94,17 +94,13 @@ private final class FoundationTunnelProcessHandle: TunnelProcessHandle, @uncheck
 
     func waitForExit() async -> Int32 {
         await withCheckedContinuation { continuation in
-            let lock = NSLock()
-            var resumed = false
-            let resumeOnce = { [process] in
-                lock.lock()
-                defer { lock.unlock() }
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume(returning: process.terminationStatus)
+            let completion = OneShotContinuation(continuation)
+            process.terminationHandler = { terminatedProcess in
+                completion.resume(returning: terminatedProcess.terminationStatus)
             }
-            process.terminationHandler = { _ in resumeOnce() }
-            if !process.isRunning { resumeOnce() }
+            if !process.isRunning {
+                completion.resume(returning: process.terminationStatus)
+            }
         }
     }
 
@@ -144,6 +140,7 @@ actor PortForwardSupervisor {
     private let maxReconnectAttempts: Int
     private let readinessTimeout: TimeInterval
     private var tunnels: [UUID: ActiveTunnel] = [:]
+    private var acceptingNewTunnels = true
 
     init(
         provider: any ConnectionProvider = SystemOpenSSHConnectionProvider(),
@@ -163,6 +160,7 @@ actor PortForwardSupervisor {
         exposureConfirmed: Bool = false,
         remoteForwardConfirmed: Bool = false
     ) async throws -> PortForwardSnapshot {
+        guard acceptingNewTunnels else { throw CancellationError() }
         try rule.validate(
             exposureConfirmed: exposureConfirmed,
             remoteForwardConfirmed: remoteForwardConfirmed
@@ -284,13 +282,96 @@ actor PortForwardSupervisor {
     }
 
     func stopAll() async {
+        let clock = ContinuousClock()
+        _ = await stopAll(until: clock.now.advanced(by: .seconds(1)))
+    }
+
+    /// Stops every tunnel inside one absolute caller-owned budget. All handles
+    /// receive TERM before this method waits, so a cancellation-insensitive
+    /// child cannot serialize or extend shutdown.
+    @discardableResult
+    func stopAll(until deadline: ContinuousClock.Instant) async -> Bool {
+        await stopAllOutcome(until: deadline) != .timedOut
+    }
+
+    private func stopAllOutcome(until deadline: ContinuousClock.Instant) async -> ShutdownOutcome {
         let ruleIDs = Array(tunnels.keys)
-        await withTaskGroup(of: Void.self) { group in
-            for ruleID in ruleIDs {
-                group.addTask { [weak self] in
-                    _ = try? await self?.stop(ruleID: ruleID)
-                }
+        let clock = ContinuousClock()
+        for ruleID in ruleIDs {
+            guard var active = tunnels[ruleID] else { continue }
+            active.stopRequested = true
+            active.snapshot.state = .stopping
+            active.httpProxy?.stop()
+            active.httpProxy = nil
+            active.handle.terminate()
+            tunnels[ruleID] = active
+        }
+
+        let forceAt = min(
+            clock.now.advanced(by: .milliseconds(550)),
+            deadline.advanced(by: .milliseconds(-250))
+        )
+        while hasRunningTunnel(in: ruleIDs),
+              clock.now < forceAt,
+              !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let forceIDs = ruleIDs.filter { tunnels[$0]?.handle.isRunning() == true }
+        for ruleID in forceIDs {
+            tunnels[ruleID]?.handle.kill()
+        }
+        while !allTunnelResourcesReleased(in: ruleIDs),
+              clock.now < deadline,
+              !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        let stopped = allTunnelResourcesReleased(in: ruleIDs)
+        for ruleID in ruleIDs {
+            guard var active = tunnels[ruleID] else { continue }
+            if active.handle.isRunning() {
+                active.snapshot.state = .failed
+                active.snapshot.lastError = ConnectionRouteError.tunnelStopTimedOut.localizedDescription
+            } else if active.rule.direction != .remote,
+                      !LocalPortAvailability.isAvailable(
+                        address: active.rule.bindAddress,
+                        port: active.rule.listenPort,
+                        reuseAddress: active.rule.direction == .http
+                      ) {
+                active.snapshot.state = .failed
+                active.snapshot.lastError = ConnectionRouteError.portStillInUse(
+                    active.rule.listenPort
+                ).localizedDescription
+            } else {
+                active.snapshot.state = .stopped
+                active.snapshot.processIdentifier = nil
             }
+            tunnels[ruleID] = active
+        }
+        guard stopped else { return .timedOut }
+        return forceIDs.isEmpty ? .completed : .forced
+    }
+
+    /// Application shutdown closes admission before stopping the current set,
+    /// preventing a reconnect or deferred UI action from racing the drain.
+    func shutdownAndDrain(until deadline: ContinuousClock.Instant) async -> ShutdownOutcome {
+        acceptingNewTunnels = false
+        return await stopAllOutcome(until: deadline)
+    }
+
+    private func hasRunningTunnel(in ruleIDs: [UUID]) -> Bool {
+        ruleIDs.contains { tunnels[$0]?.handle.isRunning() == true }
+    }
+
+    private func allTunnelResourcesReleased(in ruleIDs: [UUID]) -> Bool {
+        ruleIDs.allSatisfy { ruleID in
+            guard let active = tunnels[ruleID], !active.handle.isRunning() else { return false }
+            guard active.rule.direction != .remote else { return true }
+            return LocalPortAvailability.isAvailable(
+                address: active.rule.bindAddress,
+                port: active.rule.listenPort,
+                reuseAddress: active.rule.direction == .http
+            )
         }
     }
 

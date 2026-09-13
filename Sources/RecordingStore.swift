@@ -101,6 +101,45 @@ final class RecordingSettings: ObservableObject {
 /// Ordered I/O independent of the main actor, including finalization during application shutdown.
 final class RecordingWriter: @unchecked Sendable {
     static let pendingWrites = DispatchGroup()
+    private final class PendingWriteGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var acceptsWrites = true
+        private var pendingCount = 0
+
+        func seal() {
+            lock.lock()
+            acceptsWrites = false
+            lock.unlock()
+        }
+
+        func enter(_ group: DispatchGroup) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard acceptsWrites else { return false }
+            group.enter()
+            pendingCount += 1
+            return true
+        }
+
+        func leave(_ group: DispatchGroup) {
+            lock.lock()
+            precondition(pendingCount > 0, "Unbalanced recording write group")
+            pendingCount -= 1
+            group.leave()
+            lock.unlock()
+        }
+
+        #if DEBUG
+        func resetForTesting() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard pendingCount == 0 else { return false }
+            acceptsWrites = true
+            return true
+        }
+        #endif
+    }
+    private static let pendingWriteGate = PendingWriteGate()
     let partialURL: URL
     let finalURL: URL
     private let queue = DispatchQueue(label: "com.serverdash.recording.writer", qos: .utility)
@@ -114,6 +153,50 @@ final class RecordingWriter: @unchecked Sendable {
     private var failure: Error?
     private let onFailure: @Sendable () -> Void
     private let writeBlock: @Sendable (FileHandle, Data) throws -> Void
+
+    /// Waits for all writes that were submitted before the group becomes empty.
+    /// `DispatchGroup.notify` keeps shutdown responsive; the timeout task only
+    /// wins the one-shot completion when disk I/O has not drained by `deadline`.
+    static func drainPendingWrites(until deadline: ContinuousClock.Instant) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let completion = OneShotContinuation<Bool>(continuation)
+            let timeoutTask = Task.detached(priority: .utility) {
+                let clock = ContinuousClock()
+                if clock.now < deadline {
+                    do { try await clock.sleep(until: deadline) }
+                    catch { return }
+                }
+                guard !Task.isCancelled else { return }
+                completion.resume(returning: false)
+            }
+            pendingWrites.notify(queue: .global(qos: .utility)) {
+                timeoutTask.cancel()
+                completion.resume(returning: true)
+            }
+        }
+    }
+
+    /// Seals the process-wide writer group after every recording controller has
+    /// synchronously submitted its final frame. This makes the following
+    /// `notify` registration a stable shutdown barrier.
+    static func sealPendingWritesForShutdown() {
+        pendingWriteGate.seal()
+    }
+
+    private static func enterPendingWrite() -> Bool {
+        pendingWriteGate.enter(pendingWrites)
+    }
+
+    private static func leavePendingWrite() {
+        pendingWriteGate.leave(pendingWrites)
+    }
+
+    #if DEBUG
+    @discardableResult
+    static func resetShutdownSealForTesting() -> Bool {
+        pendingWriteGate.resetForTesting()
+    }
+    #endif
     // enqueue/finish are called by the owning main-actor controller; queue state is private to queue.
     init(header: RecordingHeader, lease: RecordingDirectoryLease, filename: String,
          budget: RecordingWriteBudget = .shared,
@@ -135,16 +218,15 @@ final class RecordingWriter: @unchecked Sendable {
     @discardableResult
     func append(output: Data, time: Double) -> Bool {
         guard budget.reserve(output.count + 256) else { return false }
-        submit(reservation: output.count + 256) { [self] in
+        return submit(reservation: output.count + 256) { [self] in
             try write(.init(kind: .output, time: time, output: output))
         }
-        return true
     }
     @discardableResult
     func append(frame: RecordingFrame, time: Double) -> Bool {
         let bytes = frame.estimatedBytes
         guard budget.reserve(bytes) else { return false }
-        submit(reservation: bytes) { [self] in
+        return submit(reservation: bytes) { [self] in
             try frame.validate()
             var delta = frame
             let full = previous == nil || time - lastKeyframe >= 5 ||
@@ -159,12 +241,14 @@ final class RecordingWriter: @unchecked Sendable {
             try write(.init(kind: .screen, time: time, frame: delta))
             previous = frame
         }
-        return true
     }
     func finish(time: Double, reason: String, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
-        Self.pendingWrites.enter()
+        guard Self.enterPendingWrite() else {
+            completion(.failure(RecordingError.write))
+            return
+        }
         queue.async { [self] in
-            defer { Self.pendingWrites.leave() }
+            defer { Self.leavePendingWrite() }
             do {
                 if let failure { throw failure }
                 guard !index.isEmpty else { throw RecordingError.write }
@@ -180,14 +264,20 @@ final class RecordingWriter: @unchecked Sendable {
             }
         }
     }
-    private func submit(reservation: Int, work: @escaping @Sendable () throws -> Void) {
-        Self.pendingWrites.enter()
+    @discardableResult
+    private func submit(reservation: Int, work: @escaping @Sendable () throws -> Void) -> Bool {
+        guard Self.enterPendingWrite() else {
+            budget.release(reservation)
+            onFailure()
+            return false
+        }
         queue.async { [self] in
-            defer { budget.release(reservation); Self.pendingWrites.leave() }
+            defer { budget.release(reservation); Self.leavePendingWrite() }
             guard failure == nil else { return }
             do { try autoreleasepool(invoking: work) }
             catch { failure = error; onFailure() }
         }
+        return true
     }
     private func write(_ value: RecordingEvent) throws {
         guard let handle else { throw RecordingError.write }

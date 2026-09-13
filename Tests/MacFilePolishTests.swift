@@ -3,6 +3,29 @@ import AppKit
 import XCTest
 @testable import ServerDash
 
+@MainActor
+private final class ManualShutdownProgressScheduler {
+    var pending: (@MainActor @Sendable () -> Void)?
+
+    func scheduler() -> ShutdownProgressScheduler {
+        ShutdownProgressScheduler { [weak self] action in
+            self?.pending = action
+            return Task {}
+        }
+    }
+
+    func fire() {
+        let action = pending
+        pending = nil
+        action?()
+    }
+}
+
+@MainActor
+private final class ShutdownProgressProbe {
+    var presentations = 0
+}
+
 final class MacFilePolishTests: XCTestCase {
     private func item(_ path: String) -> RemoteFileItem {
         RemoteFileItem(path: path, name: (path as NSString).lastPathComponent, kind: .file, size: 10, permissions: "rw-r--r--", owner: "fixture", group: "fixture", modifiedText: "2026-09-10")
@@ -123,6 +146,83 @@ final class MacFilePolishTests: XCTestCase {
         failure.documents = [doc]
         let failed = await failure.flushDrafts()
         XCTAssertFalse(failed); XCTAssertNotNil(failure.error); XCTAssertEqual(failure.documents.first?.text, doc.text)
+    }
+    @MainActor func testTerminationPreparationFreezesDraftUntilCancelled() async throws {
+        let root = try temporaryDirectory()
+        let missing = root.appendingPathComponent("missing/documents.json")
+        let store = RemoteEditorStore(persistURL: missing, restore: false)
+        let original = draft("latest local draft")
+        store.documents = [original]
+
+        let prepared = await store.prepareForApplicationTermination()
+        XCTAssertFalse(prepared)
+        XCTAssertTrue(store.preparingForApplicationTermination)
+        store.updateText("must not replace frozen snapshot", id: original.id)
+        XCTAssertEqual(store.documents.first?.text, "latest local draft")
+
+        store.cancelApplicationTermination()
+        XCTAssertFalse(store.preparingForApplicationTermination)
+        store.updateText("editing resumed", id: original.id)
+        XCTAssertEqual(store.documents.first?.text, "editing resumed")
+    }
+    @MainActor func testShutdownProgressOnlyPresentsWhenDelaySchedulerFires() {
+        let manual = ManualShutdownProgressScheduler()
+        let probe = ShutdownProgressProbe()
+        let controller = ShutdownProgressDelayController(scheduler: manual.scheduler())
+
+        controller.schedule { probe.presentations += 1 }
+        XCTAssertEqual(ShutdownProgressScheduler.delay, .milliseconds(300))
+        XCTAssertEqual(probe.presentations, 0, "Fast shutdown must not flash a progress panel")
+        manual.fire()
+        XCTAssertEqual(probe.presentations, 1)
+
+        controller.schedule { probe.presentations += 1 }
+        controller.cancel()
+        manual.fire()
+        XCTAssertEqual(probe.presentations, 1, "A completed shutdown must invalidate a late presentation callback")
+    }
+    func testShutdownCoordinatorSharesOneDeadlineAcrossComponents() async {
+        let clock = ContinuousClock()
+        let started = clock.now
+        let report = await AppShutdownCoordinator.run(
+            operations: [
+                AppShutdownOperation(component: .monitoring) { _ in .completed },
+                AppShutdownOperation(component: .directorySync) { deadline in
+                    let operationClock = ContinuousClock()
+                    if operationClock.now < deadline {
+                        try? await operationClock.sleep(until: deadline)
+                    }
+                    return .timedOut
+                }
+            ],
+            timeout: .milliseconds(60)
+        )
+        let elapsed = started.duration(to: clock.now)
+
+        XCTAssertLessThan(elapsed.seconds, 0.3)
+        XCTAssertTrue(report.reachedDeadline)
+        XCTAssertEqual(report.results.first(where: { $0.component == .monitoring })?.outcome, .completed)
+        XCTAssertEqual(report.results.first(where: { $0.component == .directorySync })?.outcome, .timedOut)
+    }
+    func testShutdownCoordinatorReturnsWhenComponentIgnoresCancellation() async {
+        let clock = ContinuousClock()
+        let started = clock.now
+        let report = await AppShutdownCoordinator.run(
+            operations: [
+                AppShutdownOperation(component: .recordings) { _ in
+                    await withCheckedContinuation { continuation in
+                        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.4) {
+                            continuation.resume()
+                        }
+                    }
+                    return .completed
+                }
+            ],
+            timeout: .milliseconds(40)
+        )
+
+        XCTAssertLessThan(started.duration(to: clock.now), .milliseconds(200))
+        XCTAssertEqual(report.results.first?.outcome, .timedOut)
     }
     func testWriterRejectsOlderRevisionAfterNewerFlush() async throws {
         let url = try temporaryDirectory().appendingPathComponent("documents.json"), writer = RemoteDraftWriter()

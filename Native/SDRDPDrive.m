@@ -110,7 +110,7 @@ static UINT driveRequest(DEVICE *device, IRP *irp) {
                 if (type == FileBasicInformation) { Stream_Write_UINT32(output, 36); basicInfo(output, info); Stream_Write_UINT32(output, attributes(info)); }
                 else if (type == FileStandardInformation) {
                     Stream_Write_UINT32(output, 22); Stream_Write_UINT64(output, info.st_blocks * 512); Stream_Write_UINT64(output, info.st_size);
-                    Stream_Write_UINT32(output, info.st_nlink); Stream_Write_UINT8(output, file.deletePending); Stream_Write_UINT8(output, S_ISDIR(info.st_mode));
+                    Stream_Write_UINT32(output, info.st_nlink); Stream_Write_UINT8(output, (UINT8)(file.deletePending ? 1 : 0)); Stream_Write_UINT8(output, S_ISDIR(info.st_mode));
                 } else if (type == FileAttributeTagInformation) { Stream_Write_UINT32(output, 8); Stream_Write_UINT32(output, attributes(info)); Stream_Write_UINT32(output, 0); }
                 else { Stream_Write_UINT32(output, 0); return complete(irp, STATUS_NOT_SUPPORTED); }
                 return complete(irp, STATUS_SUCCESS);

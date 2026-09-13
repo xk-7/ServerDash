@@ -95,6 +95,10 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
     private var activeServerID: UUID?
     private var persistTask: Task<Void, Never>?
     private var persistRevision: UInt64 = 0
+    private var operationRevision: UInt64 = 0
+    private(set) var preparingForApplicationTermination = false
+    private var applicationTerminationPrepared = false
+    private var applicationTerminationCommitted = false
     private let draftWriter = RemoteDraftWriter()
     private var presentations: [UUID: RemoteEditorPresentation] = [:]
     @Published private(set) var textMetrics: [UUID: (lines: Int, units: Int)] = [:]
@@ -111,17 +115,73 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         if restore,let copiesURL,let data=try? Data(contentsOf:copiesURL),let saved=try? JSONDecoder().decode([RemoteLocalCopy].self,from:data){localCopies=saved}
     }
     var selected: RemoteEditorDraft? { documents.first { $0.id == selectedID } }
-    func register(_ access: DesktopFileAccess) { accesses[access.server.id] = access }
+    func register(_ access: DesktopFileAccess) {
+        guard !preparingForApplicationTermination else { return }
+        accesses[access.server.id] = access
+    }
     func unregister(serverID: UUID) {
         accesses[serverID] = nil
         if activeServerID == serverID { operation?.cancel() }
     }
-    func shutdown() { operation?.cancel(); presentations.values.forEach { $0.invalidate() }; persist() }
-    @discardableResult func shutdownAndFlush() async -> Bool {
+    func shutdown() {
+        operationRevision &+= 1
         operation?.cancel()
-        // Finish cancellation first: failure/cancellation handlers may retain a newer draft.
-        await operation?.value
-        return await flushDrafts()
+        operation = nil
+        busy = false
+        activeServerID = nil
+        presentations.values.forEach { $0.invalidate() }
+        persist()
+    }
+
+    /// Freezes editor mutations and persists the latest local snapshot without
+    /// waiting for a remote read or upload that may not respond to cancellation.
+    /// The freeze is reversible until `commitApplicationTermination()` is called.
+    @discardableResult
+    func prepareForApplicationTermination() async -> Bool {
+        guard !applicationTerminationCommitted else { return true }
+        if applicationTerminationPrepared { return true }
+        preparingForApplicationTermination = true
+        // Keep an in-flight remote operation alive until draft persistence has
+        // succeeded. A failed preparation can still be cancelled by the user,
+        // so cancelling network work here would make that path destructive.
+        persistTask?.cancel()
+        persistTask = nil
+
+        flushingDrafts = true
+        defer { flushingDrafts = false }
+        persistRevision &+= 1
+        let saved = await writeSnapshot(revision: persistRevision)
+        applicationTerminationPrepared = saved
+        if saved { error = nil }
+        return saved
+    }
+
+    func cancelApplicationTermination() {
+        guard !applicationTerminationCommitted else { return }
+        preparingForApplicationTermination = false
+        applicationTerminationPrepared = false
+        error = nil
+    }
+
+    func commitApplicationTermination() {
+        preparingForApplicationTermination = true
+        applicationTerminationCommitted = true
+        operationRevision &+= 1
+        operation?.cancel()
+        operation = nil
+        persistTask?.cancel()
+        persistTask = nil
+        busy = false
+        activeServerID = nil
+        accesses.removeAll()
+        presentations.values.forEach { $0.invalidate() }
+        presentations.removeAll()
+    }
+
+    @discardableResult func shutdownAndFlush() async -> Bool {
+        let saved = await prepareForApplicationTermination()
+        if saved { commitApplicationTermination() }
+        return saved
     }
     func presentation(for id: UUID) -> RemoteEditorPresentation? {
         if let existing = presentations[id] { return existing }
@@ -140,22 +200,35 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         return presentation
     }
     func canSave(_ id: UUID) -> Bool {
+        guard !preparingForApplicationTermination else { return false }
         guard let doc = documents.first(where: { $0.id == id }) else { return false }
         return accesses[doc.serverID] != nil && !busy
     }
     func canUploadLocalCopy(_ copy:RemoteLocalCopy)->Bool {
-        accesses[copy.serverID]?.endpointIdentity==copy.endpointIdentity && !busy
+        !preparingForApplicationTermination && accesses[copy.serverID]?.endpointIdentity==copy.endpointIdentity && !busy
+    }
+    private func acceptsOperationResult(_ revision: UInt64) -> Bool {
+        !applicationTerminationCommitted && revision == operationRevision
+    }
+    private func finishOperation(_ revision: UInt64) {
+        guard revision == operationRevision else { return }
+        busy = false
+        operation = nil
+        activeServerID = nil
     }
     func openLocalCopy(_ item:RemoteFileItem,access:DesktopFileAccess) {
-        guard !busy,item.kind == .file else{return}
+        guard !preparingForApplicationTermination,!busy,item.kind == .file else{return}
         register(access);busy=true;error=nil;activeServerID=access.server.id
         let endpointIdentity=access.endpointIdentity
         message="正在下载本地副本"
+        operationRevision &+= 1
+        let revisionToken = operationRevision
         operation=Task {
-            defer{busy=false;operation=nil;activeServerID=nil}
+            defer{finishOperation(revisionToken)}
             do{
                 let (data,revision)=try await access.perform(matching:endpointIdentity){try await DesktopFileOperations.read(path:item.path,config:$0,limit:RemoteLocalCopy.maximumBytes)}
                 try Task.checkCancellation()
+                guard acceptsOperationResult(revisionToken) else { return }
                 let directory=try DesktopFilePreferences.directory("LocalCopies/"+UUID().uuidString)
                 let local=directory.appendingPathComponent(item.name)
                 try DesktopFilePreferences.writePrivate(data,to:local)
@@ -164,17 +237,19 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
                 localCopies.append(copy);persist()
                 guard NSWorkspace.shared.open(local) else{throw DesktopFileError.operation("没有可打开此文件的应用。副本已保留，可在列表中用访达显示。")}
                 message="已打开本地副本；修改后在此选择“上传修改”。"
-            }catch is CancellationError{message="已取消打开副本"}
-            catch{self.error=error.localizedDescription}
+            }catch is CancellationError{if acceptsOperationResult(revisionToken){message="已取消打开副本"}}
+            catch{if acceptsOperationResult(revisionToken){self.error=error.localizedDescription}}
         }
     }
     func uploadLocalCopy(_ id:UUID,force:Bool=false,as destination:String?=nil) {
-        guard !busy,let copy=localCopies.first(where:{$0.id==id}),let access=accesses[copy.serverID] else{return}
+        guard !preparingForApplicationTermination,!busy,let copy=localCopies.first(where:{$0.id==id}),let access=accesses[copy.serverID] else{return}
         guard access.endpointIdentity==copy.endpointIdentity else{error="主机地址或用户已变化，请保留本地副本并重新核对目标。";return}
         busy=true;error=nil;localCopyConflictID=nil;activeServerID=copy.serverID
         message="正在检查本地修改"
+        operationRevision &+= 1
+        let revisionToken = operationRevision
         operation=Task {
-            defer{busy=false;operation=nil;activeServerID=nil}
+            defer{finishOperation(revisionToken)}
             do{
                 let modified=try await Task.detached{try copy.modifiedContents(includeUnchanged:force || destination != nil)}.value
                 try Task.checkCancellation()
@@ -184,23 +259,26 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
                     try await DesktopFileOperations.save(data:data,path:path,expected:path==copy.remotePath ? copy.revision : nil,force:force,config:$0)
                 }
                 try Task.checkCancellation()
+                guard acceptsOperationResult(revisionToken) else { return }
                 guard let index=localCopies.firstIndex(where:{$0.id==id}) else{return}
                 localCopies[index].revision=revision;localCopies[index].remotePath=path;localCopies[index].lastUploadedAt = .now
                 persist();message="已上传本次修改；后续本地修改仍需明确上传。"
-            }catch DesktopFileError.conflict{localCopyConflictID=id;localCopyConflictDestination=destination}
-            catch is CancellationError{message="上传已取消，本地副本保留。"}
-            catch{self.error=error.localizedDescription;message="上传失败，本地副本保留。"}
+            }catch DesktopFileError.conflict{if acceptsOperationResult(revisionToken){localCopyConflictID=id;localCopyConflictDestination=destination}}
+            catch is CancellationError{if acceptsOperationResult(revisionToken){message="上传已取消，本地副本保留。"}}
+            catch{if acceptsOperationResult(revisionToken){self.error=error.localizedDescription;message="上传失败，本地副本保留。"}}
         }
     }
     func forgetLocalCopy(_ id:UUID) {
-        guard !busy else{return};localCopies.removeAll{$0.id==id};persist()
+        guard !preparingForApplicationTermination,!busy else{return};localCopies.removeAll{$0.id==id};persist()
     }
     func open(_ items: [RemoteFileItem], access: DesktopFileAccess, encoding: RemoteTextEncoding? = nil) {
-        guard !busy else { return }
+        guard !preparingForApplicationTermination,!busy else { return }
         register(access); busy = true; error = nil; activeServerID = access.server.id
         let endpointIdentity = access.endpointIdentity
+        operationRevision &+= 1
+        let revisionToken = operationRevision
         operation = Task {
-            defer { busy = false; operation = nil; activeServerID = nil }
+            defer { finishOperation(revisionToken) }
             do {
                 for item in items {
                     try Task.checkCancellation()
@@ -215,36 +293,41 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
                     guard remaining > 0 else { throw DesktopFileError.tooLarge }
                     let (data, revision) = try await access.perform(matching: endpointIdentity) { try await DesktopFileOperations.read(path: item.path, config: $0, limit: remaining) }
                     try Task.checkCancellation()
+                    guard acceptsOperationResult(revisionToken) else { return }
                     let decoded = try RemoteTextEncoding.decode(data, preferred: encoding)
                     let doc = RemoteEditorDraft(serverID: access.server.id, serverName: access.server.displayName,
                         path: item.path, text: decoded.0, encoding: decoded.1, hasBOM: decoded.2, original: data, revision: revision, endpointIdentity: endpointIdentity)
                     documents.append(doc); selectedID = doc.id
                 }
                 persist()
-            } catch is CancellationError { message = "已取消读取" }
-            catch { self.error = error.localizedDescription }
+            } catch is CancellationError { if acceptsOperationResult(revisionToken) { message = "已取消读取" } }
+            catch { if acceptsOperationResult(revisionToken) { self.error = error.localizedDescription } }
         }
     }
     func updateText(_ value: String, id: UUID) {
-        guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
+        guard !preparingForApplicationTermination,
+              let index = documents.firstIndex(where: { $0.id == id }) else { return }
         guard documents[index].text != value else { return }
         documents[index].text = value
         documents[index].cachedDirty = true
         schedulePersist()
     }
     func changeEncoding(_ value: RemoteTextEncoding, id: UUID) {
-        guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
+        guard !preparingForApplicationTermination,
+              let index = documents.firstIndex(where: { $0.id == id }) else { return }
         do {
             _ = try value.encode(documents[index].text, bom: documents[index].hasBOM)
             documents[index].encoding = value; documents[index].cachedDirty = true; persist()
         } catch { self.error = error.localizedDescription }
     }
     func save(_ id: UUID, force: Bool = false, as destination: String? = nil) {
-        guard !busy, let doc = documents.first(where: { $0.id == id }), let access = accesses[doc.serverID] else { return }
+        guard !preparingForApplicationTermination,!busy, let doc = documents.first(where: { $0.id == id }), let access = accesses[doc.serverID] else { return }
         guard doc.endpointIdentity == nil || doc.endpointIdentity == access.endpointIdentity else { error = "主机地址或用户已变化，请下载本地草稿后重新打开远程文件。"; return }
         busy = true; error = nil; conflictID = nil; activeServerID = doc.serverID
+        operationRevision &+= 1
+        let revisionToken = operationRevision
         operation = Task {
-            defer { busy = false; operation = nil; activeServerID = nil }
+            defer { finishOperation(revisionToken) }
             do {
                 let data = try await Task.detached(priority: .utility) { try doc.encoding.encode(doc.text, bom: doc.hasBOM) }.value
                 guard data.count <= DesktopFilePreferences.editorByteLimit else { throw DesktopFileError.tooLarge }
@@ -253,42 +336,47 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
                     try await DesktopFileOperations.save(data: data, path: path, expected: path == doc.path ? doc.revision : nil, force: force, config: $0)
                 }
                 try Task.checkCancellation()
+                guard acceptsOperationResult(revisionToken) else { return }
                 guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
                 documents[index].original = data; documents[index].revision = revision; documents[index].path = path
                 documents[index].cachedDirty = documents[index].text != doc.text || documents[index].encoding != doc.encoding || documents[index].hasBOM != doc.hasBOM
                 message = "已保存 \((path as NSString).lastPathComponent)"; persist()
-            } catch DesktopFileError.conflict { conflictID = id; conflictDestination = destination }
-            catch is CancellationError { message = "保存已取消，本地草稿仍保留" }
-            catch { self.error = error.localizedDescription; persist() }
+            } catch DesktopFileError.conflict { if acceptsOperationResult(revisionToken) { conflictID = id; conflictDestination = destination } }
+            catch is CancellationError { if acceptsOperationResult(revisionToken) { message = "保存已取消，本地草稿仍保留" } }
+            catch { if acceptsOperationResult(revisionToken) { self.error = error.localizedDescription; persist() } }
         }
     }
     func reload(_ id: UUID) {
-        guard !busy, let doc = documents.first(where: { $0.id == id }), let access = accesses[doc.serverID] else { return }
+        guard !preparingForApplicationTermination,!busy, let doc = documents.first(where: { $0.id == id }), let access = accesses[doc.serverID] else { return }
         guard doc.endpointIdentity == nil || doc.endpointIdentity == access.endpointIdentity else { error = "主机地址或用户已变化，请保留草稿并重新打开远程文件。"; return }
         busy = true; conflictID = nil; error = nil; activeServerID = doc.serverID
+        operationRevision &+= 1
+        let revisionToken = operationRevision
         operation = Task {
-            defer { busy = false; operation = nil; activeServerID = nil }
+            defer { finishOperation(revisionToken) }
             do {
                 let (data, revision) = try await access.perform(matching: doc.endpointIdentity) { try await DesktopFileOperations.read(path: doc.path, config: $0, limit: DesktopFilePreferences.editorByteLimit) }
                 let decoded = try RemoteTextEncoding.decode(data, preferred: doc.encoding)
                 try Task.checkCancellation()
+                guard acceptsOperationResult(revisionToken) else { return }
                 guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
                 documents[index].text = decoded.0; documents[index].hasBOM = decoded.2
                 documents[index].original = data; documents[index].revision = revision; documents[index].cachedDirty = false; persist()
-            } catch { self.error = error.localizedDescription }
+            } catch { if acceptsOperationResult(revisionToken) { self.error = error.localizedDescription } }
         }
     }
     func close(_ id: UUID) {
-        guard !busy else { return }
+        guard !preparingForApplicationTermination,!busy else { return }
         presentations.removeValue(forKey: id)?.invalidate(); textMetrics[id] = nil
         documents.removeAll { $0.id == id }
         if selectedID == id { selectedID = documents.last?.id }
         persist()
     }
-    func cancel() { operation?.cancel() }
-    func persist() { enqueuePersistence(delay: false) }
+    func cancel() { guard !preparingForApplicationTermination else { return }; operation?.cancel() }
+    func persist() { guard !preparingForApplicationTermination else { return }; enqueuePersistence(delay: false) }
     private func schedulePersist() { enqueuePersistence(delay: true) }
     private func enqueuePersistence(delay: Bool) {
+        guard !preparingForApplicationTermination else { return }
         persistTask?.cancel()
         persistRevision &+= 1
         let revision = persistRevision

@@ -14,10 +14,14 @@ final class RecordingFormatTests: XCTestCase {
     private let delegate = RecordingTestDelegate()
     private var directory: URL!
     override func setUpWithError() throws {
+        XCTAssertTrue(RecordingWriter.resetShutdownSealForTesting())
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("serverdash-recording-test-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     }
-    override func tearDownWithError() throws { try FileManager.default.removeItem(at: directory) }
+    override func tearDownWithError() throws {
+        XCTAssertTrue(RecordingWriter.resetShutdownSealForTesting())
+        try FileManager.default.removeItem(at: directory)
+    }
     private func terminal(columns: Int = 40, rows: Int = 5) -> Terminal {
         Terminal(delegate: delegate, options: TerminalOptions(cols: columns, rows: rows))
     }
@@ -31,6 +35,33 @@ final class RecordingFormatTests: XCTestCase {
         for event in events { data.append(try RecordingCodec.encode(event)) }
         try data.write(to: url)
         return url
+    }
+    func testPendingWriteDrainUsesStableSealAndAbsoluteDeadline() async {
+        let release = DispatchSemaphore(value: 0)
+        let writer = RecordingWriter(
+            header: .init(name: "shutdown"),
+            lease: .init(directory, scoped: false),
+            filename: "shutdown.sdrec",
+            writeBlock: { file, data in
+                release.wait()
+                try file.write(contentsOf: data)
+            },
+            onFailure: {}
+        )
+        RecordingWriter.sealPendingWritesForShutdown()
+        let clock = ContinuousClock()
+        let timedOut = await RecordingWriter.drainPendingWrites(
+            until: clock.now.advanced(by: .milliseconds(40))
+        )
+        XCTAssertFalse(timedOut)
+        XCTAssertFalse(writer.append(output: Data("late".utf8), time: 1))
+
+        release.signal()
+        let drained = await RecordingWriter.drainPendingWrites(
+            until: clock.now.advanced(by: .seconds(1))
+        )
+        XCTAssertTrue(drained)
+        XCTAssertTrue(RecordingWriter.resetShutdownSealForTesting())
     }
     private func recording(duration: Double = 10) throws -> (URL, RecordingFrame, RecordingFrame) {
         let term = terminal(); term.feed(text: "first")
