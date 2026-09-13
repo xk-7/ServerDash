@@ -22,4 +22,23 @@ final class MacSettingsPolishTests: XCTestCase {
         XCTAssertEqual(SettingsPage(rawValue: "files"), .files)
         XCTAssertNil(SettingsPage(rawValue: "removed-page"))
     }
+
+    func testServerLocationLookupRequiresPositiveOptIn() throws {
+        let suite = "ServerDash.LocationPrivacy.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(false, forKey: "disableLocationLookup")
+        PrivacySettings.migrateLocationLookupPreference(in: defaults)
+        XCTAssertFalse(PrivacySettings.locationLookupEnabled(in: defaults))
+        XCTAssertEqual(defaults.object(forKey: "disableLocationLookup") as? Bool, true)
+
+        PrivacySettings.setLocationLookupEnabled(true, in: defaults)
+        XCTAssertTrue(PrivacySettings.locationLookupEnabled(in: defaults))
+        XCTAssertEqual(defaults.object(forKey: "disableLocationLookup") as? Bool, false)
+
+        PrivacySettings.setLocationLookupEnabled(false, in: defaults)
+        XCTAssertFalse(PrivacySettings.locationLookupEnabled(in: defaults))
+        XCTAssertEqual(defaults.object(forKey: "disableLocationLookup") as? Bool, true)
+    }
 }

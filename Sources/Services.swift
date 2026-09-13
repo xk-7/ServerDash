@@ -399,6 +399,7 @@ enum SSHSupport {
         var environment = ProcessInfo.processInfo.environment
         environment["TERM"] = "xterm-256color"
         environment["LANG"] = environment["LANG"] ?? "en_US.UTF-8"
+        environment.removeValue(forKey: "SERVERDASH_DISABLE_GEO")
         if PrivacySettings.disableLocationLookup {
             environment["SERVERDASH_DISABLE_GEO"] = "1"
         }

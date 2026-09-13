@@ -169,7 +169,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 - VersionedSchema V1–V5；V5 新增分组、标签、VNC、串口、SSH 高级设置、目录同步任务及远端配置映射，同时保留既有连接 UUID 与凭据引用。升级前备份数据库；迁移失败时不会自动清空或重建。
 - OSLog 按 App、Data、SSH、Monitoring、Terminal、SFTP 分类。
 - 每台服务器独立事件日志及可复制、可预览的脱敏 SSH Diagnostics。
-- 隐藏 IP 会覆盖界面、Markdown 和诊断；冻结的 1.0 隐私约束要求远端位置查询显式选择加入，其当前界面与默认值接线仍属于内部测试前待完成工作。
+- 隐藏 IP 会覆盖界面、Markdown 和诊断；远端公网 IP／位置查询默认关闭，只有阅读说明并明确选择加入后才会启用，关闭时还会清理 ServerDash 的内存位置缓存。
 - 性能标记及本轮涉及的诊断路径不记录主机、用户名、路径、命令、指纹或凭据。
 
 完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。
@@ -197,7 +197,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
-最新正式版本：[ServerDash 1.0.1](https://github.com/xk-7/ServerDash/releases/tag/v1.0.1)（Build 6）。安装与平台附件说明见[正式发布通知](Docs/RELEASE_NOTES_1.0.1.md)。macOS 附件使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
+最新正式版本：[ServerDash 1.0.2](https://github.com/xk-7/ServerDash/releases/tag/v1.0.2)（Build 7）。安装与平台附件说明见[正式发布通知](Docs/RELEASE_NOTES_1.0.2.md)。macOS 附件使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
 
 ## 运行
 
@@ -265,10 +265,10 @@ DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 
 构建正式 GitHub Release 的 macOS、iPhone Simulator、iPad Simulator 产物，并验证无签名 iOS Device Release 编译：
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.1
+./Scripts/build-release-artifacts.sh 1.0.2
 ```
 
-产物和 SHA-256 校验文件输出到 `dist/v1.0.1/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)。
+产物和 SHA-256 校验文件输出到 `dist/v1.0.2/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)。
 
 ## 项目结构
 

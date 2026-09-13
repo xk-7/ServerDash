@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import os
 
 enum DiagnosticModule: String, CaseIterable, Identifiable, Sendable {
@@ -155,6 +156,9 @@ enum DiagnosticRedactor {
         ]
         return raw.compactMap { try? NSRegularExpression(pattern: $0) }
     }()
+    private static let ipv6CandidatePattern = try? NSRegularExpression(
+        pattern: #"(?<![0-9A-Fa-f:])\[?(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:%[A-Za-z0-9._-]+)?\]?(?![0-9A-Fa-f:])"#
+    )
 
     static func redact(_ text: String, hideIP: Bool = true) -> String {
         var result = text
@@ -165,6 +169,9 @@ enum DiagnosticRedactor {
                 withTemplate: "[REDACTED]"
             )
         }
+        if hideIP {
+            result = redactIPv6(in: result)
+        }
         if hideIP, let ipPattern = secretPatterns.last {
             result = ipPattern.stringByReplacingMatches(
                 in: result,
@@ -173,6 +180,32 @@ enum DiagnosticRedactor {
             )
         }
         return result
+    }
+
+    private static func redactIPv6(in text: String) -> String {
+        guard let ipv6CandidatePattern else { return text }
+        let source = text as NSString
+        let matches = ipv6CandidatePattern.matches(
+            in: text,
+            range: NSRange(location: 0, length: source.length)
+        )
+        let mutable = NSMutableString(string: text)
+        for match in matches.reversed() {
+            var candidate = source.substring(with: match.range)
+            if candidate.hasPrefix("[") { candidate.removeFirst() }
+            if candidate.hasSuffix("]") { candidate.removeLast() }
+            if let zone = candidate.firstIndex(of: "%") {
+                candidate = String(candidate[..<zone])
+            }
+            var address = in6_addr()
+            let isAddress = candidate.withCString {
+                inet_pton(AF_INET6, $0, &address) == 1
+            }
+            if isAddress {
+                mutable.replaceCharacters(in: match.range, with: "[IP]")
+            }
+        }
+        return mutable as String
     }
 }
 
@@ -278,19 +311,38 @@ enum SSHDiagnostics {
 }
 
 enum PrivacySettings {
+    static let locationLookupEnabledKey = "privacy.serverLocationLookupEnabled"
+    private static let legacyDisableLocationLookupKey = "disableLocationLookup"
+
     static var hideIPInformation: Bool {
         UserDefaults.standard.bool(forKey: "hideIPInformation")
     }
 
-    static var disableLocationLookup: Bool {
-        UserDefaults.standard.bool(forKey: "disableLocationLookup")
+    static var locationLookupEnabled: Bool {
+        locationLookupEnabled(in: .standard)
     }
 
-    static var confirmHostFingerprint: Bool {
-        if UserDefaults.standard.object(forKey: "confirmHostFingerprint") == nil {
-            return true
+    static var disableLocationLookup: Bool {
+        !locationLookupEnabled
+    }
+
+    static func locationLookupEnabled(in defaults: UserDefaults) -> Bool {
+        defaults.bool(forKey: locationLookupEnabledKey)
+    }
+
+    /// v1.0.1 used an inverted preference whose missing value enabled lookups.
+    /// Do not infer consent from that key; initialize the positive opt-in to off.
+    static func migrateLocationLookupPreference(in defaults: UserDefaults = .standard) {
+        if defaults.object(forKey: locationLookupEnabledKey) == nil {
+            defaults.set(false, forKey: locationLookupEnabledKey)
         }
-        return UserDefaults.standard.bool(forKey: "confirmHostFingerprint")
+        defaults.set(!locationLookupEnabled(in: defaults), forKey: legacyDisableLocationLookupKey)
+    }
+
+    static func setLocationLookupEnabled(_ enabled: Bool, in defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: locationLookupEnabledKey)
+        // Keep downgrades fail-closed even though current code reads the positive key.
+        defaults.set(!enabled, forKey: legacyDisableLocationLookupKey)
     }
 
     static var connectTimeout: TimeInterval {

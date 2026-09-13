@@ -51,8 +51,8 @@ RemoteApp, RDP recording and AI desktop context remain outside this iteration.
 - Disabling it stops new location requests and clears in-memory location cache.
 - Location, raw host values, and unredacted IP addresses are not written to
   diagnostics.
-- The current UI/default-value enforcement does not yet satisfy this frozen
-  contract and must be closed before the internal-test release is accepted.
+- ServerDash 1.0.2 satisfies this contract with a positive opt-in preference,
+  a disclosure naming ipinfo.io before activation, and cache clearing on opt-out.
 
 ## Compatibility and limited features
 

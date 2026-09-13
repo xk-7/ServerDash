@@ -13,8 +13,7 @@ struct SettingsView: View {
     @AppStorage("appAppearance") private var appearance = AppAppearance.system.rawValue
     @AppStorage("networkDisplayInBits") private var networkBits = false
     @AppStorage("hideIPInformation") private var hideIP = false
-    @AppStorage("disableLocationLookup") private var disableLocation = false
-    @AppStorage("confirmHostFingerprint") private var confirmFingerprint = true
+    @AppStorage(PrivacySettings.locationLookupEnabledKey) private var locationLookupEnabled = false
     @AppStorage("workbench.localShellPath") private var localShell = ""
     @AppStorage("workbench.localShellEnvironment") private var localEnvironment = "inherit"
     @AppStorage("mac.settings.selectedPage") private var pageID = SettingsPage.general.rawValue
@@ -23,6 +22,8 @@ struct SettingsView: View {
     @State private var timeoutSaved = false
     @FocusState private var timeoutFocused: Bool
     @State private var shortcutSearch = ""
+    @State private var confirmingLocationLookup = false
+    @State private var showsTrustedHosts = false
     private var page: SettingsPage { SettingsPage(rawValue: pageID) ?? .general }
     private var pageSelection: Binding<SettingsPage?> {
         Binding(get: { page }, set: { if let value = $0 { pageID = value.rawValue } })
@@ -46,6 +47,15 @@ struct SettingsView: View {
         .preferredColorScheme((AppAppearance(rawValue: appearance) ?? .system).colorScheme)
         .onAppear { reloadTimeout() }
         .onChange(of: pageID) { _, _ in reloadTimeout() }
+        .confirmationDialog("启用服务器公网位置查询？", isPresented: $confirmingLocationLookup) {
+            Button("启用查询") { setLocationLookupEnabled(true) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("监控连接会让受管服务器访问 ipinfo.io，以查询该服务器的公网 IP 与大致位置。ServerDash 不会上传连接凭据。")
+        }
+        .sheet(isPresented: $showsTrustedHosts) {
+            TrustedHostsView().frame(minWidth: 720, minHeight: 520)
+        }
     }
     @ViewBuilder private var detail: some View {
         switch page {
@@ -104,10 +114,14 @@ struct SettingsView: View {
         case .security:
             Form {
                 Section("SSH") {
-                    Toggle("首次连接时确认主机指纹", isOn: $confirmFingerprint)
+                    LabeledContent("主机密钥验证") {
+                        Label("始终启用", systemImage: "checkmark.shield")
+                            .foregroundStyle(Color.appLive)
+                    }
                     LabeledContent("默认连接超时") {
                         HStack {
-                            TextField("5–300", text: $timeoutText).frame(width: 80)
+                            TextField("默认连接超时", text: $timeoutText, prompt: Text("5–300"))
+                                .labelsHidden().frame(width: 80)
                                 .focused($timeoutFocused).onSubmit(saveTimeout)
                                 .accessibilityLabel("默认连接超时，秒")
                                 .onChange(of: timeoutText) { _, _ in timeoutSaved = false; timeoutError = nil }
@@ -119,12 +133,18 @@ struct SettingsView: View {
                     if let timeoutError { Text(timeoutError).foregroundStyle(Color.appError) }
                     else if timeoutSaved { Label("已保存", systemImage: "checkmark.circle").foregroundStyle(.secondary) }
                     else if MacSettingsValidation.timeout(timeoutText) == nil { Text("请输入 5–300 之间的整数秒数。").foregroundStyle(Color.appError) }
-                    Text("已有连接可在编辑主机中设置独立超时。主机密钥变化时继续要求重新确认。").font(.caption).foregroundStyle(.secondary)
+                    Text("所有 SSH、SFTP 与监控连接都使用应用专属信任记录；首次连接和密钥变化时必须明确确认。").font(.caption).foregroundStyle(.secondary)
+                    Button("管理可信主机…", systemImage: "checkmark.shield") { showsTrustedHosts = true }
                 }
-                Section("位置采集") {
-                    Toggle("停止位置采集", isOn: $disableLocation)
-                        .onChange(of: disableLocation) { _, disabled in if disabled { Task { await ServerLocationService.shared.clearCache() } } }
-                    Text("停止向位置服务发起查询，并清理已缓存的位置。").font(.caption).foregroundStyle(.secondary)
+                Section("服务器公网位置") {
+                    Toggle("查询服务器公网 IP 与大致位置", isOn: Binding(
+                        get: { locationLookupEnabled },
+                        set: { enabled in
+                            if enabled { confirmingLocationLookup = true }
+                            else { setLocationLookupEnabled(false) }
+                        }
+                    ))
+                    Text("默认关闭。启用后，受管服务器会访问 ipinfo.io；关闭会停止后续查询并清理 ServerDash 内存中的位置缓存。").font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped)
         case .sync: WebDAVSyncView(embedded: true)
@@ -149,6 +169,11 @@ struct SettingsView: View {
         }
         UserDefaults.standard.set(seconds, forKey: "sshConnectTimeout")
         timeoutText = String(seconds); timeoutError = nil; timeoutSaved = true; timeoutFocused = false
+    }
+    private func setLocationLookupEnabled(_ enabled: Bool) {
+        PrivacySettings.setLocationLookupEnabled(enabled)
+        locationLookupEnabled = enabled
+        if !enabled { appState.clearCachedServerLocations() }
     }
     private func chooseShell() {
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false; panel.directoryURL = URL(fileURLWithPath: "/bin")

@@ -354,7 +354,7 @@ enum SessionExportScope: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct SessionExportOptions: Sendable, Equatable {
-    var appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1"
+    var appVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
     var generatedAt: Date = .now
 }
 

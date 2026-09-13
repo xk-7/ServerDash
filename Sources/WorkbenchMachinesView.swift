@@ -317,14 +317,14 @@ struct MachineManagementView: View {
             if compact {
                 Table(filtered, selection: $selection) {
                     TableColumn("主机信息") { machineInformation($0, compact: true, tagColors: tagColors) }.width(min: 160, ideal: 240)
-                    TableColumn("状态 / 延迟") { machineStatus($0) }.width(min: 90, ideal: 100)
+                    TableColumn("状态 / 延迟") { machineStatus($0) }.width(min: 115, ideal: 145)
                     TableColumn("协议") { protocolBadge($0.kind) }.width(60)
                     TableColumn("") { machineConnectButton($0) }.width(36)
                 }
             } else {
                 Table(filtered, selection: $selection) {
                     TableColumn("主机信息") { machineInformation($0, compact: false, tagColors: tagColors) }.width(min: 160, ideal: 240)
-                    TableColumn("状态 / 延迟") { machineStatus($0) }.width(min: 90, ideal: 100)
+                    TableColumn("状态 / 延迟") { machineStatus($0) }.width(min: 120, ideal: 160)
                     TableColumn("协议") { protocolBadge($0.kind) }.width(60)
                     TableColumn("分组") { Text($0.group).lineLimit(1).help($0.group) }.width(min: 65, ideal: 100)
                     TableColumn("标签") { tagSummary($0.tags, colors: tagColors).lineLimit(1).help($0.tags.joined(separator: "、")) }.width(min: 65, ideal: 100)
@@ -383,7 +383,11 @@ struct MachineManagementView: View {
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     @ViewBuilder private func machineStatus(_ item: WorkbenchMachine) -> some View {
-        if case .ssh(let server) = item { MachineLiveState(server: server, runtime: appState.runtime(for: server)) }
+        if case .ssh(let server) = item {
+            MachineLiveState(server: server, runtime: appState.runtime(for: server)) {
+                Task { await appState.refresh(server) }
+            }
+        }
         else if case .vnc = item { Text("由系统管理").font(.caption).foregroundStyle(.secondary).help("系统屏幕共享独立运行，ServerDash 无法读取其在线状态。") }
         else if case .serial = item { MachineSerialLiveState(registry: appState.workbenchSessions, machineID: item.uuid) }
         else if let controller = appState.rdpControllers.values.filter({ $0.machineID == item.uuid }).sorted(by: { $0.state == .connected && $1.state != .connected }).first {
@@ -524,11 +528,40 @@ private struct MachineSerialControllerState: View {
 private struct MachineLiveState: View {
     let server: ServerRecord
     @ObservedObject var runtime: ServerRuntimeState
+    let retry: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             ServerStatusBadge(status: runtime.renderState.status)
-            Text(server.lastLatencyMS > 0 ? "\(Int(server.lastLatencyMS)) ms" : "—").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if let failure = MachineStatusPresentation.failureSummary(runtime.renderState.error) {
+                HStack(spacing: 4) {
+                    Text(failure).lineLimit(1).truncationMode(.tail).help(failure)
+                    if server.enableDashboardMonitor {
+                        Button(action: retry) { Image(systemName: "arrow.clockwise") }
+                            .buttonStyle(.borderless)
+                            .help("重试此主机的监控")
+                            .accessibilityLabel("重试 \(server.displayName) 的监控")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(Color.appError)
+            } else {
+                Text(server.lastLatencyMS > 0 ? "\(Int(server.lastLatencyMS)) ms" : "—")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
         }
+    }
+}
+
+enum MachineStatusPresentation {
+    static func failureSummary(_ error: String?) -> String? {
+        guard let error else { return nil }
+        let flattened = error
+            .split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !flattened.isEmpty else { return nil }
+        let redacted = DiagnosticRedactor.redact(flattened, hideIP: true)
+        return redacted.count > 120 ? String(redacted.prefix(117)) + "…" : redacted
     }
 }
 

@@ -36,6 +36,21 @@ final class MacFilePolishTests: XCTestCase {
         XCTAssertTrue(controller.selection.isEmpty)
         controller.close()
     }
+    @MainActor func testMultiSelectionBuildsOneDownloadRequestPerVisibleItem() throws {
+        let app = AppState(trustCoordinator: HostTrustCoordinator(), fileServicesEnabled: false)
+        let server = ServerRecord(name: "fixture", host: "fixture.invalid", username: "fixture")
+        let controller = MacSFTPController(server: server, appState: app, automaticallyConnect: false)
+        let a = item("/fixture/a.txt"), b = item("/fixture/含 空格[*].txt")
+        controller.applyDirectoryListing(.init(path: "/fixture", items: [a, b]))
+        controller.selection = [a.id, b.id]
+        let destination = try temporaryDirectory()
+
+        let requests = controller.downloadRequests(to: destination)
+
+        XCTAssertEqual(Set(requests.map(\.item)), Set([a, b]))
+        XCTAssertEqual(Set(requests.map(\.destination.lastPathComponent)), Set([a.name, b.name]))
+        controller.close()
+    }
     func testIncrementalLineIndexMatchesFullIndexThroughUnicodeAndBoundaryEdits() {
         var text = "中文\r\n😀 first\nlast\n", index = EditorLineIndex(text)
         for (range, replacement) in [

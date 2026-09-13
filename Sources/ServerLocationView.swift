@@ -85,9 +85,11 @@ actor ServerLocationService {
     """#
 
     private var cache: [UUID: ServerLocation] = [:]
+    private var cacheGeneration: UInt64 = 0
 
     func clearCache() {
         cache.removeAll()
+        cacheGeneration &+= 1
     }
 
     func location(for config: ServerConnectionConfig) async throws -> ServerLocation {
@@ -98,7 +100,11 @@ actor ServerLocationService {
             return cached
         }
 
+        let generation = cacheGeneration
         let data = try await requestFromServer(config)
+        guard generation == cacheGeneration, !PrivacySettings.disableLocationLookup else {
+            throw ServerLocationError.lookupFailed("已停止位置采集。")
+        }
         let payload = try JSONDecoder().decode(IPInfoLocationResponse.self, from: data)
         guard let location = payload.location else {
             throw ServerLocationError.invalidResponse
@@ -158,6 +164,7 @@ private extension ServerLocation {
 
 struct ServerLocationMapView: View {
     @EnvironmentObject private var appState: AppState
+    @AppStorage(PrivacySettings.locationLookupEnabledKey) private var locationLookupEnabled = false
 
     let server: ServerRecord
     let initialLocation: ServerGeoLocation?
@@ -180,12 +187,19 @@ struct ServerLocationMapView: View {
     }
 
     private var requestID: String {
-        "\(reloadID.uuidString)-\(initialLocation?.publicIP ?? "")"
+        "\(reloadID.uuidString)-\(initialLocation?.publicIP ?? "")-\(locationLookupEnabled)"
     }
 
     var body: some View {
         Group {
-            if let location {
+            if !locationLookupEnabled {
+                ContentUnavailableView {
+                    Label("服务器位置查询已关闭", systemImage: "location.slash")
+                } description: {
+                    Text("可在“设置 → 安全”中阅读说明并选择启用。")
+                }
+                .background(Color.appSurface)
+            } else if let location {
                 Map(
                     position: $mapPosition,
                     interactionModes: allowsInteraction ? [.pan, .zoom] : []
@@ -271,7 +285,7 @@ struct ServerLocationMapView: View {
     private func loadLocation() async {
         isLoading = true
         errorMessage = nil
-        if PrivacySettings.disableLocationLookup {
+        if !locationLookupEnabled {
             location = nil
             errorMessage = "已停止位置采集。"
             isLoading = false

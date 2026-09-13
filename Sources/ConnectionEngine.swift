@@ -473,6 +473,25 @@ actor ConnectionProcessController {
         }
     }
 
+    @discardableResult
+    func terminateAllAndWait(for serverID: UUID? = nil, timeout: TimeInterval = 3) async -> Bool {
+        terminateAll(for: serverID)
+        let deadline = Date().addingTimeInterval(max(0.1, timeout))
+        while activeProcessCount(for: serverID) > 0, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard activeProcessCount(for: serverID) > 0 else { return true }
+        let remaining = processes.compactMap { runID, active in
+            serverID == nil || active.summary.serverID == serverID ? runID : nil
+        }
+        remaining.forEach { forceKill(runID: $0) }
+        let forceDeadline = Date().addingTimeInterval(1)
+        while activeProcessCount(for: serverID) > 0, Date() < forceDeadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return activeProcessCount(for: serverID) == 0
+    }
+
     func activeProcessSummaries() -> [ProcessRunSummary] {
         processes.values
             .map(\.summary)

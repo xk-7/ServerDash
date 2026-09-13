@@ -21,7 +21,7 @@ enum MacUIFixture {
         let defaults = UserDefaults.standard
         defaults.set(0.0, forKey: "refreshInterval")
         defaults.set(true, forKey: "refreshIntervalConfigured")
-        defaults.set(true, forKey: "disableLocationLookup")
+        PrivacySettings.setLocationLookupEnabled(false, in: defaults)
         defaults.set(false, forKey: "terminal.history.enabled")
         defaults.set(false, forKey: "recordingOutputConsent")
         defaults.set(false, forKey: "hideIPInformation")

@@ -74,6 +74,18 @@ final class MachineBrowserProjectionTests: XCTestCase {
         XCTAssertFalse(MachineBrowserLayout(contentWidth: 899, prefersGroups: true).showsGroupPanel)
     }
 
+    func testMachineFailureSummaryIsShortSingleLineAndAlwaysRedactsIPv4() {
+        let raw = "连接 203.0.113.42 / 2001:db8::42 失败\n" + String(repeating: "详细信息", count: 80)
+        let summary = MachineStatusPresentation.failureSummary(raw)
+        XCTAssertNotNil(summary)
+        XCTAssertFalse(summary?.contains("203.0.113.42") == true)
+        XCTAssertFalse(summary?.contains("2001:db8::42") == true)
+        XCTAssertTrue(summary?.contains("[IP]") == true)
+        XCTAssertFalse(summary?.contains("\n") == true)
+        XCTAssertLessThanOrEqual(summary?.count ?? .max, 120)
+        XCTAssertNil(MachineStatusPresentation.failureSummary("  \n "))
+    }
+
     @MainActor func testThousandHostBeforeAndAfterBenchmark() throws {
         let roots = (0..<8).map { MachineBrowserGroup(id: UUID(), name: "区域 \($0)", parentID: nil) }
         let groups = roots + (0..<40).map { MachineBrowserGroup(id: UUID(), name: "项目 \($0)", parentID: roots[$0 % roots.count].id) }

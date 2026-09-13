@@ -233,6 +233,12 @@ enum DirectorySyncPlanner {
         for index in pairs.indices where pairs[index].serverID==serverID { pairs[index].automaticUpload=false };persist()
     }
     func shutdown(){operation?.cancel();automaticTask?.cancel();automaticTask=nil;persist()}
+    func shutdownAndDrain() async {
+        let activeOperation = operation
+        shutdown()
+        await activeOperation?.value
+        persist()
+    }
     func add(local:URL,remote:String,access:DesktopFileAccess) {
         guard persistenceReady else{error="目录同步数据库尚未就绪。";return}
         register(access)

@@ -17,7 +17,7 @@ import AppKit
                     waiting = false; sender.reply(toApplicationShouldTerminate: false); return
                 }
             }
-            appState?.shutdown()
+            await appState?.shutdownAndDrain()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

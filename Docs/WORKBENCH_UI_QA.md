@@ -57,3 +57,13 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 1,000 台合成主机、48 个分组和 6 组等价查询的同步主线程基准中，旧的重复层级扫描与逐次排序耗时约 1,446.9 ms；投影一次构建及缓存排序耗时约 36.2 ms，语义结果一致；随后 100 次相同更新约 0.074 ms。编辑器基准使用 1,300,000 个 UTF-16 单元、50,000 行：靠近文件末尾的 100 次行号查询从约 2.559 s 降到 0.000042 s，30 次尾部编辑的行索引维护从约 2.359 s 降到 0.000100 s；大文件按设计跳过语法正则高亮。数值来自同一次全量测试运行，仅用于本机前后对比，不作为跨设备性能承诺。
 
 新增回归覆盖工具栏唯一入口、分组栏窄宽切换偏好、筛选后选择清理、同目录刷新选择保留、目录失败原位重试、5–300 秒整数超时、Bundle 版本显示、SSH／本地／串口命令能力、终端搜索隔离、外观与窗口尺寸变化不重启 PTY、中文组合输入、光标／选择／撤销保留、版本化高亮任务及退出前草稿落盘。伪串口 PTY 和本地 `/bin/cat` 由测试进程创建；实体串口拔插、真实 VNC／RDP／WebDAV／SSH 服务和 VoiceOver 朗读未执行，继续按上一节列为设备验收项。
+
+## 2026-09-13 v1.0.2 隐私与可靠性复验
+
+本次复验使用 `codex/mac-privacy-reliability` 分支。位置查询迁移、SFTP 多选下载计划、主机错误脱敏和受管进程排空的 28 项聚焦测试全部通过；最终 macOS 全量测试执行 398 项，零失败。全量日志为 `/tmp/serverdash-v102-mac-final-tests.log`，结果包为 `.build/privacy-full-tests/Logs/Test/Test-ServerDash-2026.09.13_08-24-12-+0800.xcresult`。
+
+全量测试重新生成 `/tmp/serverdash-workbench-ui-qa/` 中的 34 张隔离界面夹具图，其中包含浅色和深色安全设置页。检查确认服务器公网 IP 与大致位置查询默认关闭，启用前明确显示由受管服务器访问 ipinfo.io；SSH 主机密钥验证显示为始终启用，并提供可信主机管理入口。夹具继续使用内存数据、模拟服务及文档网段地址，不访问用户数据库、凭据或真实主机。
+
+发布脚本成功完成 macOS 通用 Release、iPhone Simulator Release、iPad Simulator Release 和无签名 iOS Device Release 兼容构建。macOS 与两份模拟器应用均包含 arm64、x86_64，设备兼容构建为 arm64；三端 `CFBundleShortVersionString` 均为 1.0.2，`CFBundleVersion` 均为 7。macOS ad-hoc 签名通过 `codesign --verify --deep --strict`，DMG 通过 `hdiutil verify`，四项发布文件通过 SHA-256 校验。构建日志为 `/tmp/serverdash-v102-release-build.log`，产物位于 `dist/v1.0.2/`。
+
+本轮没有修改 SwiftData V5、同步包、凭据格式、连接协议或移动端能力白名单。实体 iPhone/iPad、VoiceOver 实际朗读、实体串口、真实 VNC/RDP/SSH 服务及真实 WebDAV 双设备同步未执行，仍列为设备验收项。

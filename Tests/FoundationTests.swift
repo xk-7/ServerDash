@@ -193,10 +193,14 @@ final class SSHSupportAuthenticationTests: XCTestCase {
 
 final class DiagnosticRedactorTests: XCTestCase {
     func testRedactsSecretsAndIPByDefault() {
-        let text = "password=super-secret host=203.0.113.10"
+        let text = "password=super-secret host=203.0.113.10 peer=[2001:db8::42]:22 link=[fe80::1%en0] at 12:34:56 mac AA:BB:CC:DD:EE:FF"
         XCTAssertTrue(DiagnosticRedactor.redact(text).contains("[REDACTED]"))
         XCTAssertFalse(DiagnosticRedactor.redact(text).contains("203.0.113.10"))
+        XCTAssertFalse(DiagnosticRedactor.redact(text).contains("2001:db8::42"))
+        XCTAssertFalse(DiagnosticRedactor.redact(text).contains("fe80::1"))
         XCTAssertTrue(DiagnosticRedactor.redact(text, hideIP: true).contains("[IP]"))
+        XCTAssertTrue(DiagnosticRedactor.redact(text).contains("12:34:56"))
+        XCTAssertTrue(DiagnosticRedactor.redact(text).contains("AA:BB:CC:DD:EE:FF"))
         XCTAssertFalse(
             DiagnosticRedactor.redact(
                 "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----"
@@ -1561,6 +1565,23 @@ final class MonitorPresentationTests: XCTestCase {
 }
 
 final class ConnectionProcessControllerTests: XCTestCase {
+    func testTerminateAllAndWaitDrainsActiveProcessesBeforeReturning() async throws {
+        let controller = ConnectionProcessController(
+            limiter: ConnectionLimiter(maxGlobal: 2, maxPerServer: 2),
+            terminationGrace: 0.1
+        )
+        let serverID = UUID()
+        let task = longRunningTask(controller: controller, serverID: serverID)
+        let started = await waitUntil { await controller.activeProcessCount() == 1 }
+        XCTAssertTrue(started)
+
+        let drained = await controller.terminateAllAndWait(timeout: 1)
+        XCTAssertTrue(drained)
+        await assertCancelled(task)
+        let activeCount = await controller.activeProcessCount()
+        XCTAssertEqual(activeCount, 0)
+    }
+
     func testReturnsOutputBelowConfiguredLimit() async throws {
         let controller = ConnectionProcessController(
             limiter: ConnectionLimiter(maxGlobal: 1, maxPerServer: 1)

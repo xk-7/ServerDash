@@ -32,7 +32,7 @@ import XCTest
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(false, forKey: "hideIPInformation")
-        defaults.set(true, forKey: "disableLocationLookup")
+        PrivacySettings.setLocationLookupEnabled(false, in: defaults)
         defaults.set(0.0, forKey: "refreshInterval")
         defaults.set(true, forKey: "refreshIntervalConfigured")
         defaults.set(true, forKey: "monitor.hideSpecialFilesystems")
@@ -78,6 +78,12 @@ import XCTest
                 SettingsView().modelContainer(container).environmentObject(app).environmentObject(layout)
                     .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
                 size: NSSize(width: 1000, height: 740), name: "settings-\(theme)", dark: dark))
+            defaults.set(SettingsPage.security.rawValue, forKey: "mac.settings.selectedPage")
+            artifacts.append(try await render(
+                SettingsView().modelContainer(container).environmentObject(app).environmentObject(layout)
+                    .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
+                size: NSSize(width: 1000, height: 740), name: "settings-security-\(theme)", dark: dark))
+            defaults.set(SettingsPage.general.rawValue, forKey: "mac.settings.selectedPage")
             artifacts.append(try await render(
                 Form { MonitoringFilterSettingsView() }.formStyle(.grouped)
                     .defaultAppStorage(defaults).environment(\.colorScheme, scheme),
@@ -138,7 +144,7 @@ import XCTest
         let suite = "ServerDash.WorkbenchLifecycleFixture.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(true, forKey: "disableLocationLookup")
+        PrivacySettings.setLocationLookupEnabled(false, in: defaults)
         defaults.set("grid", forKey: "machineViewMode")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         var checkpoints: [String] = []

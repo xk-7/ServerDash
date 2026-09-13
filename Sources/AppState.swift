@@ -200,6 +200,14 @@ actor MonitoringCoordinator {
         }
     }
 
+    func stopAndDrain() async {
+        stop()
+        let activeTasks = Array(running.values)
+        for task in activeTasks {
+            await task.value
+        }
+    }
+
     private var maximumConcurrency: Int {
         lowPowerMode ? min(2, baseMaximumConcurrency) : baseMaximumConcurrency
     }
@@ -1096,11 +1104,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    func shutdown() {
-        guard !didShutdown else { return }
+    @discardableResult
+    private func beginShutdown() -> Bool {
+        guard !didShutdown else { return false }
         didShutdown = true
         RemoteEditorStore.shared.shutdown()
         DirectorySyncStore.shared.shutdown()
+        AIWorkspace.shared.stopAll()
         workbenchSessions.closeAll()
         inspectorFileControllers.values.forEach { $0.close() }
         inspectorFileControllers.removeAll()
@@ -1110,10 +1120,7 @@ final class AppState: ObservableObject {
         fileControllers.values.forEach { $0.close() }
         fileControllers.removeAll()
         terminalRegistry.terminateAll()
-        if MacUIFixture.isEnabled { return }
-        // Writers do not call the main actor to drain; a late OS termination still leaves recoverable blocks.
-        _ = RecordingWriter.pendingWrites.wait(timeout: .now() + 3)
-        KeyMaterialStore.cleanupAll()
+        guard !MacUIFixture.isEnabled else { return true }
         do {
             try monitoringHistory?.beginLifecycleGap(
                 .collectorStopped,
@@ -1123,23 +1130,54 @@ final class AppState: ObservableObject {
         } catch {
             reportHistoryFailure()
         }
-        let tunnelSupervisor = portForwardSupervisor
-        let drain = DispatchSemaphore(value: 0)
-        Task.detached {
-            await tunnelSupervisor.stopAll()
-            drain.signal()
-        }
-        _ = drain.wait(timeout: .now() + 1.1)
+        return true
+    }
+
+    func shutdownAndDrain() async {
+        guard beginShutdown() else { return }
+        guard !MacUIFixture.isEnabled else { return }
+        _ = await RemoteEditorStore.shared.shutdownAndFlush()
+        await DirectorySyncStore.shared.shutdownAndDrain()
+        await monitoringCoordinator.stopAndDrain()
+        await portForwardSupervisor.stopAll()
+        _ = await ConnectionProcessController.shared.terminateAllAndWait(timeout: 4)
+        // Keep DispatchGroup waiting off the main actor so final window updates remain responsive.
+        _ = await Task.detached(priority: .utility) {
+            RecordingWriter.pendingWrites.wait(timeout: .now() + 3) == .success
+        }.value
+        KeyMaterialStore.cleanupAll()
         RouteKeyMaterialStore.cleanupAll()
+    }
+
+    func shutdown() {
+        guard beginShutdown() else { return }
         Task {
-            await monitoringCoordinator.stop()
-            await ConnectionProcessController.shared.terminateAll()
+            guard !MacUIFixture.isEnabled else { return }
+            await DirectorySyncStore.shared.shutdownAndDrain()
+            await monitoringCoordinator.stopAndDrain()
+            await portForwardSupervisor.stopAll()
+            _ = await ConnectionProcessController.shared.terminateAllAndWait(timeout: 4)
+            _ = await Task.detached(priority: .utility) {
+                RecordingWriter.pendingWrites.wait(timeout: .now() + 3) == .success
+            }.value
+            KeyMaterialStore.cleanupAll()
+            RouteKeyMaterialStore.cleanupAll()
         }
     }
 
     func updateRefreshInterval(_ interval: TimeInterval) {
         UserDefaults.standard.set(true, forKey: "refreshIntervalConfigured")
         refreshInterval = interval
+    }
+
+    func clearCachedServerLocations() {
+        for serverID in Array(runtimeStates.keys) {
+            var state = runtimeState(for: serverID).renderState
+            guard state.snapshot.geoLocation != nil else { continue }
+            state.snapshot.geoLocation = nil
+            publish(state, for: serverID)
+        }
+        Task { await ServerLocationService.shared.clearCache() }
     }
 
     func setMonitoringSleeping(_ sleeping: Bool) {

@@ -12,6 +12,7 @@ struct ServerDashApp: App {
 
     init() {
         MacUIFixture.prepareEnvironment()
+        PrivacySettings.migrateLocationLookupPreference()
         LaunchPerformanceTracker.shared.start()
         let state = MacUIFixture.isEnabled ? MacUIFixture.makeAppState() : AppState()
         let session = PersistenceSession()

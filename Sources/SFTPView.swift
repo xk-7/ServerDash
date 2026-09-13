@@ -96,7 +96,7 @@ struct SFTPBrowserView: View {
             Button("覆盖") { controller.resolveConflict(.overwrite) }
             Button("跳过") { controller.resolveConflict(.skip) }
             Button("重命名") { controller.resolveConflict(.rename) }
-            Button("取消", role: .cancel) { controller.pendingUploads = []; controller.pendingDownload = nil }
+            Button("取消", role: .cancel) { controller.pendingUploads = []; controller.pendingDownloads = [] }
         }
         .confirmationDialog("粘贴时发现同名项目", isPresented: $showingPasteConflict) {
             Button("覆盖同名项目", role: .destructive) { controller.pasteFiles(policy: .overwrite) }
@@ -147,7 +147,8 @@ struct SFTPBrowserView: View {
                     Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
                     Button("上传文件夹", systemImage: "folder.badge.plus") { controller.chooseItemsToUpload(directories: true) }
                 } label: { Image(systemName: "square.and.arrow.up") }.help("上传")
-                Button { controller.downloadSelectedItem() } label: { Image(systemName: "square.and.arrow.down") }.help("下载").disabled(controller.selectedItem == nil)
+                Button { controller.downloadSelectedItems() } label: { Image(systemName: "square.and.arrow.down") }
+                    .help("下载所选项目").accessibilityLabel("下载所选项目").disabled(controller.selectedItems.isEmpty)
                 Menu {
                     Button("新建文件夹", systemImage: "folder.badge.plus") { controller.promptText = ""; controller.showingNewFolderPrompt = true }
                     Button("新建文件", systemImage: "doc.badge.plus") { controller.promptText = ""; controller.showingNewFilePrompt = true }
@@ -178,7 +179,7 @@ struct SFTPBrowserView: View {
                 Button("编辑", systemImage: "square.and.pencil") { openEditor(items) }.disabled(items.contains { $0.kind != .file })
                 Menu("以指定编码编辑") { ForEach(RemoteTextEncoding.allCases) { encoding in Button(encoding.rawValue) { openEditor(items, encoding: encoding) } } }.disabled(items.contains { $0.kind != .file })
                 Button("用本地程序打开", systemImage: "arrow.up.forward.app") { controller.openLocalCopy(first);showingLocalCopies=true }.disabled(first.kind != .file || editor.busy)
-                Button("下载", systemImage: "square.and.arrow.down") { controller.selection = [first.id]; controller.downloadSelectedItem() }
+                Button("下载", systemImage: "square.and.arrow.down") { controller.selection = ids; controller.downloadSelectedItems() }
                 Button("重命名…", systemImage: "pencil") { controller.selection = [first.id]; controller.beginRename() }.disabled(items.count != 1)
                 Button("移动到…", systemImage: "arrow.right") { controller.selection = [first.id]; controller.promptText = controller.currentPath; controller.showingMovePrompt = true }.disabled(items.count != 1)
                 Button("修改权限…", systemImage: "lock.shield") { controller.selection = ids; permissions = first.isDirectory ? "755" : "644"; recursivePermissions = false; showingPermissions = true }
@@ -215,9 +216,12 @@ struct SFTPBrowserView: View {
     }
     private var statusBar: some View {
         VStack(spacing: 4) {
-            if let progress = controller.progress { ProgressView(value: progress.fraction) }
+            if let progress = controller.progress {
+                if progress.isIndeterminate { ProgressView() }
+                else { ProgressView(value: progress.fraction) }
+            }
             HStack(spacing: 6) {
-                if controller.busyMessage != nil { ProgressView().controlSize(.small) }
+                if controller.busyMessage != nil, controller.progress == nil { ProgressView().controlSize(.small) }
                 Text(controller.busyMessage ?? controller.statusMessage).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 2)
                 if controller.hasActiveTransfer { Button("取消") { controller.transferTask?.cancel() } }
@@ -268,7 +272,7 @@ final class MacSFTPController: ObservableObject {
     @Published var progress: SFTPProgress?
     @Published var transferTask: Task<Void, Never>?
     @Published var pendingUploads: [URL] = []
-    @Published var pendingDownload: (item: RemoteFileItem, url: URL)?
+    @Published var pendingDownloads: [SFTPDownloadRequest] = []
     @Published var conflictPolicy: SFTPConflictPolicy = .overwrite
 
     private func rebuildVisibleItems() {
@@ -303,7 +307,7 @@ final class MacSFTPController: ObservableObject {
         directoryTask?.cancel()
         transferTask?.cancel()
         pendingUploads = []
-        pendingDownload = nil
+        pendingDownloads = []
         progress = nil
     }
     func loadDirectory(_ path: String) async {
@@ -426,50 +430,59 @@ final class MacSFTPController: ObservableObject {
         }
     }
 
-    func downloadSelectedItem() {
-        guard let item = selectedItem else { return }
+    func downloadSelectedItems() {
+        let selected = selectedItems
+        guard !selected.isEmpty else { return }
         let preferred = DesktopFilePreferences.downloadDirectory
         if !preferred.isEmpty {
             let directory = URL(fileURLWithPath: preferred, isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                enqueueDownload(item, to: directory.appendingPathComponent(item.name)); return
+                enqueueDownloads(downloadRequests(for: selected, to: directory)); return
             } catch { errorMessage = error.localizedDescription; return }
         }
-        if item.isDirectory {
+        if selected.count > 1 || selected[0].isDirectory {
             let panel = NSOpenPanel()
-            panel.title = "选择下载文件夹的位置"
+            panel.title = selected.count == 1 ? "选择下载文件夹的位置" : "选择 \(selected.count) 个项目的下载位置"
             panel.prompt = "下载"
             panel.canChooseFiles = false
             panel.canChooseDirectories = true
             panel.canCreateDirectories = true
             guard panel.runModal() == .OK, let folder = panel.url else { return }
-            let destination = folder.appendingPathComponent(item.name)
-            enqueueDownload(item, to: destination)
+            enqueueDownloads(downloadRequests(for: selected, to: folder))
         } else {
+            let item = selected[0]
             let panel = NSSavePanel()
             panel.title = "下载 \(item.name)"
             panel.nameFieldStringValue = item.name
             panel.prompt = "下载"
             guard panel.runModal() == .OK, let destination = panel.url else { return }
-            enqueueDownload(item, to: destination)
+            enqueueDownloads([SFTPDownloadRequest(item: item, destination: destination)])
         }
     }
 
-    func enqueueDownload(_ item: RemoteFileItem, to destination: URL) {
-        if FileManager.default.fileExists(atPath: destination.path) {
-            pendingDownload = (item, destination)
+    func downloadRequests(for selected: [RemoteFileItem]? = nil, to directory: URL) -> [SFTPDownloadRequest] {
+        (selected ?? selectedItems).map {
+            SFTPDownloadRequest(item: $0, destination: directory.appendingPathComponent($0.name))
+        }
+    }
+
+    func enqueueDownloads(_ requests: [SFTPDownloadRequest]) {
+        guard !requests.isEmpty else { return }
+        if requests.contains(where: { FileManager.default.fileExists(atPath: $0.destination.path) }) {
+            pendingDownloads = requests
             showingConflict = true
         } else {
-            download(item, to: destination, policy: .overwrite)
+            download(requests, policy: .overwrite)
         }
     }
 
-    func download(_ item: RemoteFileItem, to destination: URL, policy: SFTPConflictPolicy) {
+    func download(_ requests: [SFTPDownloadRequest], policy: SFTPConflictPolicy) {
         guard !closed, transferTask == nil else { return }
+        guard !requests.isEmpty else { return }
         let request = generation, transfer = UUID()
         transferGeneration = transfer
-        busyMessage = "正在下载 \(item.name)"
+        busyMessage = requests.count == 1 ? "正在下载 \(requests[0].item.name)" : "正在下载 \(requests.count) 个项目"
         transferTask = Task { [self] in
             defer { if generation == request { transferTask = nil; busyMessage = nil; progress = nil } }
             do {
@@ -477,8 +490,7 @@ final class MacSFTPController: ObservableObject {
                 let config = connectionConfig
                 try await appState.performTrustedConnection(config, source: .sftp) {
                     try await SFTPService.download(
-                        item: item,
-                        to: destination,
+                        requests: requests,
                         config: config,
                         policy: policy
                     ) { [self] update in
@@ -490,7 +502,8 @@ final class MacSFTPController: ObservableObject {
                     }
                 }
                 guard generation == request, !Task.isCancelled else { return }
-                statusMessage = "已下载到 \(destination.path)"
+                let folder = requests[0].destination.deletingLastPathComponent().path
+                statusMessage = requests.count == 1 ? "已下载到 \(requests[0].destination.path)" : "已下载 \(requests.count) 个项目到 \(folder)"
             } catch {
                 guard generation == request else { return }
                 errorMessage = error.localizedDescription
@@ -507,9 +520,10 @@ final class MacSFTPController: ObservableObject {
             let urls = pendingUploads
             pendingUploads = []
             upload(urls, policy: policy)
-        } else if let pendingDownload {
-            download(pendingDownload.item, to: pendingDownload.url, policy: policy)
-            self.pendingDownload = nil
+        } else if !pendingDownloads.isEmpty {
+            let requests = pendingDownloads
+            pendingDownloads = []
+            download(requests, policy: policy)
         }
     }
 

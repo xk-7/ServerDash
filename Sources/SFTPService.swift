@@ -48,11 +48,17 @@ struct SFTPProgress: Sendable {
     var speedBytesPerSecond: Double
     var remaining: TimeInterval
     var message: String
+    var isIndeterminate = false
 
     var fraction: Double {
         guard totalBytes > 0 else { return 0 }
         return min(1, Double(transferredBytes) / Double(totalBytes))
     }
+}
+
+struct SFTPDownloadRequest: Sendable, Equatable {
+    let item: RemoteFileItem
+    let destination: URL
 }
 
 enum SFTPError: LocalizedError {
@@ -248,7 +254,6 @@ enum SFTPService {
         for url in localURLs { try validatePath(url.path) }
         var commands: [String] = []
         var totalBytes: Int64 = 0
-        var destinations: [String] = []
         for url in localURLs {
             var name = url.lastPathComponent
             if existingNames.contains(name) {
@@ -262,7 +267,6 @@ enum SFTPService {
                 }
             }
             let destination = RemotePath.child(name, of: remoteDirectory)
-            destinations.append(destination)
             totalBytes += LocalTransferMeasure.size(of: url)
             var isDirectory: ObjCBool = false
             FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
@@ -270,18 +274,11 @@ enum SFTPService {
             commands.append("\(flag) \(quote(url.path)) \(quote(destination))")
         }
         guard !commands.isEmpty else { return }
-        let resolvedDestinations = destinations
         try await runTransfer(
             config: config,
             commands: commands,
             totalBytes: totalBytes,
-            measure: {
-                var total: Int64 = 0
-                for path in resolvedDestinations {
-                    total += (try? await remoteSize(config: config, path: path)) ?? 0
-                }
-                return total
-            },
+            message: localURLs.count == 1 ? "正在上传 \(localURLs[0].lastPathComponent)" : "正在上传 \(localURLs.count) 个项目",
             onProgress: onProgress
         )
     }
@@ -293,37 +290,52 @@ enum SFTPService {
         policy: SFTPConflictPolicy,
         onProgress: (@Sendable (SFTPProgress) -> Void)? = nil
     ) async throws {
-        try validatePath(item.path)
-        try validatePath(localURL.path)
-        if FileManager.default.fileExists(atPath: localURL.path) {
-            switch policy {
-            case .skip:
-                return
-            case .rename:
-                let renamed = uniquedLocalURL(localURL)
-                try await download(
-                    item: item,
-                    to: renamed,
-                    config: config,
-                    policy: .overwrite,
-                    onProgress: onProgress
-                )
-                return
-            case .overwrite:
-                break
-            }
-        }
-        let flag = item.isDirectory ? "get -pR" : "get -p"
-        let total = item.isDirectory ? max(item.size, 1) : item.size
-        try await runTransfer(
+        try await download(
+            requests: [SFTPDownloadRequest(item: item, destination: localURL)],
             config: config,
-            commands: ["\(flag) \(quote(item.path)) \(quote(localURL.path))"],
-            totalBytes: total,
-            measure: { LocalTransferMeasure.size(of: localURL) },
+            policy: policy,
             onProgress: onProgress
         )
-        guard FileManager.default.fileExists(atPath: localURL.path) else {
-            throw SFTPError.commandFailed("传输未完成，未将半成品标为成功。")
+    }
+
+    static func download(
+        requests: [SFTPDownloadRequest],
+        config: ServerConnectionConfig,
+        policy: SFTPConflictPolicy,
+        onProgress: (@Sendable (SFTPProgress) -> Void)? = nil
+    ) async throws {
+        var commands: [String] = []
+        var destinations: [URL] = []
+        var totalBytes: Int64 = 0
+        for request in requests {
+            try validatePath(request.item.path)
+            try validatePath(request.destination.path)
+            var destination = request.destination
+            if FileManager.default.fileExists(atPath: destination.path) {
+                switch policy {
+                case .skip:
+                    continue
+                case .rename:
+                    destination = uniquedLocalURL(destination)
+                case .overwrite:
+                    break
+                }
+            }
+            let flag = request.item.isDirectory ? "get -pR" : "get -p"
+            commands.append("\(flag) \(quote(request.item.path)) \(quote(destination.path))")
+            destinations.append(destination)
+            if request.item.kind == .file { totalBytes += max(0, request.item.size) }
+        }
+        guard !commands.isEmpty else { return }
+        try await runTransfer(
+            config: config,
+            commands: commands,
+            totalBytes: totalBytes,
+            message: requests.count == 1 ? "正在下载 \(requests[0].item.name)" : "正在下载 \(requests.count) 个项目",
+            onProgress: onProgress
+        )
+        for destination in destinations where !FileManager.default.fileExists(atPath: destination.path) {
+            throw SFTPError.commandFailed("传输未完成，未将半成品标为成功：\(destination.lastPathComponent)")
         }
     }
 
@@ -412,7 +424,7 @@ enum SFTPService {
         try await runTransfer(config: config,
             commands: ["put \(preserveLocalAttributes ? "-p " : "")\(quote(localURL.path)) \(quote(path))"],
             totalBytes: LocalTransferMeasure.size(of: localURL),
-            measure: { (try? await remoteSize(config: config, path: path)) ?? 0 }, onProgress: onProgress)
+            message: "正在上传 \(localURL.lastPathComponent)", onProgress: onProgress)
     }
 
     static func quote(_ value: String) -> String {
@@ -448,55 +460,31 @@ enum SFTPService {
         return url.deletingLastPathComponent().appendingPathComponent(name)
     }
 
-    private static func remoteSize(config: ServerConnectionConfig, path: String) async throws -> Int64 {
-        let listing = try await list(config: config, path: RemotePath.parent(of: path))
-        return listing.items.first { $0.path == path }?.size ?? 0
-    }
-
     private static func runTransfer(
         config: ServerConnectionConfig,
         commands: [String],
         totalBytes: Int64,
-        measure: @escaping @Sendable () async -> Int64,
+        message: String,
         onProgress: (@Sendable (SFTPProgress) -> Void)?
     ) async throws {
         let interval = PerformanceTrace.begin(.sftpTransfer)
         defer { PerformanceTrace.end(interval) }
-        let started = Date()
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
-                _ = try await run(
-                    config: config,
-                    commands: commands,
-                    totalTimeout: 21_600
-                )
-            }
-            if let onProgress {
-                group.addTask {
-                    while !Task.isCancelled {
-                        let transferred = await measure()
-                        let elapsed = max(0.1, Date().timeIntervalSince(started))
-                        let speed = Double(transferred) / elapsed
-                        let remaining = speed > 0
-                            ? Double(max(0, totalBytes - transferred)) / speed
-                            : 0
-                        PerformanceTrace.event(.sftpProgressPublish)
-                        onProgress(
-                            SFTPProgress(
-                                transferredBytes: transferred,
-                                totalBytes: totalBytes,
-                                speedBytesPerSecond: speed,
-                                remaining: remaining,
-                                message: "已传输 \(DisplayFormat.bytes(Double(transferred)))"
-                            )
-                        )
-                        try await Task.sleep(for: .milliseconds(400))
-                    }
-                }
-            }
-            try await group.next()
-            group.cancelAll()
+        if let onProgress {
+            PerformanceTrace.event(.sftpProgressPublish)
+            onProgress(SFTPProgress(
+                transferredBytes: 0,
+                totalBytes: totalBytes,
+                speedBytesPerSecond: 0,
+                remaining: 0,
+                message: message,
+                isIndeterminate: true
+            ))
         }
+        _ = try await run(
+            config: config,
+            commands: commands,
+            totalTimeout: 21_600
+        )
     }
 
     private static func run(
