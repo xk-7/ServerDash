@@ -20,8 +20,23 @@ copied=0
 for source in "${SOURCE_DIR}"/*.log; do
     [[ -f "${source}" ]] || continue
     destination="${DESTINATION_DIR}/$(basename "${source}")"
-    awk '!/^[[:space:]]*export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=/' "${source}" \
-        | tail -n "${MAX_LINES}" \
+    {
+        echo "--- matched failure diagnostics ---"
+        awk '
+            /Test Case .* failed/ ||
+            /:[0-9]+(:[0-9]+)?: error:/ ||
+            /Issue recorded/ ||
+            /XCTAssert/ ||
+            /Assertion failed/ ||
+            /fatal error:/ ||
+            /Process completed with exit code/ {
+                print NR ":" $0
+            }
+        ' "${source}" | tail -n "${MAX_LINES}"
+        echo "--- final log lines ---"
+        tail -n "${MAX_LINES}" "${source}"
+    } \
+        | awk '!/^[[:space:]]*export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=/' \
         | sed -E \
             -e 's#/(Users|private/(tmp|var/folders)|tmp)/[^[:space:]"'"'"']+#/<redacted-path>#g' \
             -e 's#(token|password|secret|credential)=([^[:space:]]+)#\1=<redacted>#Ig' \
