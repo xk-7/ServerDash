@@ -358,6 +358,10 @@ final class RecordingFormatTests: XCTestCase {
         let finished = expectation(description: "finalized")
         writer.finish(time: 12, reason: "user") { result in
             if case .failure = result { XCTFail("Failed writer") }
+            XCTAssertTrue(
+                RecordingWriter.resetShutdownSealForTesting(),
+                "A finish callback must run only after the process-wide pending-write group has drained"
+            )
             finished.fulfill()
         }
         await fulfillment(of: [finished], timeout: 10)
