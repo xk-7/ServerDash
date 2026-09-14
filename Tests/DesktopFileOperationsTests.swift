@@ -12,10 +12,34 @@ final class DesktopFileOperationsTests: XCTestCase {
         addTeardownBlock {try? FileManager.default.removeItem(at:root)}
         return root.resolvingSymlinksInPath()
     }
+    private func pythonEnvironment() -> [String:String] {
+        var environment=ProcessInfo.processInfo.environment
+        for key in ["DYLD_LIBRARY_PATH","DYLD_FRAMEWORK_PATH","DYLD_INSERT_LIBRARIES","PYTHONHOME","PYTHONPATH"] {
+            environment.removeValue(forKey:key)
+        }
+        return environment
+    }
+    private func pythonExecutable(environment:[String:String]) -> URL? {
+        var candidates:[String]=[]
+        if let configured=environment["SERVERDASH_TEST_PYTHON3"],!configured.isEmpty {candidates.append(configured)}
+        candidates += (environment["PATH"] ?? "").split(separator:":").map {String($0)+"/python3"}.filter {$0 != "/usr/bin/python3"}
+        candidates += ["/opt/homebrew/bin/python3","/usr/local/bin/python3","/usr/bin/python3"]
+        var seen=Set<String>()
+        for path in candidates where seen.insert(path).inserted && FileManager.default.isExecutableFile(atPath:path) {
+            let process=Process(),output=Pipe()
+            process.executableURL=URL(fileURLWithPath:path);process.arguments=["--version"]
+            process.environment=environment;process.standardOutput=output;process.standardError=output
+            do {try process.run()} catch {continue}
+            _=output.fileHandleForReading.readDataToEndOfFile();process.waitUntilExit()
+            if process.terminationStatus==0 {return process.executableURL}
+        }
+        return nil
+    }
     private func run(_ payload:[String:Any]) throws -> DesktopFileOperations.Response {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath:"/usr/bin/python3"),"Python fixture runtime is unavailable")
+        let environment=pythonEnvironment()
+        guard let executable=pythonExecutable(environment:environment) else {throw XCTSkip("Python fixture runtime is unavailable")}
         let process=Process(),output=Pipe(),error=Pipe()
-        process.executableURL=URL(fileURLWithPath:"/usr/bin/python3")
+        process.executableURL=executable;process.environment=environment
         process.arguments=["-c",DesktopFileOperations.remoteScript,String(decoding:try JSONSerialization.data(withJSONObject:payload),as:UTF8.self)]
         process.standardOutput=output;process.standardError=error
         try process.run();let data=output.fileHandleForReading.readDataToEndOfFile();process.waitUntilExit()

@@ -29,6 +29,9 @@ for source in "${SOURCE_DIR}"/*.log; do
             /XCTAssert/ ||
             /Assertion failed/ ||
             /fatal error:/ ||
+            /"failedTests"[[:space:]]*:/ ||
+            /"testName"[[:space:]]*:/ ||
+            /"failureText"[[:space:]]*:/ ||
             /Process completed with exit code/ {
                 print NR ":" $0
             }
