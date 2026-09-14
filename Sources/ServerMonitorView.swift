@@ -155,6 +155,15 @@ struct ServerMonitorLayoutView: View {
                     )
             }
             HStack(spacing: AppleDesign.Spacing.xs) {
+                Button {
+                    Task { await appState.refresh(server) }
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                }
+                .disabled(runtime.renderState.isRefreshing)
+                .help("刷新此服务器的监控数据")
+                .accessibilityLabel("刷新此服务器的监控数据")
+                .accessibilityIdentifier("monitor.refresh")
                 if copiedMarkdown {
                     Label("已复制", systemImage: "checkmark")
                         .font(.caption)

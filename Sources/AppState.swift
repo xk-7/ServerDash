@@ -15,8 +15,14 @@ enum MonitoringRequestPriority: Int, Comparable, Sendable {
     }
 }
 
+enum MonitoringRequestOrigin: Sendable, Equatable {
+    case automatic
+    case manual
+}
+
 struct MonitoringScheduleTarget: Sendable, Equatable {
     let serverID: UUID
+    /// Controls periodic scheduling; an explicit manual refresh remains available.
     let enabled: Bool
 }
 
@@ -37,7 +43,7 @@ private enum MonitoringSuspensionReason: Hashable {
 actor MonitoringCoordinator {
     static let maximumDispatchesPerSecond: Double = 24
 
-    typealias Operation = @Sendable (UUID) async -> Bool
+    typealias Operation = @Sendable (UUID, MonitoringRequestOrigin) async -> Bool
     typealias Jitter = @Sendable (ClosedRange<TimeInterval>) -> TimeInterval
 
     private struct TargetState {
@@ -251,7 +257,7 @@ actor MonitoringCoordinator {
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
                 guard !Task.isCancelled,
-                      targets[serverID]?.enabled == true,
+                      targets[serverID] != nil,
                       !stopped else {
                     continuation.resume(returning: false)
                     return
@@ -290,7 +296,9 @@ actor MonitoringCoordinator {
         notBefore: Date,
         automatic: Bool
     ) {
-        guard targets[serverID]?.enabled == true, !stopped else { return }
+        guard let target = targets[serverID],
+              (!automatic || target.enabled),
+              !stopped else { return }
         if running[serverID] != nil {
             return
         }
@@ -343,12 +351,13 @@ actor MonitoringCoordinator {
             queue[entry.serverID] = nil
             let serverID = entry.serverID
             let operation = self.operation
+            let origin: MonitoringRequestOrigin = entry.automatic ? .automatic : .manual
             PerformanceTrace.event(.monitorSchedulerDispatch)
             nextDispatchDate = clock.now().addingTimeInterval(
                 1 / Self.maximumDispatchesPerSecond
             )
             running[serverID] = Task {
-                let succeeded = await operation(serverID)
+                let succeeded = await operation(serverID, origin)
                 self.finished(
                     serverID: serverID,
                     succeeded: succeeded,
@@ -806,9 +815,9 @@ final class AppState: ObservableObject {
     private let connectivityMonitor = NWPathMonitor()
     private lazy var monitoringCoordinator = MonitoringCoordinator(
         clock: monitoringClock
-    ) { [weak self] serverID in
+    ) { [weak self] serverID, origin in
         guard let self else { return false }
-        return await self.collectScheduled(serverID: serverID)
+        return await self.collectMonitoringRequest(serverID: serverID, origin: origin)
     }
 
     private let fileServicesEnabled: Bool
@@ -1065,8 +1074,7 @@ final class AppState: ObservableObject {
         }
         await configureMonitoringSchedule()
         let targets = servers.filter { server in
-            server.enableDashboardMonitor &&
-            (!failedOnly || runtime(for: server).renderState.status == .failed)
+            !failedOnly || runtime(for: server).renderState.status == .failed
         }
         guard !targets.isEmpty else { return }
         let serverIDs = targets.map(\.id)
@@ -1590,15 +1598,18 @@ final class AppState: ObservableObject {
         )
     }
 
-    private func collectScheduled(serverID: UUID) async -> Bool {
-        guard let server = serverRecords[serverID], server.enableDashboardMonitor else {
+    private func collectMonitoringRequest(
+        serverID: UUID,
+        origin: MonitoringRequestOrigin
+    ) async -> Bool {
+        guard let server = serverRecords[serverID],
+              origin == .manual || server.enableDashboardMonitor else {
             return false
         }
         return await collect(server)
     }
 
     private func collect(_ server: ServerRecord) async -> Bool {
-        guard server.enableDashboardMonitor else { return false }
         var startingState = runtime(for: server).renderState
         startingState.isRefreshing = true
         if startingState.status == .unknown {
