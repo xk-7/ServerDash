@@ -75,11 +75,19 @@ SwiftData V4 只新增独立 RDP 实体，SSH 字段不变；升级前备份数�
 ## 构建
 
 ```sh
-bash Scripts/build-rdp-dependencies.sh
-xcodegen generate
-xcodebuild -project ServerDash.xcodeproj -scheme ServerDash \
-  -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO \
-  ONLY_ACTIVE_ARCH=NO ARCHS='arm64 x86_64' build
+Scripts/macos-dev.sh bootstrap
+Scripts/macos-dev.sh build
 ```
+
+`bootstrap` 校验或从锁定源码构建共享的通用 RDP 缓存；Scheme 的预操作也会在
+Xcode 点击 Build 时自动完成同一检查。命令行构建必须使用共享 Scheme 或上述包装
+脚本，不能用 `xcodebuild -target` 绕过依赖自举。
+
+共享缓存默认位于 `~/Library/Caches/com.serverdash.app/Native/RDP`。每个
+`artifacts/<内容键>/` 目录只包含 XCFramework、必需头文件和构建清单；源码下载、
+锁、最近使用顺序及活动工作区租约分别保存在 `downloads/`、`locks/`、`usage/`
+和 `leases/`，不会写入已校验的产物目录。工作区 `.build/rdp` 仅保存指向当前缓存
+产物的忽略符号链接。缓存根带有 ServerDash 所有权标记，误把覆盖路径设为用户目录
+或其他非空目录时会在清理任何内容前拒绝运行。
 
 依赖锁定、安全升级依据及许可见 [Vendor/RDP](../Vendor/RDP/README.md)。

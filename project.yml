@@ -169,6 +169,12 @@ schemes:
       targets:
         ServerDash: all
         ServerDashTests: [test]
+      preActions:
+        - name: Prepare verified RDP dependencies
+          settingsTarget: ServerDash
+          script: |
+            set -euo pipefail
+            /bin/bash "${SRCROOT}/Scripts/ensure-rdp-dependencies.sh"
     test:
       targets:
         - ServerDashTests

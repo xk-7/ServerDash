@@ -200,7 +200,7 @@ The [SwiftServer product page](https://swiftserver.app/) and [official documenta
 - macOS 14 or later
 - iOS or iPadOS 18 or later for `ServerDashMobile`
 - Xcode 26
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.45.4
 
 The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, `Vendor/swift-nio-ssh`, and `Vendor/ZIPFoundation` packages. SwiftPM still resolves their pinned transitive dependencies from `Package.resolved`.
 
@@ -220,30 +220,42 @@ Latest stable release: [ServerDash 1.0.3](https://github.com/xk-7/ServerDash/rel
 
 ## Build and Run
 
-Before the first macOS build, build the pinned native dependency locally:
+Keep the primary checkout on `main`. Put feature and platform worktrees beside it
+under `<checkout-parent>/ServerDash-worktrees/`; source worktrees must not live
+under `.build`, which is reserved for disposable output.
+Check a worktree before opening Xcode:
 
 ```bash
-bash Scripts/build-rdp-dependencies.sh
+./Scripts/macos-dev.sh doctor
+./Scripts/macos-dev.sh open
 ```
 
-This requires network access for hash-verified official archives and builds both Mac architectures.
-The iOS targets do not link these libraries. [Dependency provenance and licenses](Vendor/RDP/README.md).
+The shared `ServerDash` scheme automatically prepares the pinned RDP dependency
+before Xcode resolves its build graph. A cold build downloads hash-verified
+official archives and compiles both Mac architectures. Later worktrees reuse the
+verified payload in `~/Library/Caches/com.serverdash.app/Native/RDP`; the current
+and most recently used previous payload are retained. The iOS targets do not link
+these libraries. See [dependency provenance and licenses](Vendor/RDP/README.md).
+
+To prepare or verify the dependency without opening Xcode:
 
 ```bash
-xcodegen generate
-open ServerDash.xcodeproj
+./Scripts/macos-dev.sh bootstrap
+./Scripts/ensure-rdp-dependencies.sh --verify-only
 ```
 
-Select the `ServerDash` scheme in Xcode, or build from the command line:
+Build and test the Mac app through the wrapper:
 
 ```bash
-xcodebuild \
-  -project ServerDash.xcodeproj \
-  -scheme ServerDash \
-  -destination 'platform=macOS' \
-  -skipPackagePluginValidation \
-  build
+./Scripts/macos-dev.sh build Debug
+./Scripts/macos-dev.sh test
+./Scripts/macos-dev.sh test -only-testing:ServerDashTests
 ```
+
+The wrapper and Xcode both use the shared scheme. A direct
+`xcodebuild -target ServerDash` invocation is unsupported because it bypasses the
+scheme pre-action that materializes the local XCFramework. Use the
+`-scheme ServerDash` option for custom command lines.
 
 Build the universal iPhone/iPad app for Simulator:
 
@@ -252,35 +264,16 @@ xcodebuild \
   -project ServerDash.xcodeproj \
   -scheme ServerDashMobile \
   -destination 'generic/platform=iOS Simulator' \
+  -onlyUsePackageVersionsFromResolvedFile \
   build
 ```
 
 To install on an iPhone or iPad, open the project, select `ServerDashMobile`, choose your development team, connect a device running iOS/iPadOS 18 or later, and Run. A free Apple ID can be used for local development signing subject to Apple's normal provisioning limits. No TestFlight or App Store package is provided.
 
-Run the complete test suite:
-
-```bash
-xcodebuild \
-  -project ServerDash.xcodeproj \
-  -scheme ServerDash \
-  -destination 'platform=macOS' \
-  -skipPackagePluginValidation \
-  test
-```
-
-Run only the application test bundle while iterating:
-
-```bash
-xcodebuild \
-  -project ServerDash.xcodeproj \
-  -scheme ServerDash \
-  -destination 'platform=macOS' \
-  -skipPackagePluginValidation \
-  -only-testing:ServerDashTests \
-  test
-```
-
-The checked-in Xcode project is generated from `project.yml`. Run `xcodegen generate` after changing the project definition; ordinary source-only changes do not require regeneration.
+The checked-in Xcode project is generated from `project.yml`. After changing the
+project definition, run `xcodegen generate`, review both files, and use
+`./Scripts/macos-dev.sh generate-check` to verify there is no drift. Ordinary
+source-only changes do not require regeneration.
 
 Create an ad-hoc signed test DMG (no Apple Developer account required):
 
@@ -289,6 +282,16 @@ Create an ad-hoc signed test DMG (no Apple Developer account required):
 ```
 
 The DMG is written to `dist/`. On another Mac, open the app with Control-click → **Open**, or allow it under **System Settings → Privacy & Security** when Gatekeeper reports that the developer cannot be verified.
+
+DMG scripts require a clean Apple worktree based on the locally known
+`origin/main`. The release artifact script additionally requires `main` or a
+detached matching version tag, verifies project and release-note versions, and
+performs an isolated RDP source build. The following overrides are only for an
+intentional diagnostic build and are always reported: `SERVERDASH_ALLOW_DIRTY=1`,
+`SERVERDASH_ALLOW_STALE_BASE=1`, `SERVERDASH_ALLOW_NONRELEASE_BRANCH=1`, and
+`SERVERDASH_RELEASE_USE_SHARED_RDP_CACHE=1`. Less common detached-head, Windows
+branch, and legacy-worktree overrides are listed by the
+`./Scripts/dev-doctor.sh --help` command.
 
 Build the macOS, iPhone Simulator, and iPad Simulator GitHub Release artifacts, plus an unsigned iOS Device Release compile check:
 

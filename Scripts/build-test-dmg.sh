@@ -5,28 +5,39 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_ROOT="${ROOT_DIR}/.build/test-dmg"
 DERIVED_DATA="${BUILD_ROOT}/DerivedData"
+PACKAGE_CACHE="${BUILD_ROOT}/SourcePackages"
 STAGING_DIR="${BUILD_ROOT}/staging"
 DIST_DIR="${ROOT_DIR}/dist"
 APP_NAME="ServerDash"
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/${APP_NAME}.app"
+DOCTOR_SCRIPT="${ROOT_DIR}/Scripts/dev-doctor.sh"
+RDP_ENSURE_SCRIPT="${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh"
+RELEASE_VERIFIER="${ROOT_DIR}/Scripts/verify-ci-release.sh"
+EXPECTED_VERSION="$(awk '$1 == "MARKETING_VERSION:" { value = $2; gsub(/\042/, "", value); print value; exit }' "${ROOT_DIR}/project.yml")"
+EXPECTED_BUILD="$(awk '$1 == "CURRENT_PROJECT_VERSION:" { value = $2; gsub(/\042/, "", value); print value; exit }' "${ROOT_DIR}/project.yml")"
 
-for tool in xcodegen xcodebuild codesign hdiutil; do
+for tool in xcodegen xcodebuild codesign hdiutil shasum lipo otool; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "Missing required tool: ${tool}" >&2
         exit 1
     fi
 done
 
-echo "Generating Xcode project..."
 cd "${ROOT_DIR}"
-if [[ ! -d "${ROOT_DIR}/.build/rdp/ServerDashRDP.xcframework" ]]; then
-    bash "${ROOT_DIR}/Scripts/build-rdp-dependencies.sh"
-fi
-xcodegen generate
+bash "${DOCTOR_SCRIPT}" --require-clean
+bash "${RDP_ENSURE_SCRIPT}" ensure
+bash "${RDP_ENSURE_SCRIPT}" --verify-only --quiet
 
 echo "Building unsigned universal Release app..."
 rm -rf "${BUILD_ROOT}"
 mkdir -p "${DERIVED_DATA}" "${STAGING_DIR}" "${DIST_DIR}"
+
+echo "Resolving the versions pinned by Package.resolved..."
+xcodebuild \
+    -resolvePackageDependencies \
+    -project "${ROOT_DIR}/ServerDash.xcodeproj" \
+    -clonedSourcePackagesDirPath "${PACKAGE_CACHE}" \
+    -onlyUsePackageVersionsFromResolvedFile
 
 xcodebuild \
     -project "${ROOT_DIR}/ServerDash.xcodeproj" \
@@ -34,7 +45,10 @@ xcodebuild \
     -configuration Release \
     -destination "generic/platform=macOS" \
     -derivedDataPath "${DERIVED_DATA}" \
+    -clonedSourcePackagesDirPath "${PACKAGE_CACHE}" \
     -skipPackagePluginValidation \
+    -onlyUsePackageVersionsFromResolvedFile \
+    -disableAutomaticPackageResolution \
     CODE_SIGNING_ALLOWED=NO \
     ONLY_ACTIVE_ARCH=NO \
     ARCHS="arm64 x86_64" \
@@ -48,8 +62,14 @@ fi
 echo "Applying ad-hoc signature..."
 codesign --force --deep --sign - "${APP_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+bash "${RELEASE_VERIFIER}" "${APP_PATH}"
 
 VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${APP_PATH}/Contents/Info.plist")"
+BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${APP_PATH}/Contents/Info.plist")"
+if [[ "${VERSION}" != "${EXPECTED_VERSION}" || "${BUILD_NUMBER}" != "${EXPECTED_BUILD}" ]]; then
+    echo "Built app metadata mismatch: expected ${EXPECTED_VERSION} (build ${EXPECTED_BUILD}), found ${VERSION} (build ${BUILD_NUMBER})" >&2
+    exit 1
+fi
 DMG_FILENAME="${APP_NAME}-${VERSION}-test.dmg"
 DMG_PATH="${DIST_DIR}/${DMG_FILENAME}"
 CHECKSUM_PATH="${DMG_PATH}.sha256"
