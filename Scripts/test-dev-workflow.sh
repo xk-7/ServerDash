@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+# Exercise each fixture with only the CI state specified by that test. GitHub
+# Actions exports both variables globally, which would otherwise make the
+# local-worktree guard cases look like detached CI checkouts.
+unset CI GITHUB_ACTIONS
+
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/serverdash-dev-workflow-tests.XXXXXX")"
 PRIMARY_REPO="${FIXTURE_ROOT}/ServerDash"
