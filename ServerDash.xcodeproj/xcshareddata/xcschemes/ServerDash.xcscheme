@@ -6,6 +6,24 @@
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
       runPostActionsOnFailure = "NO">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Prepare verified RDP dependencies"
+               scriptText = "set -euo pipefail&#10;/bin/bash &quot;${SRCROOT}/Scripts/ensure-rdp-dependencies.sh&quot;&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "6AC6F66596C25AD6DE2A0AE3"
+                     BuildableName = "ServerDash.app"
+                     BlueprintName = "ServerDash"
+                     ReferencedContainer = "container:ServerDash.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"

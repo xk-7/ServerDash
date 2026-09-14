@@ -185,7 +185,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 - macOS 14 或更高版本
 - `ServerDashMobile` 需要 iOS 或 iPadOS 18 及以上
 - Xcode 26
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.45.4
 
 项目使用仓库内的 `Vendor/SwiftTerm`、`Vendor/Citadel`、`Vendor/swift-nio-ssh` 与 `Vendor/ZIPFoundation` 本地 package；其传递依赖由 `Package.resolved` 固定。
 
@@ -205,21 +205,39 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 ## 运行
 
-```bash
-xcodegen generate
-open ServerDash.xcodeproj
-```
-
-在 Xcode 中选择 `ServerDash` scheme 后运行，或使用命令行：
+主工作区固定检出 `main`。功能与平台分支放在同级的
+`<checkout-parent>/ServerDash-worktrees/`；`.build` 只存放可删除的构建产物，
+不能再放注册的源码工作区。打开 Xcode 前可执行：
 
 ```bash
-xcodebuild \
-  -project ServerDash.xcodeproj \
-  -scheme ServerDash \
-  -destination 'platform=macOS' \
-  -skipPackagePluginValidation \
-  build
+./Scripts/macos-dev.sh doctor
+./Scripts/macos-dev.sh open
 ```
+
+共享的 `ServerDash` Scheme 会在 Xcode 解析构建依赖图前自动准备固定版本的
+RDP 依赖。首次构建会下载经过 SHA-256 校验的官方源码并编译 Mac 双架构；
+后续工作区复用 `~/Library/Caches/com.serverdash.app/Native/RDP` 中通过校验的
+产物，并保留当前与最近使用的上一套缓存。iOS Target 不链接这些库；来源与
+许可证见 [RDP 依赖说明](Vendor/RDP/README.md)。
+
+也可以单独准备或验证依赖：
+
+```bash
+./Scripts/macos-dev.sh bootstrap
+./Scripts/ensure-rdp-dependencies.sh --verify-only
+```
+
+Mac 日常构建和测试统一通过包装脚本：
+
+```bash
+./Scripts/macos-dev.sh build Debug
+./Scripts/macos-dev.sh test
+./Scripts/macos-dev.sh test -only-testing:ServerDashTests
+```
+
+包装脚本和 Xcode 都使用共享 Scheme。不要直接运行
+`xcodebuild -target ServerDash`，因为 Target 入口会绕过负责生成本地
+XCFramework 的 Scheme pre-action；自定义命令行也必须使用 `-scheme ServerDash`。
 
 构建通用 iPhone/iPad Simulator App：
 
@@ -228,35 +246,16 @@ xcodebuild \
   -project ServerDash.xcodeproj \
   -scheme ServerDashMobile \
   -destination 'generic/platform=iOS Simulator' \
+  -onlyUsePackageVersionsFromResolvedFile \
   build
 ```
 
 安装到 iPhone 或 iPad：在 Xcode 中选择 `ServerDashMobile`，设置开发团队，连接运行 iOS/iPadOS 18 及以上的设备后运行。可使用免费 Apple ID 进行本地开发签名，但受 Apple 常规 Provisioning 限制；本项目当前不提供 TestFlight 或 App Store 包。
 
-运行全部测试：
-
-```bash
-xcodebuild \
-  -project ServerDash.xcodeproj \
-  -scheme ServerDash \
-  -destination 'platform=macOS' \
-  -skipPackagePluginValidation \
-  test
-```
-
-开发过程中只运行应用测试 Bundle：
-
-```bash
-xcodebuild \
-  -project ServerDash.xcodeproj \
-  -scheme ServerDash \
-  -destination 'platform=macOS' \
-  -skipPackagePluginValidation \
-  -only-testing:ServerDashTests \
-  test
-```
-
-仓库中的 Xcode 工程由 `project.yml` 生成。修改工程定义后运行 `xcodegen generate`；普通源码修改不需要重新生成。
+仓库中的 Xcode 工程由 `project.yml` 生成。修改工程定义后运行
+`xcodegen generate`，同时审查定义与生成结果，再运行
+`./Scripts/macos-dev.sh generate-check` 确认两者没有漂移；普通源码修改不需要
+重新生成。
 
 生成无需 Apple Developer 账号的 Ad-hoc 测试 DMG：
 
@@ -265,6 +264,14 @@ xcodebuild \
 ```
 
 DMG 会输出到 `dist/`。在其他 Mac 上首次打开时，请按住 Control 点击 App 并选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。
+
+DMG 脚本默认要求工作区干净、用于 Apple 构建且包含本地已知的
+`origin/main`。正式发布脚本还要求当前位于 `main` 或与版本一致的分离标签，
+核对工程及发布通知版本，并使用隔离缓存从源码构建 RDP。以下变量只允许用于
+明确的诊断构建且会输出警告：`SERVERDASH_ALLOW_DIRTY=1`、
+`SERVERDASH_ALLOW_STALE_BASE=1`、`SERVERDASH_ALLOW_NONRELEASE_BRANCH=1` 和
+`SERVERDASH_RELEASE_USE_SHARED_RDP_CACHE=1`。分离 HEAD、Windows 分支和旧式
+工作区的低频覆盖项可通过 `./Scripts/dev-doctor.sh --help` 查看。
 
 构建正式 GitHub Release 的 macOS、iPhone Simulator、iPad Simulator 产物，并验证无签名 iOS Device Release 编译：
 

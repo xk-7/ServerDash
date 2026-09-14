@@ -42,16 +42,37 @@ certificate may be accepted manually, after date checks and fingerprint review.
 From the repository root:
 
 ```sh
-bash Scripts/build-rdp-dependencies.sh
-xcodegen generate
+./Scripts/macos-dev.sh bootstrap
+./Scripts/ensure-rdp-dependencies.sh --verify-only
 ```
 
-The script downloads archives to `.build/rdp/downloads`, extracts sources under
-`.build/rdp/sources`, compiles arm64 and x86_64 for macOS 14, merges static
-archives and creates `.build/rdp/ServerDashRDP.xcframework`. Generated files are
-ignored by Git. For a clean verification, run in a fresh checkout; incremental
-builds reuse the extracted source trees and OpenSSL archives. This is a pinned
-source/build recipe, not a claim of byte-identical output across Xcode versions.
+`ensure-rdp-dependencies.sh` computes a content key from the dependency manifest,
+build recipe, deployment target, architectures, Xcode, Swift and macOS SDK. It
+stores only a validated XCFramework, required headers and a build manifest under
+`~/Library/Caches/com.serverdash.app/Native/RDP` (or
+`SERVERDASH_RDP_CACHE_DIR`). Each `artifacts/<content-key>/` directory contains
+exactly those three immutable payload entries. Verified source archives live in
+manifest-addressed sets under `downloads/`, per-key and per-download-set locks
+in `locks/`, monotonic last-use sidecars in `usage/`, and active worktree leases
+in `leases/`; metadata never changes the validated artifact payload. The cache
+root has an ownership marker and refuses unsafe or unrelated non-empty override
+directories before any cleanup. Each worktree receives ignored links at
+`.build/rdp`; removing that directory or moving the worktree is repaired on the
+next ensure.
+
+Concurrent worktrees use a per-key `lockf` lock. Downloads and builds publish
+atomically only after hash, header, metadata and exact `arm64`/`x86_64` checks.
+Failed staging data is removed without poisoning the cache. After a successful
+ensure, the current payload and the most recently used previous payload remain;
+additional payloads remain only while a live worktree link leases them.
+Use `--force-source-build` for an isolated source rebuild. The lower-level
+`build-rdp-dependencies.sh` is an implementation tool for the cache producer,
+not the normal developer entry point.
+
+The shared `ServerDash` Xcode scheme runs the ensure step before dependency graph
+resolution. Direct `xcodebuild -target ServerDash` builds bypass that scheme
+action and are unsupported. This remains a pinned source/build recipe, not a
+claim of byte-identical output across Xcode versions.
 
 Important build choices: static libraries, LTO disabled, client common/channels
 enabled, standalone clients/servers disabled, Mac Audio enabled. Optional

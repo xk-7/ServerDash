@@ -1,0 +1,451 @@
+name: macOS
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  strict-tests:
+    name: Strict build and tests
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      SERVERDASH_RDP_CACHE_DIR: ${{ github.workspace }}/.build/ci-rdp-cache
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Verify pinned Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          exec > >(tee .build/ci-logs/toolchain.log) 2>&1
+          expected_image_version="20260907.0337.1"
+          expected_runner_arch="ARM64"
+          expected_xcode_version="26.2"
+          expected_xcode_build="17C52"
+          expected_swift_version="swift-driver version: 1.127.14.1 Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)"
+          expected_sdk_version="26.2"
+          expected_sdk_build="25C57"
+
+          image_version="${ImageVersion:-}"
+          runner_arch="${RUNNER_ARCH:-}"
+          xcode_output="$(xcodebuild -version)"
+          xcode_version="$(printf '%s\n' "${xcode_output}" | sed -n '1s/^Xcode //p')"
+          xcode_build="$(printf '%s\n' "${xcode_output}" | sed -n '2s/^Build version //p')"
+          swift_version="$(xcrun swiftc --version 2>&1 | sed -n '1p')"
+          sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
+          sdk_build="$(xcrun --sdk macosx --show-sdk-build-version)"
+
+          mismatch=0
+          verify_value() {
+            local label="$1"
+            local expected="$2"
+            local actual="$3"
+            if [[ "${actual}" != "${expected}" ]]; then
+              echo "${label} mismatch: expected '${expected}', found '${actual:-<unset>}'." >&2
+              mismatch=1
+            fi
+          }
+
+          verify_value "Runner image" "${expected_image_version}" "${image_version}"
+          verify_value "Runner architecture" "${expected_runner_arch}" "${runner_arch}"
+          verify_value "Xcode version" "${expected_xcode_version}" "${xcode_version}"
+          verify_value "Xcode build" "${expected_xcode_build}" "${xcode_build}"
+          verify_value "Swift compiler" "${expected_swift_version}" "${swift_version}"
+          verify_value "macOS SDK version" "${expected_sdk_version}" "${sdk_version}"
+          verify_value "macOS SDK build" "${expected_sdk_build}" "${sdk_build}"
+
+          if [[ ${mismatch} -ne 0 ]]; then
+            echo "Pinned Apple toolchain changed; review the macos-15 arm64 runner image before updating this workflow." >&2
+            exit 1
+          fi
+
+          printf 'Runner image %s (%s)\n%s\n%s\nmacOS SDK %s (%s)\n' \
+            "${image_version}" "${runner_arch}" "${xcode_output}" "${swift_version}" "${sdk_version}" "${sdk_build}"
+
+      - name: Install pinned XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          exec > >(tee .build/ci-logs/xcodegen-install.log) 2>&1
+          archive="${RUNNER_TEMP}/xcodegen-2.45.4.zip"
+          destination="${RUNNER_TEMP}/xcodegen-2.45.4"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.45.4/xcodegen.zip \
+            --output "${archive}"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  ${archive}" | shasum -a 256 --check
+          mkdir -p "${destination}"
+          ditto -x -k "${archive}" "${destination}"
+          xcodegen_binary="${destination}/xcodegen/bin/xcodegen"
+          [[ "$("${xcodegen_binary}" --version)" == "Version: 2.45.4" ]]
+          echo "$(dirname "${xcodegen_binary}")" >> "${GITHUB_PATH}"
+
+      - name: Test developer workflow guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          exec > >(tee .build/ci-logs/workflow-guards.log) 2>&1
+          bash Scripts/test-dev-workflow.sh
+          bash Scripts/test-rdp-cache.sh
+          bash Scripts/test-ci-release-verifier.sh
+
+      - name: Calculate the exact RDP cache key
+        id: rdp-key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          exec > >(tee .build/ci-logs/rdp-cache-key.log) 2>&1
+          key="$(bash Scripts/ensure-rdp-dependencies.sh --print-key)"
+          if [[ ! "${key}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "The RDP content key is empty or contains unsafe characters." >&2
+            exit 1
+          fi
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore exact RDP artifact for pull requests without saving
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.SERVERDASH_RDP_CACHE_DIR }}/artifacts/${{ steps.rdp-key.outputs.key }}
+          key: serverdash-rdp-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rdp-key.outputs.key }}
+
+      - name: Restore and save the exact RDP artifact for trusted runs
+        if: github.event_name != 'pull_request'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.SERVERDASH_RDP_CACHE_DIR }}/artifacts/${{ steps.rdp-key.outputs.key }}
+          key: serverdash-rdp-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rdp-key.outputs.key }}
+
+      - name: Materialize and verify RDP dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          log=".build/ci-logs/rdp-bootstrap.log"
+          set +e
+          bash Scripts/ensure-rdp-dependencies.sh >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ ${status} -ne 0 ]]; then
+            echo "Final RDP bootstrap log lines:" >&2
+            tail -120 "${log}" >&2
+            exit ${status}
+          fi
+          bash Scripts/ensure-rdp-dependencies.sh --verify-only
+          warning_count="$(grep -c 'warning:' "${log}" || true)"
+          echo "FreeRDP/WinPR bootstrap warning instances (informational): ${warning_count}"
+
+      - name: Verify generated Xcode project is current
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVERDASH_ALLOW_STALE_BASE=1 bash Scripts/macos-dev.sh generate-check
+
+      - name: Strict concurrency build with zero first-party warnings
+        shell: bash
+        env:
+          SERVERDASH_DERIVED_DATA: ${{ github.workspace }}/.build/ci-strict
+          SERVERDASH_BUILD_LOG: ${{ github.workspace }}/.build/ci-logs/strict-build.log
+        run: bash Scripts/check-app-concurrency.sh
+
+      - name: Run macOS tests without rebuilding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs .build/ci-results
+          log=".build/ci-logs/macos-tests.log"
+          summary=".build/ci-logs/macos-test-summary.log"
+          result_bundle=".build/ci-results/ServerDash-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.xcresult"
+          fixture_python="$(command -v python3 || true)"
+          if [[ -z "${fixture_python}" || "${fixture_python}" == "/usr/bin/python3" ]]; then
+            echo "A standalone Python 3 runtime is required for desktop file-operation fixtures; /usr/bin/python3 is an Xcode-select shim." >&2
+            exit 1
+          fi
+          "${fixture_python}" --version
+          export SERVERDASH_TEST_PYTHON3="${fixture_python}"
+          set +e
+          xcodebuild \
+            -project ServerDash.xcodeproj \
+            -scheme ServerDash \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath .build/ci-strict \
+            -resultBundlePath "${result_bundle}" \
+            -skipPackagePluginValidation \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            SWIFT_STRICT_CONCURRENCY=complete \
+            test-without-building >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ -d "${result_bundle}" ]]; then
+            xcrun xcresulttool get test-results summary --path "${result_bundle}" >"${summary}" 2>&1 || true
+          fi
+          if [[ ${status} -ne 0 ]]; then
+            if [[ -s "${summary}" ]]; then
+              echo "XCTest result summary:" >&2
+              grep -E '"(failedTests|testName|failureText)"[[:space:]]*:' "${summary}" | tail -200 >&2 || true
+            fi
+            echo "Matched failure diagnostics:" >&2
+            grep -n -E 'Test Case .* failed|:[0-9]+(:[0-9]+)?: error:|Issue recorded|XCTAssert|Assertion failed|fatal error:' "${log}" \
+              | tail -200 >&2 || true
+            echo "Final test log lines:" >&2
+            tail -120 "${log}" >&2
+            exit ${status}
+          fi
+
+      - name: Run the RDP bridge sanitizer probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          log=".build/ci-logs/rdp-sanitizers.log"
+          set +e
+          bash Scripts/test-rdp-native.sh >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ ${status} -ne 0 ]]; then
+            cat "${log}" >&2
+            exit ${status}
+          fi
+
+      - name: Prepare cropped failure logs
+        if: failure()
+        shell: bash
+        run: |
+          bash Scripts/prepare-ci-failure-logs.sh .build/ci-logs .build/ci-failure-logs
+          if [[ -f .build/ci-strict/first-party-warnings.txt ]]; then
+            cp .build/ci-strict/first-party-warnings.txt .build/ci-failure-logs/
+          fi
+
+      - name: Upload cropped failure logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: macos-strict-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .build/ci-failure-logs/*
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
+  main-release-smoke:
+    name: Main release smoke
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: strict-tests
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      SERVERDASH_RDP_CACHE_DIR: ${{ github.workspace }}/.build/ci-rdp-cache
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Verify pinned Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_image_version="20260907.0337.1"
+          expected_runner_arch="ARM64"
+          expected_xcode_version="26.2"
+          expected_xcode_build="17C52"
+          expected_swift_version="swift-driver version: 1.127.14.1 Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)"
+          expected_sdk_version="26.2"
+          expected_sdk_build="25C57"
+
+          image_version="${ImageVersion:-}"
+          runner_arch="${RUNNER_ARCH:-}"
+          xcode_output="$(xcodebuild -version)"
+          xcode_version="$(printf '%s\n' "${xcode_output}" | sed -n '1s/^Xcode //p')"
+          xcode_build="$(printf '%s\n' "${xcode_output}" | sed -n '2s/^Build version //p')"
+          swift_version="$(xcrun swiftc --version 2>&1 | sed -n '1p')"
+          sdk_version="$(xcrun --sdk macosx --show-sdk-version)"
+          sdk_build="$(xcrun --sdk macosx --show-sdk-build-version)"
+
+          mismatch=0
+          verify_value() {
+            local label="$1"
+            local expected="$2"
+            local actual="$3"
+            if [[ "${actual}" != "${expected}" ]]; then
+              echo "${label} mismatch: expected '${expected}', found '${actual:-<unset>}'." >&2
+              mismatch=1
+            fi
+          }
+
+          verify_value "Runner image" "${expected_image_version}" "${image_version}"
+          verify_value "Runner architecture" "${expected_runner_arch}" "${runner_arch}"
+          verify_value "Xcode version" "${expected_xcode_version}" "${xcode_version}"
+          verify_value "Xcode build" "${expected_xcode_build}" "${xcode_build}"
+          verify_value "Swift compiler" "${expected_swift_version}" "${swift_version}"
+          verify_value "macOS SDK version" "${expected_sdk_version}" "${sdk_version}"
+          verify_value "macOS SDK build" "${expected_sdk_build}" "${sdk_build}"
+
+          if [[ ${mismatch} -ne 0 ]]; then
+            echo "Pinned Apple toolchain changed; review the macos-15 arm64 runner image before updating this workflow." >&2
+            exit 1
+          fi
+
+          printf 'Runner image %s (%s)\n%s\n%s\nmacOS SDK %s (%s)\n' \
+            "${image_version}" "${runner_arch}" "${xcode_output}" "${swift_version}" "${sdk_version}" "${sdk_build}"
+
+      - name: Calculate the exact RDP cache key
+        id: rdp-key
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(bash Scripts/ensure-rdp-dependencies.sh --print-key)"
+          if [[ ! "${key}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "The RDP content key is empty or contains unsafe characters." >&2
+            exit 1
+          fi
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore exact verified RDP artifact
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.SERVERDASH_RDP_CACHE_DIR }}/artifacts/${{ steps.rdp-key.outputs.key }}
+          key: serverdash-rdp-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.rdp-key.outputs.key }}
+
+      - name: Materialize and verify RDP dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          log=".build/ci-logs/rdp-bootstrap.log"
+          set +e
+          bash Scripts/ensure-rdp-dependencies.sh >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ ${status} -ne 0 ]]; then
+            tail -120 "${log}" >&2
+            exit ${status}
+          fi
+          bash Scripts/ensure-rdp-dependencies.sh --verify-only
+          warning_count="$(grep -c 'warning:' "${log}" || true)"
+          echo "FreeRDP/WinPR bootstrap warning instances (informational): ${warning_count}"
+
+      - name: Build universal unsigned macOS Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          log=".build/ci-logs/macos-release.log"
+          set +e
+          xcodebuild \
+            -project ServerDash.xcodeproj \
+            -scheme ServerDash \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath .build/ci-release-macos \
+            -skipPackagePluginValidation \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -disableAutomaticPackageResolution \
+            'ARCHS=arm64 x86_64' \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ ${status} -ne 0 ]]; then
+            tail -120 "${log}" >&2
+            exit ${status}
+          fi
+
+      - name: Verify universal architecture and linked paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Scripts/verify-ci-release.sh \
+            .build/ci-release-macos/Build/Products/Release/ServerDash.app
+
+      - name: Build iOS Simulator compatibility target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          log=".build/ci-logs/ios-simulator-release.log"
+          set +e
+          xcodebuild \
+            -project ServerDash.xcodeproj \
+            -scheme ServerDashMobile \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/ci-release-ios-simulator \
+            -skipPackagePluginValidation \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ ${status} -ne 0 ]]; then
+            tail -120 "${log}" >&2
+            exit ${status}
+          fi
+
+      - name: Build unsigned iOS Device compatibility target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/ci-logs
+          log=".build/ci-logs/ios-device-release.log"
+          set +e
+          xcodebuild \
+            -project ServerDash.xcodeproj \
+            -scheme ServerDashMobile \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath .build/ci-release-ios-device \
+            -skipPackagePluginValidation \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build >"${log}" 2>&1
+          status=$?
+          set -e
+          if [[ ${status} -ne 0 ]]; then
+            tail -120 "${log}" >&2
+            exit ${status}
+          fi
+
+      - name: Prepare cropped failure logs
+        if: failure()
+        shell: bash
+        run: bash Scripts/prepare-ci-failure-logs.sh .build/ci-logs .build/ci-failure-logs
+
+      - name: Upload cropped failure logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: main-release-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .build/ci-failure-logs/*
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7

@@ -3,13 +3,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DERIVED_DATA="${ROOT_DIR}/.build/concurrency-gate"
-LOG_FILE="${DERIVED_DATA}/build.log"
+DERIVED_DATA="${SERVERDASH_DERIVED_DATA:-${ROOT_DIR}/.build/concurrency-gate}"
+LOG_FILE="${SERVERDASH_BUILD_LOG:-${DERIVED_DATA}/build.log}"
+
+"${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --verify-only >/dev/null 2>&1 || \
+    "${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --quiet
 
 if [[ "${REUSE_BUILD:-0}" != "1" ]]; then
     rm -rf "${DERIVED_DATA}"
 fi
 mkdir -p "${DERIVED_DATA}"
+mkdir -p "$(dirname "${LOG_FILE}")"
 
 set +e
 xcodebuild \
@@ -19,7 +23,10 @@ xcodebuild \
     -destination "platform=macOS" \
     -derivedDataPath "${DERIVED_DATA}" \
     -skipPackagePluginValidation \
+    -onlyUsePackageVersionsFromResolvedFile \
+    -disableAutomaticPackageResolution \
     CODE_SIGNING_ALLOWED=NO \
+    COMPILER_INDEX_STORE_ENABLE=NO \
     SWIFT_STRICT_CONCURRENCY=complete \
     build-for-testing >"${LOG_FILE}" 2>&1
 BUILD_STATUS=$?
@@ -33,16 +40,19 @@ fi
 
 FIRST_PARTY_WARNINGS="${DERIVED_DATA}/first-party-warnings.txt"
 awk -v root="${ROOT_DIR}/" '
-    index($0, root "Sources/") || index($0, root "Tests/") {
+    index($0, root "Sources/") || index($0, root "Tests/") || index($0, root "Native/") {
         start = index($0, root)
         relative = substr($0, start + length(root))
         path = relative
         sub(/:[0-9]+(:[0-9]+)?: warning:.*/, "", path)
-        if (path ~ /^(Sources|Tests)\/.*\.swift$/ && $0 ~ /: warning:/) {
+        if (path ~ /^(Sources|Tests|Native)\/.*\.(swift|m|mm|c|cc|cpp|h)$/ && $0 ~ /: warning:/) {
             print $0
         }
     }
     /^@__swiftmacro_.*ServerDash.*: warning:/ {
+        print $0
+    }
+    /(^|[[:space:]"])(Sources|Tests|Native)\/[^:]+\.(swift|m|mm|c|cc|cpp|h):[0-9]+(:[0-9]+)?: warning:/ {
         print $0
     }
 ' "${LOG_FILE}" | sort -u >"${FIRST_PARTY_WARNINGS}"
@@ -60,10 +70,9 @@ awk '
         else if ($0 ~ /\/Vendor\/ZIPFoundation\//) zipfoundation++
         else if ($0 ~ /\/(SourcePackages\/.*|Vendor\/)swift-nio-ssh\//) niossh++
         else if ($0 ~ /\/SourcePackages\/.*Citadel\// || $0 ~ /\/Vendor\/Citadel\//) citadel++
-        else if ($0 ~ /\/\.build\/rdp\//) rdp++
     }
     END {
-        printf "Third-party warning instances (informational): SwiftTerm=%d, ZIPFoundation=%d, NIOSSH=%d, Citadel=%d, FreeRDP/WinPR=%d\n", swiftterm + 0, zipfoundation + 0, niossh + 0, citadel + 0, rdp + 0
+        printf "Third-party warning instances in the Xcode log (informational): SwiftTerm=%d, ZIPFoundation=%d, NIOSSH=%d, Citadel=%d; FreeRDP/WinPR are recorded from the RDP bootstrap log.\n", swiftterm + 0, zipfoundation + 0, niossh + 0, citadel + 0
     }
 ' "${LOG_FILE}"
 echo "Full log: ${LOG_FILE}"
