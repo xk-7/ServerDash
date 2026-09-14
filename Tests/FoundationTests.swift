@@ -738,7 +738,7 @@ final class MonitoringCoordinatorTests: XCTestCase {
         let coordinator = MonitoringCoordinator(
             maximumConcurrency: 2,
             jitter: { _ in 0 },
-            operation: { serverID in await probe.run(serverID) }
+            operation: { serverID, _ in await probe.run(serverID) }
         )
         let serverIDs = (0..<4).map { _ in UUID() }
         await coordinator.configure(
@@ -766,7 +766,7 @@ final class MonitoringCoordinatorTests: XCTestCase {
         let coordinator = MonitoringCoordinator(
             maximumConcurrency: 1,
             jitter: { _ in 0 },
-            operation: { serverID in await probe.run(serverID) }
+            operation: { serverID, _ in await probe.run(serverID) }
         )
         let first = UUID()
         let background = UUID()
@@ -810,12 +810,41 @@ final class MonitoringCoordinatorTests: XCTestCase {
         await coordinator.stop()
     }
 
+    func testManualRefreshRunsDisabledConfiguredTargetOnceWithoutSchedulingAutomaticRefresh() async {
+        let probe = MonitoringOperationProbe()
+        let coordinator = MonitoringCoordinator(
+            maximumConcurrency: 1,
+            jitter: { _ in 0 },
+            operation: { serverID, _ in await probe.run(serverID) }
+        )
+        let serverID = UUID()
+        await coordinator.configure(
+            targets: [MonitoringScheduleTarget(serverID: serverID, enabled: false)],
+            interval: 5
+        )
+
+        let refresh = Task {
+            await coordinator.refresh(serverIDs: [serverID], priority: .manual)
+        }
+        await waitUntil { await probe.startedCount() == 1 }
+        await probe.complete(serverID, succeeded: true)
+
+        let result = await refresh.value
+        XCTAssertEqual(result[serverID], true)
+        await waitUntil { await coordinator.activeCount == 0 }
+        let startCount = await probe.startCount(for: serverID)
+        let queuedCount = await coordinator.queuedCount
+        XCTAssertEqual(startCount, 1)
+        XCTAssertEqual(queuedCount, 0)
+        await coordinator.stop()
+    }
+
     func testLowPowerModeReducesNewMonitoringConcurrency() async {
         let probe = MonitoringOperationProbe()
         let coordinator = MonitoringCoordinator(
             maximumConcurrency: 5,
             jitter: { _ in 0 },
-            operation: { serverID in await probe.run(serverID) }
+            operation: { serverID, _ in await probe.run(serverID) }
         )
         await coordinator.setLowPowerMode(true)
         let serverIDs = (0..<5).map { _ in UUID() }
@@ -839,7 +868,7 @@ final class MonitoringCoordinatorTests: XCTestCase {
         let coordinator = MonitoringCoordinator(
             maximumConcurrency: 1,
             jitter: { _ in 0 },
-            operation: { id in await probe.run(id) }
+            operation: { id, _ in await probe.run(id) }
         )
         await coordinator.configure(
             targets: [MonitoringScheduleTarget(serverID: serverID, enabled: true)],
@@ -864,7 +893,7 @@ final class MonitoringCoordinatorTests: XCTestCase {
         let coordinator = MonitoringCoordinator(
             maximumConcurrency: 1,
             jitter: { _ in 0 },
-            operation: { id in await probe.run(id) }
+            operation: { id, _ in await probe.run(id) }
         )
         await coordinator.configure(
             targets: [MonitoringScheduleTarget(serverID: serverID, enabled: true)],

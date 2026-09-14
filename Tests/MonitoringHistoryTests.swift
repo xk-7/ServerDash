@@ -505,7 +505,7 @@ final class MonitoringCoordinatorClockTests: XCTestCase {
         let coordinator = MonitoringCoordinator(
             clock: clock,
             jitter: { _ in 0 },
-            operation: { id in await probe.run(id) }
+            operation: { id, _ in await probe.run(id) }
         )
         await coordinator.configure(
             targets: [MonitoringScheduleTarget(serverID: UUID(), enabled: false)],
@@ -528,7 +528,7 @@ final class MonitoringCoordinatorClockTests: XCTestCase {
             maximumConcurrency: 1,
             clock: clock,
             jitter: { _ in 0 },
-            operation: { id in await probe.run(id) }
+            operation: { id, _ in await probe.run(id) }
         )
 
         await coordinator.configure(
@@ -560,7 +560,7 @@ final class MonitoringCoordinatorClockTests: XCTestCase {
             maximumConcurrency: 1,
             clock: clock,
             jitter: { range in jitter.value(in: range) },
-            operation: { id in await probe.run(id) }
+            operation: { id, _ in await probe.run(id) }
         )
 
         await coordinator.configure(
@@ -592,7 +592,7 @@ final class MonitoringCoordinatorClockTests: XCTestCase {
             maximumConcurrency: 5,
             clock: clock,
             jitter: { _ in 1 },
-            operation: { id in await probe.run(id) }
+            operation: { id, _ in await probe.run(id) }
         )
         await coordinator.configure(
             targets: serverIDs.map { MonitoringScheduleTarget(serverID: $0, enabled: true) },

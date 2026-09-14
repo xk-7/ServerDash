@@ -686,6 +686,17 @@ struct TerminalInspectorView: View {
                 .foregroundStyle(controller.status.displayColor)
             Spacer()
             Text("SSH 会话").foregroundStyle(.secondary)
+            if controller.serverID == server.id {
+                Button {
+                    Task { await appState.refresh(server) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(state.isRefreshing)
+                .help("刷新资源快照")
+                .accessibilityLabel("刷新资源快照")
+                .accessibilityIdentifier("terminal.inspector.refresh")
+            }
         }
         .font(.caption)
 
@@ -695,8 +706,6 @@ struct TerminalInspectorView: View {
             HStack {
                 ServerStatusBadge(status: state.status)
                 Spacer()
-                Button { Task { await appState.refresh(server) } } label: { Image(systemName: "arrow.clockwise") }
-                    .disabled(state.isRefreshing).help("刷新资源快照").accessibilityLabel("刷新资源快照")
             }
             if let error = state.error { Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
             CompactMonitorContent(snapshot: snapshot, history: state.history,
@@ -722,12 +731,12 @@ struct TerminalInspectorView: View {
                 if let error = state.error {
                     Text(error).textSelection(.enabled)
                     if !server.enableDashboardMonitor {
-                        Text("自动监控已关闭，可在机器设置中开启。").font(.caption)
+                        Text("自动监控已关闭，仍可使用上方刷新按钮手动采集。").font(.caption)
                     }
                 } else {
                     Text(server.enableDashboardMonitor
                          ? "采集成功后将在这里显示，终端连接与监控状态相互独立。"
-                         : "此服务器未开启仪表盘监控，可在机器设置中开启。")
+                         : "自动监控已关闭，仍可使用上方刷新按钮手动采集。")
                 }
             }
         }

@@ -248,7 +248,7 @@ final class RecordingWriter: @unchecked Sendable {
             return
         }
         queue.async { [self] in
-            defer { Self.leavePendingWrite() }
+            let result: Result<URL, Error>
             do {
                 if let failure { throw failure }
                 guard !index.isEmpty else { throw RecordingError.write }
@@ -256,12 +256,17 @@ final class RecordingWriter: @unchecked Sendable {
                 try handle?.synchronize(); try handle?.close(); handle = nil
                 if reason != "interrupted" {
                     try FileManager.default.moveItem(at: partialURL, to: finalURL)
-                    completion(.success(finalURL))
-                } else { completion(.success(partialURL)) }
+                    result = .success(finalURL)
+                } else { result = .success(partialURL) }
             } catch {
                 try? handle?.synchronize(); try? handle?.close(); handle = nil
-                completion(.failure(RecordingError.write))
+                result = .failure(RecordingError.write)
             }
+            // A completion callback is the public boundary that finalization has
+            // drained. Leave the process-wide shutdown group first so callers can
+            // safely tear down or begin another recording from the callback.
+            Self.leavePendingWrite()
+            completion(result)
         }
     }
     @discardableResult

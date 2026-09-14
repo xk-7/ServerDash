@@ -73,6 +73,7 @@ private final class WorkbenchFixtureContainerRetention {
             let scheme: ColorScheme = dark ? .dark : .light
             let theme = dark ? "dark" : "light"
             defaults.set(theme, forKey: "appAppearance")
+            app.route = .section(.machines)
             for mode in ["grid", "list"] {
                 defaults.set(mode, forKey: "machineViewMode")
                 for size in [NSSize(width: 900, height: 620), NSSize(width: 1440, height: 900), NSSize(width: 1920, height: 1080)] {
@@ -82,6 +83,13 @@ private final class WorkbenchFixtureContainerRetention {
                         size: size, name: "machines-\(mode)-\(Int(size.width))-\(theme)", dark: dark))
                 }
             }
+            app.route = .section(.dashboard)
+            let dashboard = try await render(
+                ContentView().modelContainer(container).environmentObject(app).environmentObject(layout)
+                    .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
+                size: NSSize(width: 900, height: 620), name: "dashboard-refresh-900-\(theme)", dark: dark)
+            artifacts.append(dashboard)
+            app.route = .section(.machines)
             artifacts.append(try await render(
                 SettingsView().modelContainer(container).environmentObject(app).environmentObject(layout)
                     .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
@@ -498,7 +506,9 @@ private final class WorkbenchFixtureContainerRetention {
                 accessibilityValue("accessibilityTitle", from: object) as? String,
                 accessible?.accessibilityHelp(),
                 accessibilityValue("accessibilityHelp", from: object) as? String])
-            if !role.isEmpty && role != NSAccessibility.Role.unknown.rawValue { result.append(.init(role: role, label: label)) }
+            if !role.isEmpty && role != NSAccessibility.Role.unknown.rawValue {
+                result.append(.init(role: role, label: label))
+            }
             let children = (accessible?.accessibilityChildren() ?? [])
                 + (accessibilityValue("accessibilityChildren", from: object) as? [Any] ?? [])
             pending.append(contentsOf: NSAccessibility.unignoredChildren(from: children))

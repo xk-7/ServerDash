@@ -30,8 +30,36 @@ struct DashboardOverviewView: View {
                     subtitle: "服务器运行状况，一目了然。",
                     symbol: "gauge.with.dots.needle.50percent"
                 ) {
-                    Button("添加服务器", systemImage: "plus", action: onAdd)
-                        .buttonStyle(.borderedProminent)
+                    HStack(spacing: AppleDesign.Spacing.xs) {
+                        Button {
+                            Task { await appState.refreshAll(servers) }
+                        } label: {
+                            Label("刷新全部", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(servers.isEmpty)
+                        .help("刷新全部服务器")
+                        .accessibilityLabel("刷新全部服务器")
+                        .accessibilityIdentifier("dashboard.refresh.all")
+
+                        Menu {
+                            Button("仅重试失败的监控", systemImage: "arrow.clockwise.circle") {
+                                Task { await appState.refreshAll(servers, failedOnly: true) }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .disabled(servers.isEmpty)
+                        .help("更多刷新选项")
+                        .accessibilityLabel("更多刷新选项")
+                        .accessibilityIdentifier("dashboard.refresh.options")
+
+                        Button("添加服务器", systemImage: "plus", action: onAdd)
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
 
                 if servers.isEmpty {
@@ -518,15 +546,6 @@ private struct ServerDetailHeader: View {
                 .labelsHidden()
                 .frame(width: 230)
                 Spacer(minLength: AppleDesign.Spacing.xs)
-                if mode == .monitor {
-                    Button {
-                        Task { await appState.refresh(server) }
-                    } label: {
-                        Label("刷新", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(runtime.renderState.isRefreshing)
-                    .help("刷新此服务器的监控数据")
-                }
                 Menu {
                     Button("事件日志", systemImage: "list.bullet.rectangle", action: onEventLog)
                     if runtime.renderState.diagnostics != nil {
