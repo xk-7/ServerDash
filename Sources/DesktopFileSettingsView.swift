@@ -35,7 +35,7 @@ struct DesktopFileSettingsView: View {
                 if sync.pairs.isEmpty { Text("尚无目录配对。").foregroundStyle(.secondary) }
                 ForEach(sync.pairs) { pair in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(pair.serverName).font(.headline)
+                        Text(pair.serverName).font(AppTypography.cardTitle)
                         Text("\(pair.localPath.isEmpty ? "尚未绑定本机目录" : pair.localPath) ↔ \(pair.remotePath)").font(.caption.monospaced())
                         Toggle("自动上传本地更改", isOn: Binding(get: { pair.automaticUpload }, set: { sync.setAutomatic($0, id: pair.id) }))
                             .disabled(pair.localPath.isEmpty)
@@ -43,6 +43,7 @@ struct DesktopFileSettingsView: View {
                 }
             }
         }.formStyle(.grouped)
+        .macGlassFormBackground()
         .sheet(isPresented: $showingEditor) { RemoteEditorView() }
         .sheet(isPresented:$showingLocalCopies){LocalFileCopiesView()}
     }

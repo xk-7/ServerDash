@@ -87,6 +87,7 @@ struct RecordingSettingsView: View {
             }
             if let error { Text(error).foregroundStyle(.red) }
         }.formStyle(.grouped)
+        .macGlassFormBackground()
     }
 }
 
@@ -104,7 +105,7 @@ struct RecordingLibraryView: View {
         HSplitView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("录制").font(.title2.bold())
+                    Text("录制").font(AppTypography.sectionTitle)
                     Spacer()
                     Button { store.refresh() } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("刷新录制列表")
                 }
@@ -140,7 +141,7 @@ struct RecordingLibraryView: View {
                 if let document = player.document {
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(document.header.name).font(.headline)
+                            Text(document.header.name).font(AppTypography.cardTitle)
                             Text(document.header.date, style: .date).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -226,7 +227,7 @@ struct GIFExportView: View {
     @State private var previewTask: Task<Void, Never>?
     var body: some View {
         VStack(spacing: 12) {
-            Text("导出 GIF 片段").font(.title2.bold())
+            Text("导出 GIF 片段").font(AppTypography.sectionTitle)
             if let preview { Image(decorative: preview, scale: 1).resizable().scaledToFit().frame(height: 190) }
             Form {
                 HStack {
@@ -241,7 +242,9 @@ struct GIFExportView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("画质决定像素缩放，水印占用独立底部区域。分享前请检查画面中是否包含敏感信息。")
                     .font(.caption).foregroundStyle(.secondary)
-            }.disabled(running)
+            }
+            .disabled(running)
+            .macGlassFormBackground()
             if running { ProgressView(value: progress) }
             if let error { Text(error).foregroundStyle(.orange) }
             if let savedURL {
@@ -255,9 +258,14 @@ struct GIFExportView: View {
                 Button(running ? "取消导出" : "关闭") { if running { task?.cancel() } else { dismiss() } }
                 Spacer()
                 Button("选择保存位置并导出…", action: startExport).disabled(running)
-                    .buttonStyle(.borderedProminent)
+                    .macGlassButton(prominent: true)
             }
-        }.padding(24).frame(width: 620).background(.background)
+        }
+        .padding(24)
+        .frame(width: 620)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+        .padding(AppleDesign.Spacing.md)
+        .macGlassSheetRoot()
         .interactiveDismissDisabled(running)
         .onAppear { options.end = min(300, document.duration); updatePreview() }
         .onChange(of: options.start) { _, _ in updatePreview() }

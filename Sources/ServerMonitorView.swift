@@ -6,6 +6,7 @@ struct ServerMonitorLayoutView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var layoutStore: MonitorLayoutStore
+    @EnvironmentObject private var glassEntranceStore: GlassCardEntranceStore
     @AppStorage("hideIPInformation") private var hideIPInformation = false
     @AppStorage("monitor.hideSpecialFilesystems") private var hideSpecialFilesystems = true
     @AppStorage("monitor.hideDockerMounts") private var hideDockerMounts = true
@@ -20,6 +21,9 @@ struct ServerMonitorLayoutView: View {
     @State private var showingHistory = false
     @State private var presentedDetail: MonitorCardKind?
     @State private var copiedMarkdown = false
+    private var entranceRegistry: GlassCardEntranceRegistry {
+        glassEntranceStore.registry(for: "monitor.\(server.id.uuidString)")
+    }
 
     private var snapshot: ServerSnapshot {
         MonitoringFilters(hideSpecialFilesystems: hideSpecialFilesystems, hideDockerMounts: hideDockerMounts,
@@ -64,7 +68,7 @@ struct ServerMonitorLayoutView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Text("等待首次资源采集")
-                            .font(.headline)
+                            .font(AppTypography.cardTitle)
                         Text(firstSnapshotDescription)
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -79,34 +83,43 @@ struct ServerMonitorLayoutView: View {
                         Text("打开布局编辑器以恢复或显示监控卡片。")
                     } actions: {
                         Button("编辑布局") { showingLayoutEditor = true }
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 360)
                     .applePanel()
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 330), spacing: AppleDesign.Spacing.md, alignment: .top)],
-                        alignment: .leading,
-                        spacing: AppleDesign.Spacing.md
-                    ) {
-                        ForEach(cards) { card in
-                            MonitorCardShell(
-                                card: card,
-                                onOpen: card.supportsDetail ? { presentedDetail = card } : nil,
-                                onHide: {
-                                    layoutStore.setHidden(true, card: card, for: server.id)
+                    ServerDashGlassEffectContainer(spacing: 26) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 330), spacing: 26, alignment: .top)],
+                            alignment: .leading,
+                            spacing: 26
+                        ) {
+                            ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
+                                MonitorCardShell(
+                                    card: card,
+                                    onOpen: card.supportsDetail ? { presentedDetail = card } : nil,
+                                    onHide: {
+                                        layoutStore.setHidden(true, card: card, for: server.id)
+                                    }
+                                ) {
+                                    cardContent(card)
                                 }
-                            ) {
-                                cardContent(card)
+                                .glassCardEntrance(
+                                    id: card.id,
+                                    index: index,
+                                    registry: entranceRegistry
+                                )
                             }
                         }
                     }
+                    .padding(AppleDesign.Spacing.xs)
                 }
             }
             .padding(AppleDesign.Spacing.lg)
             .frame(maxWidth: AppleDesign.Layout.contentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollClipDisabled()
         .sheet(isPresented: $showingLayoutEditor) {
             MonitorLayoutEditorView(serverID: server.id, snapshot: snapshot)
                 .environmentObject(layoutStore)
@@ -145,13 +158,13 @@ struct ServerMonitorLayoutView: View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text("资源监控")
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                 Text(monitorStatusText)
                     .font(.caption)
                     .foregroundStyle(
                         runtime.renderState.isStale(refreshInterval: appState.refreshInterval)
                             ? Color.appWarning
-                            : .secondary
+                            : GlassPalette.secondaryText
                     )
             }
             HStack(spacing: AppleDesign.Spacing.xs) {
@@ -160,6 +173,7 @@ struct ServerMonitorLayoutView: View {
                 } label: {
                     Label("刷新", systemImage: "arrow.clockwise")
                 }
+                .macGlassButton()
                 .disabled(runtime.renderState.isRefreshing)
                 .help("刷新此服务器的监控数据")
                 .accessibilityLabel("刷新此服务器的监控数据")
@@ -173,9 +187,11 @@ struct ServerMonitorLayoutView: View {
                 Button("编辑布局", systemImage: "rectangle.grid.2x2") {
                     showingLayoutEditor = true
                 }
+                .macGlassButton()
                 Button("历史", systemImage: "chart.xyaxis.line") {
                     showingHistory = true
                 }
+                .macGlassButton()
                 .help("查看持久化监控历史和 Data Gap")
                 Menu {
                     Button("复制 Markdown", systemImage: "doc.on.doc") {
@@ -189,12 +205,16 @@ struct ServerMonitorLayoutView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .macGlassButton()
                 .help("状态页操作")
                 Spacer(minLength: 0)
             }
-            .buttonStyle(.bordered)
             .controlSize(.regular)
         }
+        .applePanel(
+            padding: AppleDesign.Spacing.md,
+            radius: AppleDesign.Radius.card
+        )
     }
 
     private var monitorStatusText: String {
@@ -299,14 +319,10 @@ struct ServerMonitorLayoutView: View {
 }
 
 private struct MonitorCardShell<Content: View>: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     let card: MonitorCardKind
     let onOpen: (() -> Void)?
     let onHide: () -> Void
     @ViewBuilder let content: Content
-
-    @State private var isHovering = false
 
     init(
         card: MonitorCardKind,
@@ -327,7 +343,7 @@ private struct MonitorCardShell<Content: View>: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
                 Text(card.title)
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                 Spacer()
                 if let onOpen {
                     Button(action: onOpen) {
@@ -354,18 +370,10 @@ private struct MonitorCardShell<Content: View>: View {
         }
         .frame(maxWidth: .infinity, minHeight: 230, alignment: .topLeading)
         .applePanel(padding: AppleDesign.Spacing.md, radius: AppleDesign.Radius.card)
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: AppleDesign.Radius.card,
-                style: .continuous
-            )
-            .stroke(
-                isHovering && onOpen != nil
-                    ? Color.appAccent.opacity(0.4)
-                    : Color.clear,
-                lineWidth: 1
-            )
-        }
+        .appleInteractiveSurface(
+            radius: AppleDesign.Radius.card,
+            isEnabled: onOpen != nil
+        )
         .contentShape(
             RoundedRectangle(
                 cornerRadius: AppleDesign.Radius.card,
@@ -375,8 +383,6 @@ private struct MonitorCardShell<Content: View>: View {
         .onTapGesture {
             onOpen?()
         }
-        .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : AppleDesign.quick, value: isHovering)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
         .accessibilityHint(onOpen == nil ? "" : "打开\(card.title)详情")
@@ -739,7 +745,7 @@ private struct NetworkMonitorCard: View {
             HStack {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text(snapshot.activeNetworkInterface.isEmpty ? "自动选择接口" : snapshot.activeNetworkInterface)
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                     Text("活动接口")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1010,7 +1016,7 @@ private struct DockerMonitorCard: View {
             HStack {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("Docker \(snapshot.dockerVersion)")
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                     Text("\(DisplayFormat.integer(summary.total)) 个容器")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1098,7 +1104,7 @@ struct MonitorLayoutEditorView: View {
             HStack {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("编辑状态卡布局")
-                        .font(.title2.weight(.bold))
+                        .font(AppTypography.sectionTitle)
                     Text("拖动排序，或隐藏不需要的卡片。GPU 与 Docker 会在不可用时自动隐藏。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1106,9 +1112,10 @@ struct MonitorLayoutEditorView: View {
                 Spacer()
                 Button("完成") { dismiss() }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .macGlassButton(prominent: true)
             }
             .padding(AppleDesign.Spacing.lg)
+            .macGlassChromeBar()
             Divider()
             List {
                 ForEach(order) { card in
@@ -1158,6 +1165,8 @@ struct MonitorLayoutEditorView: View {
                     layoutStore.setOrder(order, for: serverID)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .macHighContrastContentSurface()
             Divider()
             HStack {
                 Button("恢复默认布局", systemImage: "arrow.counterclockwise") {
@@ -1167,8 +1176,24 @@ struct MonitorLayoutEditorView: View {
                 Spacer()
             }
             .padding(AppleDesign.Spacing.md)
+            .macGlassChromeBar()
         }
         .frame(width: 560, height: 620)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: AppleDesign.Radius.panel,
+                style: .continuous
+            )
+        )
+        .macGlassSurface(
+            role: .overlay,
+            cornerRadius: AppleDesign.Radius.panel
+        )
+        .padding(20)
+#if !SERVERDASH_MAC_QA
+        .macGlassSheetRoot()
+#endif
+        .accessibilityIdentifier("monitor.layout.editor")
         .task {
             order = layoutStore.orderedCards(for: serverID)
         }
@@ -1194,7 +1219,7 @@ private struct MonitorCardDetailView: View {
         VStack(spacing: 0) {
             HStack {
                 Label(card.title, systemImage: card.symbol)
-                    .font(.title2.weight(.bold))
+                    .font(AppTypography.sectionTitle)
                 Spacer()
                 Button("完成", action: onDismiss)
                     .keyboardShortcut(.cancelAction)
@@ -1297,7 +1322,7 @@ private struct CPUDetailView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(snapshot.cpuModel.isEmpty ? "未识别处理器型号" : snapshot.cpuModel)
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                         .lineLimit(2)
                 }
 
@@ -1332,7 +1357,7 @@ private struct CPUDetailView: View {
             HStack {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("使用率趋势")
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                     Text("最近 \(DisplayFormat.integer(min(history.count, 120))) 个采样点")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1404,7 +1429,7 @@ private struct CPUDetailView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("每核心明细")
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                     Text("实时展示各核心的运行时间构成")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1767,7 +1792,12 @@ private struct NetworkDetailView: View {
                 } description: {
                     Text("vnStat 在服务器上长期记录网络流量，安装后需要等待一段时间收集数据。")
                 } actions: {
+#if SERVERDASH_MAC_QA
+                    Text("安装说明在隔离验收中不可打开")
+                        .foregroundStyle(.secondary)
+#else
                     Link("查看 vnStat 安装说明", destination: URL(string: "https://humdi.net/vnstat/")!)
+#endif
                 }
                 DemoVnStatChart()
                     .frame(height: 180)
@@ -1850,7 +1880,7 @@ private struct StorageDetailView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("文件系统与设备 I/O")
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                 Spacer()
                 Picker("默认卷", selection: $selectedVolume) {
                     ForEach(snapshot.filesystems) { filesystem in
@@ -1917,7 +1947,7 @@ private struct GPUDetailView: View {
                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
                         HStack {
                             Text("GPU \(gpu.index) · \(gpu.name)")
-                                .font(.headline)
+                                .font(AppTypography.cardTitle)
                             Spacer()
                             if let temperature = gpu.temperatureCelsius {
                                 Text("\(DisplayFormat.decimal(temperature, fractionLength: 0))°C")

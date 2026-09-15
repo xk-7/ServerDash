@@ -16,7 +16,14 @@ struct MachineOrganizationEditor: View {
     @State private var deleting = false
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text("管理分组与标签").font(.title2.weight(.semibold)); Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
+            HStack {
+                Text("管理分组与标签").font(AppTypography.pageTitle)
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             Divider()
             HSplitView {
                 VStack {
@@ -47,13 +54,17 @@ struct MachineOrganizationEditor: View {
                                 ForEach(MachineTagTint.allCases) { color in Label(color.title, systemImage: "circle.fill").foregroundStyle(color.color).tag(color.rawValue) }
                             }
                         }
-                        Button("保存", action: save).buttonStyle(.borderedProminent).disabled(MachineOrganization.cleanName(name).isEmpty)
+                        Button("保存", action: save)
+                            .macGlassButton(prominent: true)
+                            .disabled(MachineOrganization.cleanName(name).isEmpty)
                     }
                     if let error { Text(error).foregroundStyle(Color.appError) }
                     Text(section == 0 ? "删除分组会将主机移到默认分组；子分组提升到原父级。名称同步到现有主机配置。" : "重命名会更新主机标签；删除标签不会删除主机。").font(.caption).foregroundStyle(.secondary)
                 }.formStyle(.grouped).frame(minWidth: 300)
             }
-        }.frame(width: 660, height: 470).background(Color.appGround)
+        }
+        .frame(width: 660, height: 470)
+        .background(ServerDashBackdrop())
             .onChange(of: selectedID) { _, _ in load() }
             .onChange(of: section) { _, _ in selectedID = nil; name = ""; parent = nil; colorName = MachineTagTint.accent.rawValue; error = nil }
             .confirmationDialog("删除\(section == 0 ? "分组" : "标签")？", isPresented: $deleting) {

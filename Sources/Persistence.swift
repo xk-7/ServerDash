@@ -281,6 +281,14 @@ final class PersistenceSession: ObservableObject {
 
     func rebuild() {
         do {
+            #if os(macOS)
+            if MacUIFixture.isEnabled {
+                container = try PersistenceController.makeInMemoryContainer()
+                lastBackupURL = nil
+                openError = nil
+                return
+            }
+            #endif
             lastBackupURL = try PersistenceController.backupExistingStore()
             try PersistenceController.destroyStore()
             let opened = try PersistenceController.makeContainer(migrateLegacyStore: false)
@@ -305,16 +313,27 @@ struct DatabaseRecoveryView: View {
                 .font(.system(size: 42, weight: .light))
                 .foregroundStyle(Color.appError)
             Text("无法打开本地数据库")
+#if os(macOS)
+                .font(AppTypography.sectionTitle)
+#else
                 .font(.title2.weight(.bold))
+#endif
             Text(error.localizedDescription)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
             HStack {
+                #if os(macOS)
+                Button("重试", action: onRetry)
+                    .macGlassButton()
+                Button("备份并重建", role: .destructive, action: onRebuild)
+                    .macGlassButton(prominent: true)
+                #else
                 Button("重试", action: onRetry)
                 Button("备份并重建", role: .destructive, action: onRebuild)
                     .buttonStyle(.borderedProminent)
+                #endif
             }
             if let backupURL {
                 Text("已备份到 \(backupURL.path)")

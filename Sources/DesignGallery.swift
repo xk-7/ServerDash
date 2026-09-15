@@ -24,7 +24,7 @@ struct AppleDesignGallery: View {
                 HStack {
                     Button("次要操作") {}
                     Button("主要操作") {}
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                     Spacer()
                     ProgressView()
                         .controlSize(.small)
@@ -42,7 +42,11 @@ struct AppleDesignGallery: View {
             .padding(AppleDesign.Spacing.lg)
             .frame(maxWidth: 760)
         }
+#if os(macOS)
+        .background(ServerDashBackdrop())
+#else
         .background(Color.appGround)
+#endif
     }
 
     private func galleryRow(

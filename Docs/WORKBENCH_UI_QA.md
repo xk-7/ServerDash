@@ -107,3 +107,42 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 - [ ] 真实 SSH 多因素认证、VNC 系统屏幕共享、RDP Windows 互操作及长时间会话退出。
 - [ ] 真实 WebDAV 强 ETag、双设备同步、冲突、断网恢复与恢复密钥交换。
 - [ ] 实体 iPhone/iPad 的兼容性、前后台行为和辅助功能。
+
+## 2026-09-15 macOS Liquid Glass 工作台验收
+
+本节只记录 `codex/mac-glass-workbench` 的玻璃界面和 QA 基础设施。历史章节中的构建、测试和截图数字属于当时分支，不能作为本轮通过证据。本轮没有修改 SwiftData V5、同步格式、凭据、连接协议、移动端功能或版本号。
+
+### 隔离应用与路由
+
+`ServerDashMacQA` 是独立 macOS 应用目标，Bundle ID 固定为 `com.serverdash.app.macqa`。目标使用 `SERVERDASH_MAC_QA` 编译条件，因此即使没有传入启动参数也只会进入隔离路径：SwiftData 使用内存容器，UserDefaults 使用 `.macqa` 域，草稿、录制及文件目录使用每进程临时目录，监控使用合成快照，SSH/SFTP/RDP 等真实连接被拒绝。QA 目标不会读取或迁移正式应用数据库。
+
+`--fixture-page` 支持 `dashboard`、`machines-grid`、`machines-list`、`monitor`、`terminal`、`sftp`、`rdp`、`settings`、`empty` 和 `dialog`。`--fixture-theme` 支持 `system`、`light` 和 `dark`；窗口使用 `--fixture-width`、`--fixture-height`，主机及终端规模使用 `--fixture-hosts`、`--fixture-panes`。`--fixture-reduce-transparency`、`--fixture-reduce-motion` 和 `--fixture-increase-contrast` 注入玻璃主题覆盖值，仅影响 QA 进程；只有对应截图确实呈现目标辅助功能状态后才记录为通过。
+
+`ServerDashGlassUITests` scheme 在真实合成窗口中运行 UI 测试并将截图保存在 xcresult 附件中。全矩阵覆盖清单为：
+
+- 仪表盘、机器宫格和机器列表：900×620、1440×900、1920×1080，浅色与深色。
+- 监控、终端、SFTP、RDP、设置、空状态和弹窗：1440×900，浅色与深色。
+- 1440×900 深色分别覆盖 Reduce Transparency、Reduce Motion 和 Increase Contrast。
+- 额外检查长中文名称、卡片 hover 1.05 几何、窗口边界、仪表盘刷新入口、1,000 台主机筛选与连续滚动。
+
+`WorkbenchUIFixtureTests` 的 `cacheDisplay` 输出继续只用于布局、原生子视图挂载和辅助功能语义诊断。材质、Liquid Glass 合成、hover、焦点环和实际窗口裁切以 UI 测试附件及人工窗口检查为准。
+
+### 自动化状态
+
+- [x] `xcodegen generate` 后已核对 QA app、UI 测试 target、依赖、Bundle ID 和共享 scheme；`ServerDashGlassUITests` 的 `build-for-testing` 通过，构建产物 Bundle ID 为 `com.serverdash.app.macqa`，五个字体文件均在 App Resources 中。
+- [x] `MacGlassThemeTests` 7 项与 `MacUIFixtureConfigurationTests` 6 项，共 13 项聚焦回归测试通过，零失败。它们覆盖公开 token、表面角色、稳定 ID 只入场一次、Reduce Motion/刷新、字体缺失回退与实际包内注册，以及路由、尺寸、主机数、面板数、辅助功能参数、凭据后端和禁网边界。
+- [x] `ServerDashGlassUITests` 真实 QA 窗口全矩阵最终复跑 **10/10 组通过**，导出 37 张 PNG。已覆盖全部路由、三档窗口尺寸、浅深色、三种辅助功能、仪表盘刷新、单窗口设置入口、SFTP 离线数据、hover 几何及千台主机性能。执行入口为 `Scripts/run-mac-glass-ui-tests.sh`。
+- [x] 弹窗重复背景修复后，核心页面组再次通过；浅色和深色截图均只保留一层全窗口渐变，圆角玻璃面板无硬边矩形或裁切。最后三处纯字体映射修正后的额外 UI 重试被 macOS 26 的“Enable UI Automation”本机身份验证挡在 Runner 初始化前，未执行任何应用断言；最终源码已继续通过严格编译和全量单元测试。
+- [x] 1,000 台主机的最终实际 UI 测量为 **9.542 秒**：筛选 3.423 秒、恢复全量结果 4.457 秒、单次 `4,160pt` 连续滚动 1.662 秒；本机验收上限为 30 秒。该数字用于本轮交互可用性验收，不作为跨设备性能承诺。
+- [x] macOS 全量门禁最终复跑 **425/425 项通过、零失败、零跳过**。
+- [x] 严格并发检查最终复跑通过，第一方源码、测试及宏展开编译告警为 **0**。依赖告警计数为 SwiftTerm 87、ZIPFoundation 4、NIOSSH 0、Citadel 0；RDP/WinPR 在 bootstrap 阶段单独记录，不并入上述计数。
+- [x] `ServerDash` 和 `ServerDashMacQA` 两个 macOS 目标均打包五个字体文件与对应 OFL 声明；`ServerDashMobile` iOS 目标未包含这些 Mac 字体资源。
+- [x] macOS 14/15 本轮完成 deployment target 与编译兼容检查。
+- [ ] macOS 14/15 真机／运行时界面矩阵；本轮未在这两个系统上运行，不记录旧系统运行通过。
+- [x] macOS 26.3.2 本机真实 QA 窗口已复验：玻璃合成、三张总览卡重叠、hover 1.05、边缘裁切、浅深色、辅助功能覆盖、焦点与键盘可达性均通过自动化及截图检查。
+- [x] Mac 通用 Release 构建与产物检查通过：可执行文件包含 arm64 与 x86_64，最低系统为 macOS 14，版本为 1.0.3（Build 8），五个字体与两份 OFL 声明均在包内，二进制和应用包未发现开发机路径泄漏。
+- [x] iOS Simulator 兼容构建通过。
+- [x] 无签名 iOS Device 兼容构建通过。
+- [ ] VoiceOver 实际朗读、顺序与完整键盘导航。
+
+本轮自动化覆盖不替代 VoiceOver 真人朗读，也不替代 macOS 14/15 实际运行验收。这些运行和人工验收项在取得对应证据前保持未通过。

@@ -93,6 +93,7 @@ actor ServerLocationService {
     }
 
     func location(for config: ServerConnectionConfig) async throws -> ServerLocation {
+        try MacUIFixtureIsolationPolicy.requireNetworkAllowed()
         if PrivacySettings.disableLocationLookup {
             throw ServerLocationError.lookupFailed("已停止位置采集。")
         }
@@ -190,6 +191,22 @@ struct ServerLocationMapView: View {
         "\(reloadID.uuidString)-\(initialLocation?.publicIP ?? "")-\(locationLookupEnabled)"
     }
 
+    private var placeholderBackground: Color {
+#if os(macOS)
+        .clear
+#else
+        .appSurface
+#endif
+    }
+
+    private var frameBorder: Color {
+#if os(macOS)
+        GlassPalette.border
+#else
+        Color.appHairline.opacity(0.5)
+#endif
+    }
+
     var body: some View {
         Group {
             if !locationLookupEnabled {
@@ -198,7 +215,7 @@ struct ServerLocationMapView: View {
                 } description: {
                     Text("可在“设置 → 安全”中阅读说明并选择启用。")
                 }
-                .background(Color.appSurface)
+                .background(placeholderBackground)
             } else if let location {
                 Map(
                     position: $mapPosition,
@@ -231,7 +248,7 @@ struct ServerLocationMapView: View {
                 .accessibilityValue(location.displayName)
             } else if isLoading {
                 ZStack {
-                    Color.appSurface
+                    placeholderBackground
                     VStack(spacing: AppleDesign.Spacing.sm) {
                         ProgressView()
                         Text("正在通过服务器获取公网位置")
@@ -249,14 +266,14 @@ struct ServerLocationMapView: View {
                         reloadID = UUID()
                     }
                 }
-                .background(Color.appSurface)
+                .background(placeholderBackground)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 280)
         .clipShape(RoundedRectangle(cornerRadius: AppleDesign.Radius.panel, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: AppleDesign.Radius.panel, style: .continuous)
-                .stroke(Color.appHairline.opacity(0.5))
+                .stroke(frameBorder)
         }
         .task(id: requestID) {
             await loadLocation()
@@ -269,7 +286,7 @@ struct ServerLocationMapView: View {
                 .foregroundStyle(Color.appAccent)
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text(location.displayName.isEmpty ? "服务器位置" : location.displayName)
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                 Text(PrivacySettings.hideIPInformation ? "[IP]" : location.ip)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)

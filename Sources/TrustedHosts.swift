@@ -242,6 +242,7 @@ enum TrustedHostStore {
 
     static func scan(host: String, port: Int, preferredAlgorithm: String? = nil) throws -> SSHHostKeyProbe {
 #if os(macOS)
+        try MacUIFixtureIsolationPolicy.requireNetworkAllowed()
         let interval = PerformanceTrace.begin(.hostKeyScan)
         defer { PerformanceTrace.end(interval) }
         let scan = run(

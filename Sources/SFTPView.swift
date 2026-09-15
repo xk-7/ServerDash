@@ -60,13 +60,15 @@ struct SFTPBrowserView: View {
                     } actions: {
                         Button("刷新") { Task { await controller.loadDirectory(controller.currentPath) } }
                     }
+                    .padding(AppleDesign.Spacing.lg)
+                    .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
                 }
             }
             Divider()
             statusBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.appGround)
+        .background(Color.clear)
         .onAppear { controller.beginIfNeeded(); if let access = controller.fileAccess { editor.register(access); DirectorySyncStore.shared.register(access) } }
         .alert("新建文件夹", isPresented: $controller.showingNewFolderPrompt) {
             TextField("文件夹名称", text: $controller.promptText)
@@ -111,24 +113,38 @@ struct SFTPBrowserView: View {
         .sheet(isPresented: $showingSync) { if let access = controller.fileAccess { DirectorySyncView(access: access, remotePath: controller.currentPath) } }
         .sheet(isPresented: $showingPermissions) {
             VStack(alignment: .leading, spacing: 16) {
-                Label("修改权限", systemImage: "lock.shield").font(.title2.bold())
+                Label("修改权限", systemImage: "lock.shield").font(AppTypography.sectionTitle)
                 Text("已选择 \(controller.selectedItems.count) 个项目。符号链接不会被跟随。")
-                TextField("八进制权限，例如 644 或 755", text: $permissions).textFieldStyle(.roundedBorder)
+                TextField("八进制权限，例如 644 或 755", text: $permissions)
+                    .textFieldStyle(.roundedBorder)
+                    .foregroundStyle(Color(nsColor: .textColor))
                 Toggle("递归应用到文件夹内的文件和子文件夹", isOn: $recursivePermissions)
                 Text("读取 r = 4，写入 w = 2，执行 x = 1；依次为所有者、组、其他用户。").font(.caption).foregroundStyle(.secondary)
                 HStack { Spacer(); Button("取消") { showingPermissions = false }; Button("应用") {
                     if let mode = UInt16(permissions, radix: 8) { controller.changePermissions(mode, recursive: recursivePermissions); showingPermissions = false }
-                }.buttonStyle(.borderedProminent).disabled(UInt16(permissions, radix: 8).map { $0 > 0o7777 } ?? true) }
-            }.padding(24).frame(width: 510)
+                }.macGlassButton(prominent: true).disabled(UInt16(permissions, radix: 8).map { $0 > 0o7777 } ?? true) }
+            }
+            .padding(24)
+            .frame(width: 510)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+            .padding(AppleDesign.Spacing.md)
+            .macGlassSheetRoot()
         }
         .sheet(isPresented: $showingArchive) {
             VStack(alignment: .leading, spacing: 16) {
-                Label("创建压缩包", systemImage: "archivebox").font(.title2.bold())
-                TextField("压缩包名称", text: $archiveName).textFieldStyle(.roundedBorder)
+                Label("创建压缩包", systemImage: "archivebox").font(AppTypography.sectionTitle)
+                TextField("压缩包名称", text: $archiveName)
+                    .textFieldStyle(.roundedBorder)
+                    .foregroundStyle(Color(nsColor: .textColor))
                 Picker("格式", selection: $archiveFormat) { ForEach(RemoteArchiveFormat.allCases) { Text($0.rawValue).tag($0) } }
                 Text("保存在当前目录，保留符号链接，不覆盖同名压缩包。").font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("取消") { showingArchive = false }; Button("压缩") { controller.archiveSelection(name: archiveName, format: archiveFormat); showingArchive = false }.buttonStyle(.borderedProminent).disabled(archiveName.isEmpty || archiveName.contains("/")) }
-            }.padding(24).frame(width: 460)
+                HStack { Spacer(); Button("取消") { showingArchive = false }; Button("压缩") { controller.archiveSelection(name: archiveName, format: archiveFormat); showingArchive = false }.macGlassButton(prominent: true).disabled(archiveName.isEmpty || archiveName.contains("/")) }
+            }
+            .padding(24)
+            .frame(width: 460)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+            .padding(AppleDesign.Spacing.md)
+            .macGlassSheetRoot()
         }
     }
 
@@ -137,11 +153,17 @@ struct SFTPBrowserView: View {
             HStack(spacing: 6) {
                 Button { Task { await controller.loadDirectory(".") } } label: { Image(systemName: "house") }.help("主目录")
                 Button { Task { await controller.loadDirectory(RemotePath.parent(of: controller.currentPath)) } } label: { Image(systemName: "chevron.up") }.help("上级目录").disabled(controller.currentPath == "/")
-                TextField("远程路径", text: $controller.pathText).textFieldStyle(.roundedBorder).font(.callout.monospaced()).onSubmit { Task { await controller.loadDirectory(controller.pathText) } }
+                TextField("远程路径", text: $controller.pathText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(Color(nsColor: .textColor))
+                    .onSubmit { Task { await controller.loadDirectory(controller.pathText) } }
                 Button { Task { await controller.loadDirectory(controller.currentPath) } } label: { Image(systemName: "arrow.clockwise") }.help("刷新")
             }
             HStack(spacing: 8) {
-                TextField("搜索文件", text: $controller.search).textFieldStyle(.roundedBorder)
+                TextField("搜索文件", text: $controller.search)
+                    .textFieldStyle(.roundedBorder)
+                    .foregroundStyle(Color(nsColor: .textColor))
                 Toggle(isOn: $controller.showHidden) { Image(systemName: controller.showHidden ? "eye" : "eye.slash") }.toggleStyle(.button).help("显示隐藏文件")
                 Menu {
                     Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
@@ -161,11 +183,15 @@ struct SFTPBrowserView: View {
                 } label: { Image(systemName: "ellipsis.circle") }.help("文件操作")
             }
         }.controlSize(compact ? .small : .regular).buttonStyle(.borderless)
-            .padding(compact ? 8 : 12).background(.bar)
+            .padding(compact ? 8 : 12)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             .disabled(controller.busyMessage != nil && controller.transferTask == nil)
     }
     private var fileTable: some View {
         tableContent
+        .foregroundStyle(Color(nsColor: .textColor))
+        .background(Color(nsColor: .controlBackgroundColor))
         .contextMenu(forSelectionType: String.self) { ids in
             let items = controller.items.filter { ids.contains($0.id) }
             if let first = items.first {
@@ -227,7 +253,11 @@ struct SFTPBrowserView: View {
                 if controller.hasActiveTransfer { Button("取消") { controller.transferTask?.cancel() } }
                 Text("\(controller.visibleItems.count) 项").monospacedDigit()
             }
-        }.font(.caption).foregroundStyle(.secondary).padding(8).background(.bar)
+        }
+        .font(.caption)
+        .foregroundStyle(GlassPalette.secondaryText)
+        .padding(8)
+        .background(AppleChromeBackground())
     }
     private func openEditor(_ items: [RemoteFileItem], encoding: RemoteTextEncoding? = nil) {
         guard let access = controller.fileAccess else { return }; editor.open(items, access: access, encoding: encoding); showingEditor = true

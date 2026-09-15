@@ -45,9 +45,23 @@ struct RDPEditorView: View {
     @State private var loaded = false
     @State private var invalidStoredSettings = false
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Label(record == nil ? "添加 RDP 远程桌面" : "编辑 RDP 远程桌面", systemImage: "desktopcomputer").font(.title2.bold()); Spacer() }.padding(20)
-            Form {
+        ZStack {
+            ServerDashBackdrop()
+
+            VStack(spacing: 0) {
+                HStack {
+                    Label(
+                        record == nil ? "添加 RDP 远程桌面" : "编辑 RDP 远程桌面",
+                        systemImage: "desktopcomputer"
+                    )
+                    .font(AppTypography.pageTitle)
+                    Spacer()
+                }
+                .padding(20)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+
+                Form {
                 Section("Windows 连接") {
                     TextField("名称", text: $name)
                     TextField("主机地址", text: $host)
@@ -109,16 +123,31 @@ struct RDPEditorView: View {
                     Picker("证书策略", selection: $settings.certificatePolicy) { ForEach(RDPCertificatePolicy.allCases, id: \.self) { Text($0.title).tag($0) } }
                     Toggle("网络中断后自动重连（最多五次）", isOn: $settings.autoReconnect)
                 }
-                if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-            }.formStyle(.grouped)
-            HStack {
-                Button("取消", role: .cancel) { password = ""; dismiss() }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("保存") { save(connect: false) }.disabled(invalidStoredSettings)
-                Button("保存并连接") { save(connect: true) }.buttonStyle(.borderedProminent).disabled(invalidStoredSettings).keyboardShortcut(.defaultAction)
-            }.padding(16)
-        }.frame(width: 620, height: 740).background(Color(nsColor: .windowBackgroundColor))
-            .onAppear(perform: load)
+                    if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+                }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(Color(nsColor: .textColor))
+                .background(Color(nsColor: .controlBackgroundColor))
+
+                HStack {
+                    Button("取消", role: .cancel) { password = ""; dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("保存") { save(connect: false) }
+                        .disabled(invalidStoredSettings)
+                    Button("保存并连接") { save(connect: true) }
+                        .macGlassButton(prominent: true)
+                        .disabled(invalidStoredSettings)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+            }
+        }
+        .frame(width: 620, height: 740)
+        .onAppear(perform: load)
     }
     private func load() {
         guard !loaded else { return }; loaded = true
@@ -196,7 +225,7 @@ struct RDPMachineDetail: View {
                 Button("编辑", systemImage: "pencil") { editing = true }
                 Button("删除", systemImage: "trash", role: .destructive) { deleting = true }
             }
-            Label(record.displayName, systemImage: "desktopcomputer").font(.largeTitle.bold())
+            Label(record.displayName, systemImage: "desktopcomputer").font(AppTypography.pageTitle)
             Text("RDP · \(record.username)@\(record.host):\(record.port)").font(.title3).textSelection(.enabled)
             if !record.domain.isEmpty { LabeledContent("域", value: record.domain) }
             if let settings = try? record.settings() {
@@ -207,12 +236,16 @@ struct RDPMachineDetail: View {
             Text("RDP 不参与 SSH 监控或 SSH 会话导入导出。Windows 实机兼容性仍待验收。")
                 .foregroundStyle(.secondary)
             HStack {
-                Button("连接远程桌面", systemImage: "play.fill") { appState.openRDP(record) }.buttonStyle(.borderedProminent)
+                Button("连接远程桌面", systemImage: "play.fill") { appState.openRDP(record) }
+                    .macGlassButton(prominent: true)
                 Button("新建 RDP 标签") { appState.openRDP(record, newTab: true) }
             }
             if let error { Text(error).foregroundStyle(.red) }
             Spacer()
-        }.padding(28)
+        }
+        .padding(28)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+        .padding(AppleDesign.Spacing.lg)
             .sheet(isPresented: $editing) { RDPEditorView(record: record) { value, connect, password in if connect { appState.openRDP(value, newTab: true, password: password) } } }
             .confirmationDialog("删除 RDP 机器并关闭其会话？", isPresented: $deleting) {
                 Button("删除并取消传输", role: .destructive) {
@@ -236,20 +269,32 @@ struct RDPSessionPicker: View {
     let onRDP: (RDPConnectionRecord) -> Void
     @State private var search = ""
     var body: some View {
-        NavigationStack {
-            List {
-                Section("SSH") {
-                    ForEach(servers.filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search) || $0.host.localizedCaseInsensitiveContains(search) }) { server in
-                        Button { dismiss(); onSSH(server) } label: { Label(server.displayName + " · " + server.host, systemImage: "terminal").frame(minHeight: 44) }.buttonStyle(.plain)
+        ZStack {
+            ServerDashBackdrop()
+            NavigationStack {
+                List {
+                    Section("SSH") {
+                        ForEach(servers.filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search) || $0.host.localizedCaseInsensitiveContains(search) }) { server in
+                            Button { dismiss(); onSSH(server) } label: { Label(server.displayName + " · " + server.host, systemImage: "terminal").frame(minHeight: 44) }.buttonStyle(.plain)
+                        }
+                    }
+                    Section("RDP") {
+                        ForEach(rdpMachines.filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search) || $0.host.localizedCaseInsensitiveContains(search) }) { record in
+                            Button { dismiss(); onRDP(record) } label: { Label(record.displayName + " · " + record.host, systemImage: "desktopcomputer").frame(minHeight: 44) }.buttonStyle(.plain)
+                        }
                     }
                 }
-                Section("RDP") {
-                    ForEach(rdpMachines.filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search) || $0.host.localizedCaseInsensitiveContains(search) }) { record in
-                        Button { dismiss(); onRDP(record) } label: { Label(record.displayName + " · " + record.host, systemImage: "desktopcomputer").frame(minHeight: 44) }.buttonStyle(.plain)
-                    }
-                }
-            }.searchable(text: $search, prompt: "搜索机器").navigationTitle("选择会话机器")
+                .scrollContentBackground(.hidden)
+                .macHighContrastContentSurface(cornerRadius: AppleDesign.Radius.thumbnail)
+                .searchable(text: $search, prompt: "搜索机器")
+                .navigationTitle("选择会话机器")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
-        }.frame(width: 500, height: 440)
+            }
+            .padding(20)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+            .padding(20)
+        }
+        .frame(width: 500, height: 440)
+        .font(AppTypography.body)
     }
 }

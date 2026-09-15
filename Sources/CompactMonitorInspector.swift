@@ -145,7 +145,7 @@ struct CompactMonitorContent: View {
                 LineMark(x: .value("时间", point.date), y: .value("CPU %", point.cpu)).foregroundStyle(Color.accentColor)
             }.frame(height: 130).chartYScale(domain: 0...100).accessibilityLabel("CPU 使用率历史")
             if !snapshot.cpuCores.isEmpty {
-                Text("核心详情").font(.headline)
+                Text("核心详情").font(AppTypography.cardTitle)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 70))], spacing: 8) {
                     ForEach(snapshot.cpuCores) { core in
                         VStack(alignment: .leading, spacing: 5) {
@@ -195,7 +195,7 @@ struct CompactMonitorContent: View {
         }
         ForEach(snapshot.diskIO) { io in
             VStack(alignment: .leading, spacing: 8) {
-                Text(io.device).font(.headline)
+                Text(io.device).font(AppTypography.cardTitle)
                 HStack { stat("读取", value: DisplayFormat.speed(io.readBytesPerSecond)); stat("写入", value: DisplayFormat.speed(io.writeBytesPerSecond)) }
                 Text("IOPS 读 \(Int(io.readIOPS)) / 写 \(Int(io.writeIOPS))").font(.caption).foregroundStyle(.secondary)
             }.applePanel()
@@ -210,7 +210,7 @@ struct CompactMonitorContent: View {
             stat("文件句柄", value: "\(used) / \(snapshot.fileHandlesLimit.map(String.init) ?? "—")")
         }
         trafficChart
-        Text("监听端口").font(.headline)
+        Text("监听端口").font(AppTypography.cardTitle)
         if let error = snapshot.listeningPortsError {
             Label("监听端口采集失败：\(error)", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
         } else if !snapshot.listeningPortsAvailable {
@@ -225,17 +225,17 @@ struct CompactMonitorContent: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
         }
-        Text("网络接口").font(.headline)
+        Text("网络接口").font(AppTypography.cardTitle)
         ForEach(snapshot.networkInterfaces.filter(filters.includes)) { item in
             VStack(alignment: .leading, spacing: 8) {
-                Text(item.name).font(.headline)
+                Text(item.name).font(AppTypography.cardTitle)
                 HStack { stat("下载", value: DisplayFormat.speed(item.downloadBytesPerSecond)); stat("上传", value: DisplayFormat.speed(item.uploadBytesPerSecond)) }
             }.applePanel()
         }
     }
     private var trafficChart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("网络流量").font(.headline)
+            Text("网络流量").font(AppTypography.cardTitle)
             Chart(history) { point in
                 LineMark(x: .value("时间", point.date), y: .value("字节/秒", point.download), series: .value("方向", "下载")).foregroundStyle(by: .value("方向", "下载"))
                 LineMark(x: .value("时间", point.date), y: .value("字节/秒", point.upload), series: .value("方向", "上传")).foregroundStyle(by: .value("方向", "上传"))
@@ -252,7 +252,7 @@ struct CompactMonitorContent: View {
     private var processList: some View { processRows(snapshot.topProcesses, memory: false) }
     private func processRows(_ processes: [ProcessMetric], memory: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(memory ? "进程内存排行" : "进程 CPU 排行").font(.headline)
+            Text(memory ? "进程内存排行" : "进程 CPU 排行").font(AppTypography.cardTitle)
             ForEach(processes.prefix(10)) { process in
                 HStack {
                     VStack(alignment: .leading, spacing: 3) { Text(process.name).lineLimit(1); Text("\(process.pid) · \(process.user)").font(.caption2).foregroundStyle(.secondary) }
@@ -264,7 +264,11 @@ struct CompactMonitorContent: View {
     }
     private func usage(_ title: String, value: Double, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack { Text(title).font(.headline).lineLimit(1); Spacer(); Text(DisplayFormat.percent(value)).font(.headline).monospacedDigit() }
+            HStack {
+                Text(title).font(AppTypography.cardTitle).lineLimit(1)
+                Spacer()
+                Text(DisplayFormat.percent(value)).font(.headline).monospacedDigit()
+            }
             ProgressView(value: min(100, max(0, value)), total: 100)
             Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }.applePanel().accessibilityElement(children: .combine)
@@ -275,6 +279,9 @@ struct CompactMonitorContent: View {
     }
     private func percent(_ value: Double?) -> String { value.map(DisplayFormat.percent) ?? "—" }
     private func unavailable(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) { Text(title).font(.headline); Text(detail).font(.caption).foregroundStyle(.secondary) }.applePanel()
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(AppTypography.cardTitle)
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+        }.applePanel()
     }
 }

@@ -89,7 +89,7 @@ check_generated_project() {
     GENERATED_CHECK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/serverdash-xcodegen-check.XXXXXX")"
     generated_root="${GENERATED_CHECK_ROOT}"
     cp "${ROOT_DIR}/project.yml" "${generated_root}/project.yml"
-    for item in Sources Native Vendor Resources Tests Mobile; do
+    for item in Sources Native Vendor Resources Tests Mobile MacResources MacQA ServerDashGlassUITests; do
         ln -s "${ROOT_DIR}/${item}" "${generated_root}/${item}"
     done
 

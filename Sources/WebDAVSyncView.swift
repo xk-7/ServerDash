@@ -105,8 +105,15 @@ struct WebDAVSyncView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !embedded {
-                HStack { Label("WebDAV 配置同步", systemImage: "arrow.triangle.2.circlepath").font(.title2.weight(.semibold)); Spacer(); Button("完成") { dismiss() }.disabled(model.busy) }.padding(20)
-                Divider()
+                HStack {
+                    Label("WebDAV 配置同步", systemImage: "arrow.triangle.2.circlepath")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                    Button("完成") { dismiss() }.disabled(model.busy)
+                }
+                .padding(20)
+                .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+                .padding([.top, .horizontal], AppleDesign.Spacing.md)
             }
             Form {
                 Section("连接") {
@@ -138,7 +145,17 @@ struct WebDAVSyncView: View {
                     if let error = model.error ?? keyError { Text(error).foregroundStyle(Color.appError).textSelection(.enabled) }
                     ForEach($model.changes) { $change in
                         VStack(alignment: .leading, spacing: 5) {
-                            HStack { Text(change.name).fontWeight(.medium); Spacer(); Text(change.detail).font(.caption).foregroundStyle(change.conflict ? Color.appWarning : .secondary) }
+                            HStack {
+                                Text(change.name).fontWeight(.medium)
+                                Spacer()
+                                Text(change.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(
+                                        change.conflict
+                                            ? Color.appWarning
+                                            : GlassPalette.secondaryText
+                                    )
+                            }
                             if change.conflict {
                                 Picker("处理方式", selection: $change.choice) {
                                     ForEach(SyncChoice.allCases.filter { choice in
@@ -157,14 +174,21 @@ struct WebDAVSyncView: View {
                     }
                     if model.hasPreview {
                         Button("应用预览并同步") { model.commit(appState: appState) }
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                             .disabled(model.busy || model.changes.contains { $0.choice == .unresolved })
                     }
                 }
-            }.formStyle(.grouped)
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .foregroundStyle(Color(nsColor: .textColor))
+            .modifier(WebDAVFormSurfaceModifier(embedded: embedded))
+            .padding(embedded ? 0 : AppleDesign.Spacing.md)
         }
         .frame(minWidth: embedded ? 440 : 680, idealWidth: 720, minHeight: 520, idealHeight: 700)
-        .background(Color.appGround)
+        .background {
+            if !embedded { ServerDashBackdrop() }
+        }
         .interactiveDismissDisabled(model.busy)
         .onAppear { loadSecrets() }
         .onChange(of: address) { _, _ in model.invalidate(); password = ""; loadSecrets() }
@@ -212,5 +236,18 @@ struct WebDAVSyncView: View {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             keyError = nil
         } catch { keyError = error.localizedDescription }
+    }
+}
+
+private struct WebDAVFormSurfaceModifier: ViewModifier {
+    let embedded: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if embedded {
+            content
+        } else {
+            content.applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+        }
     }
 }

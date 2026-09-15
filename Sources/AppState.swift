@@ -785,6 +785,10 @@ final class AppState: ObservableObject {
     @Published private(set) var pendingTrust: HostTrustRequest?
     @Published private(set) var monitoringHistoryError: String?
     @Published private(set) var portForwardSnapshots: [UUID: PortForwardSnapshot] = [:]
+    #if SERVERDASH_MAC_QA
+    @Published private(set) var qaRefreshInvocationCount = 0
+    @Published var qaShowsSettings = false
+    #endif
     @Published var refreshInterval: TimeInterval {
         didSet {
             UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
@@ -804,6 +808,16 @@ final class AppState: ObservableObject {
         terminalRegistry.sessions
     }
 
+    #if SERVERDASH_MAC_QA
+    func showQASettings() {
+        qaShowsSettings = true
+    }
+
+    func hideQASettings() {
+        qaShowsSettings = false
+    }
+    #endif
+
     private var selectedConfig: ServerConnectionConfig?
     private var serverRecords: [UUID: ServerRecord] = [:]
     private var runtimeStates: [UUID: ServerRuntimeState] = [:]
@@ -821,6 +835,11 @@ final class AppState: ObservableObject {
     }
 
     private let fileServicesEnabled: Bool
+    /// The separately identified Mac QA executable can contain 1,000 synthetic
+    /// hosts. It must exercise the real list projection without eagerly opening
+    /// history repositories, building connection configs, or scheduling network
+    /// work for every fixture row before the first window is shown.
+    private let usesIsolatedFixtureBootstrap: Bool
     private var didShutdown = false
     private var shutdownTask: Task<AppShutdownReport, Never>?
     private var shutdownGeneration: UUID?
@@ -839,10 +858,12 @@ final class AppState: ObservableObject {
         monitoringClock: any MonitoringClock = SystemMonitoringClock(),
         portForwardSupervisor: PortForwardSupervisor = .shared,
         terminalRegistry: TerminalSessionRegistry? = nil,
-        fileServicesEnabled: Bool = true
+        fileServicesEnabled: Bool = true,
+        usesIsolatedFixtureBootstrap: Bool = false
     ) {
         self.terminalRegistry = terminalRegistry ?? TerminalSessionRegistry()
         self.fileServicesEnabled = fileServicesEnabled
+        self.usesIsolatedFixtureBootstrap = usesIsolatedFixtureBootstrap
         self.trustCoordinator = trustCoordinator
         self.monitoringClock = monitoringClock
         self.portForwardSupervisor = portForwardSupervisor
@@ -873,6 +894,12 @@ final class AppState: ObservableObject {
     }
 
     func bootstrap(servers: [ServerRecord], context: ModelContext) {
+        if usesIsolatedFixtureBootstrap {
+            for server in servers {
+                serverRecords[server.id] = server
+            }
+            return
+        }
         if fileServicesEnabled { DirectorySyncStore.shared.configure(container: context.container) }
         if monitoringHistory == nil {
             monitoringHistory = MonitoringHistoryRepository(
@@ -1069,6 +1096,9 @@ final class AppState: ObservableObject {
     }
 
     func refreshAll(_ servers: [ServerRecord], failedOnly: Bool = false) async {
+        #if SERVERDASH_MAC_QA
+        qaRefreshInvocationCount += 1
+        #endif
         for server in servers {
             serverRecords[server.id] = server
         }
@@ -1169,10 +1199,17 @@ final class AppState: ObservableObject {
     @Published private(set) var fileControllers: [UUID: MacSFTPController] = [:]
     private var inspectorFileControllers: [UUID: MacSFTPController] = [:]
 
-    func inspectorFileController(for server: ServerRecord) -> MacSFTPController {
+    func inspectorFileController(
+        for server: ServerRecord,
+        automaticallyConnect: Bool = true
+    ) -> MacSFTPController {
         if let existing = inspectorFileControllers[server.id] { return existing }
         let controller = fileControllers.values.first { $0.server.id == server.id }
-            ?? MacSFTPController(server: server, appState: self)
+            ?? MacSFTPController(
+                server: server,
+                appState: self,
+                automaticallyConnect: automaticallyConnect
+            )
         inspectorFileControllers[server.id] = controller
         return controller
     }
@@ -1212,17 +1249,22 @@ final class AppState: ObservableObject {
         RDPConnectionActivityStore.shared.remove(machineID)
     }
 
-    func openSFTP(for server: ServerRecord) {
+    func openSFTP(for server: ServerRecord, automaticallyConnect: Bool = true) {
         route = .section(.terminal)
         if let existing = terminalRegistry.workspace.tabs.first(where: { $0.kind == .sftp && $0.serverID == server.id }) {
             terminalRegistry.workspace.select(tab: existing.id)
             return
         }
         let id = UUID()
-        let controller = inspectorFileController(for: server)
+        let controller = inspectorFileController(
+            for: server,
+            automaticallyConnect: automaticallyConnect
+        )
         fileControllers[id] = controller
         terminalRegistry.workspace.add(sessionID: id, serverID: server.id, title: server.displayName, kind: .sftp)
-        controller.beginIfNeeded()
+        if automaticallyConnect {
+            controller.beginIfNeeded()
+        }
     }
 
     func closeWorkspaceTabs(_ tabs: [WorkspaceTab]) {

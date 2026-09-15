@@ -1,3 +1,4 @@
+import AppKit
 import SwiftData
 import SwiftUI
 
@@ -5,11 +6,27 @@ struct SSHConnectionRouteEditor: View {
     @Environment(\.dismiss) private var dismiss
     let server: ServerRecord
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text("\(server.displayName) · 连接路线与代理").font(.title2.bold()); Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
-            Divider()
-            ProfessionalConnectionsView(initialServerID: server.id, routeOnly: true)
-        }.frame(width: 860, height: 700)
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    Text("\(server.displayName) · 连接路线与代理")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                    Button("完成") { dismiss() }
+                        .macGlassButton()
+                        .keyboardShortcut(.cancelAction)
+                }
+                .padding(20)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+                Divider()
+                ProfessionalConnectionsView(initialServerID: server.id, routeOnly: true)
+                    .foregroundStyle(Color(nsColor: .textColor))
+                    .background(Color(nsColor: .controlBackgroundColor))
+            }
+        }
+        .frame(width: 860, height: 700)
     }
 }
 
@@ -33,10 +50,19 @@ struct VNCEditorView: View {
         _tags = State(initialValue: record?.tagsText ?? ""); _notes = State(initialValue: record?.notes ?? "")
     }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text(record == nil ? "新建 VNC 主机" : "编辑 VNC 主机").font(.title2.bold()); Spacer() }.padding(20)
-            Divider()
-            Form {
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(record == nil ? "新建 VNC 主机" : "编辑 VNC 主机")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                }
+                .padding(20)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+                Divider()
+                Form {
                 Section("连接信息") {
                     TextField("名称", text: $name); TextField("主机地址", text: $host)
                     TextField("端口", value: $port, format: .number.grouping(.never))
@@ -46,15 +72,28 @@ struct VNCEditorView: View {
                     TextField("分组", text: $group); TextField("标签（逗号分隔）", text: $tags)
                     TextField("备注", text: $notes, axis: .vertical).lineLimit(2...4)
                 }
-            }.formStyle(.grouped)
-            if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal, 20) }
-            Divider()
-            HStack {
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("保存") { save(connect: false) }
-                Button("保存并打开屏幕共享") { save(connect: true) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-            }.padding(16).disabled(opening)
-        }.frame(width: 550, height: 500)
+                }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(Color(nsColor: .textColor))
+                .background(Color(nsColor: .controlBackgroundColor))
+                if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal, 20) }
+                Divider()
+                HStack {
+                    Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("保存") { save(connect: false) }
+                    Button("保存并打开屏幕共享") { save(connect: true) }
+                        .macGlassButton(prominent: true)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+                .disabled(opening)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+            }
+        }
+        .frame(width: 550, height: 500)
     }
     private func save(connect: Bool) {
         do {
@@ -92,10 +131,19 @@ struct SerialEditorView: View {
         _tags = State(initialValue: record?.tagsText ?? ""); _notes = State(initialValue: record?.notes ?? "")
     }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text(record == nil ? "新建串口连接" : "编辑串口连接").font(.title2.bold()); Spacer() }.padding(20)
-            Divider()
-            Form {
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(record == nil ? "新建串口连接" : "编辑串口连接")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                }
+                .padding(20)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+                Divider()
+                Form {
                 Section("设备") {
                     TextField("名称", text: $name)
                     HStack {
@@ -121,15 +169,28 @@ struct SerialEditorView: View {
                     TextField("分组", text: $group); TextField("标签（逗号分隔）", text: $tags)
                     TextField("备注", text: $notes, axis: .vertical).lineLimit(2...4)
                 }
-            }.formStyle(.grouped)
-            if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal, 20) }
-            Divider()
-            HStack {
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("保存") { save(connect: false) }
-                Button("保存并连接") { save(connect: true) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-            }.padding(16)
-        }.frame(width: 550, height: 620).onAppear { devices = SerialDeviceDiscovery.devices() }
+                }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(Color(nsColor: .textColor))
+                .background(Color(nsColor: .controlBackgroundColor))
+                if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal, 20) }
+                Divider()
+                HStack {
+                    Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                    Spacer()
+                    Button("保存") { save(connect: false) }
+                    Button("保存并连接") { save(connect: true) }
+                        .macGlassButton(prominent: true)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+            }
+        }
+        .frame(width: 550, height: 620)
+        .onAppear { devices = SerialDeviceDiscovery.devices() }
     }
     private func save(connect: Bool) {
         do {

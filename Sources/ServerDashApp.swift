@@ -11,6 +11,7 @@ struct ServerDashApp: App {
     @AppStorage("appAppearance") private var appAppearanceRawValue = AppAppearance.system.rawValue
 
     init() {
+        AppTypography.registerBundledFonts()
         MacUIFixture.prepareEnvironment()
         PrivacySettings.migrateLocationLookupPreference()
         LaunchPerformanceTracker.shared.start()
@@ -28,23 +29,33 @@ struct ServerDashApp: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            Group {
-                if let container = persistence.container {
-                    ContentView()
-                        .environmentObject(appState)
-                        .environmentObject(monitorLayoutStore)
-                        .modelContainer(container)
-                } else if let error = persistence.openError {
-                    DatabaseRecoveryView(
-                        error: error,
-                        backupURL: persistence.lastBackupURL,
-                        onRetry: persistence.open,
-                        onRebuild: persistence.rebuild
-                    )
-                } else {
-                    ProgressView("正在打开数据库")
+            ZStack {
+                ServerDashBackdrop()
+
+                Group {
+                    if let container = persistence.container {
+                        ContentView()
+                            .environmentObject(appState)
+                            .environmentObject(monitorLayoutStore)
+                            .modelContainer(container)
+                    } else if let error = persistence.openError {
+                        DatabaseRecoveryView(
+                            error: error,
+                            backupURL: persistence.lastBackupURL,
+                            onRetry: persistence.open,
+                            onRebuild: persistence.rebuild
+                        )
+                        .padding(AppleDesign.Spacing.lg)
+                        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+                        .padding(AppleDesign.Spacing.lg)
+                    } else {
+                        ProgressView("正在打开数据库")
+                            .padding(AppleDesign.Spacing.lg)
+                            .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+                    }
                 }
             }
+            .font(AppTypography.body)
             .onAppear {
                 LaunchPerformanceTracker.shared.markFirstFrame()
             }
@@ -109,7 +120,12 @@ struct ServerDashApp: App {
         }
 
         Window("AI 通用对话", id: "ai-general") {
-            AIGeneralWindow().preferredColorScheme(appAppearance.colorScheme)
+            ZStack {
+                ServerDashBackdrop()
+                AIGeneralWindow()
+            }
+            .font(AppTypography.body)
+            .preferredColorScheme(appAppearance.colorScheme)
         }.defaultSize(width: 640, height: 760)
 
         Settings {
@@ -119,7 +135,10 @@ struct ServerDashApp: App {
                     .environmentObject(monitorLayoutStore)
                     .modelContainer(container)
             } else {
-                Text("请先完成数据库恢复。").padding()
+                ZStack {
+                    ServerDashBackdrop()
+                    Text("请先完成数据库恢复。").padding().applePanel()
+                }
             }
         }
     }

@@ -37,7 +37,7 @@ struct TerminalBatchExecutionSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("选择已连接的 SSH 面板").font(.headline)
+                Text("选择已连接的 SSH 面板").font(AppTypography.cardTitle)
                 if let pending {
                     Text("确认向以下 \(pending.targets.count) 个面板发送命令：").font(.callout)
                     targetList(pending.targets, editable: false)
@@ -48,11 +48,16 @@ struct TerminalBatchExecutionSheet: View {
                     HStack {
                         Button("返回编辑") { self.pending = nil }
                         Spacer()
-                        Button("确认执行") { execute(pending) }.buttonStyle(.borderedProminent)
+                        Button("确认执行") { execute(pending) }.macGlassButton(prominent: true)
                     }
                 } else {
                     targetList(targets, editable: true)
-                    TextEditor(text: $command).font(.body.monospaced()).frame(height: 130)
+                    TextEditor(text: $command)
+                        .font(.body.monospaced())
+                        .foregroundStyle(Color(nsColor: .textColor))
+                        .scrollContentBackground(.hidden)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .frame(height: 130)
                         .overlay { RoundedRectangle(cornerRadius: 6).stroke(.quaternary) }
                     if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
                     HStack {
@@ -61,14 +66,19 @@ struct TerminalBatchExecutionSheet: View {
                         Button("预览执行…") {
                             let request = TerminalBatchRequest(command: command, targets: targets.filter { selected.contains($0.id) })
                             if request.isValid { pending = request }
-                        }.buttonStyle(.borderedProminent)
+                        }.macGlassButton(prominent: true)
                             .disabled(!TerminalBatchRequest(command: command, targets: targets.filter { selected.contains($0.id) }).isValid)
                     }
                 }
-            }.padding(20)
+            }
+            .padding(20)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+            .padding(AppleDesign.Spacing.md)
                 .navigationTitle("批量执行命令")
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
-        }.frame(width: 620, height: 590)
+        }
+        .frame(width: 620, height: 590)
+        .macGlassSheetRoot()
     }
     private func targetList(_ entries: [TerminalBatchTarget], editable: Bool) -> some View {
         ScrollView {
@@ -135,7 +145,7 @@ struct TerminalTunnelManagerView: View {
                             serverID: server.id, direction: direction, bindAddress: bindAddress,
                             listenPort: listenPort, targetHost: targetHost, targetPort: targetPort)
                         requestStart(rule)
-                    }.disabled(busy).buttonStyle(.borderedProminent)
+                    }.disabled(busy).macGlassButton(prominent: true)
                 }
                 if let operationError { Section { Label(operationError, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
                 Section("已保存的隧道") {
@@ -143,7 +153,7 @@ struct TerminalTunnelManagerView: View {
                     ForEach(rules) { record in
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(record.name).font(.headline)
+                                Text(record.name).font(AppTypography.cardTitle)
                                 Text("\(record.rule.direction.title) · \(record.bindAddress):\(record.listenPort)").font(.caption.monospaced()).foregroundStyle(.secondary)
                                 if let error = appState.portForwardSnapshots[record.id]?.lastError { Text(error).font(.caption).foregroundStyle(.red) }
                             }
@@ -155,9 +165,15 @@ struct TerminalTunnelManagerView: View {
                         }
                     }
                 }
-            }.formStyle(.grouped).navigationTitle("SSH 隧道管理")
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .macHighContrastContentSurface()
+            .navigationTitle("SSH 隧道管理")
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-        }.frame(width: 650, height: 580)
+        }
+        .frame(width: 650, height: 580)
+        .macGlassSheetRoot()
             .task {
                 while !Task.isCancelled {
                     await appState.refreshPortForwardSnapshots()

@@ -126,6 +126,7 @@ struct AIProviderAdapter: Sendable {
     }
 
     func listModels(profile: AIProviderProfile, key: String, protocolClasses: [AnyClass]? = nil) async throws -> [AIModelDescriptor] {
+        try MacUIFixtureIsolationPolicy.requireNetworkAllowed()
         var models: [String: AIModelDescriptor] = [:], cursor: String?, visited: Set<String> = []
         let delegate = AIBoundedResponseDelegate()
         let config = URLSessionConfiguration.ephemeral

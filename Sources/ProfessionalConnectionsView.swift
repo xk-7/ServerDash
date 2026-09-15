@@ -151,7 +151,7 @@ struct ProfessionalConnectionsView: View {
                     HStack {
                         Spacer()
                         Button("保存路线") { saveImportedRoute(importResult) }
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                             .disabled(selectedServerID == nil)
                     }
                 }
@@ -165,7 +165,7 @@ struct ProfessionalConnectionsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
             Text("最终解析值")
-                .font(.headline)
+                .font(AppTypography.cardTitle)
             ForEach(Array(result.reports.enumerated()), id: \.offset) { _, report in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(report.alias)
@@ -195,7 +195,7 @@ struct ProfessionalConnectionsView: View {
             let unsupported = result.reports.flatMap(\.unsupported)
             if !unsupported.isEmpty {
                 Text("不支持项（\(DisplayFormat.integer(unsupported.count))）")
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                 ForEach(unsupported) { item in
                     Label(
                         "\(item.name) · \(item.source.display) · \(item.reason)",
@@ -224,7 +224,7 @@ struct ProfessionalConnectionsView: View {
                     ForEach(visibleRoutes) { record in
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(record.name).font(.headline)
+                                Text(record.name).font(AppTypography.cardTitle)
                                 Text(routeSummary(record))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -289,7 +289,7 @@ struct ProfessionalConnectionsView: View {
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Button("保存代理路线") { saveProxyRoute() }
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                         .disabled(
                             selectedServerID == nil ||
                                 proxyHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -351,7 +351,7 @@ struct ProfessionalConnectionsView: View {
                 HStack {
                     Spacer()
                     Button("添加规则") { addRule() }
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                         .disabled(selectedServerID == nil)
                 }
                 Text("默认仅允许本机访问。远端或广域监听需要在启动前确认。")
@@ -386,10 +386,14 @@ struct ProfessionalConnectionsView: View {
         return HStack {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(record.name).font(.headline)
+                    Text(record.name).font(AppTypography.cardTitle)
                     Text(snapshot?.state.rawValue ?? "stopped")
                         .font(.caption.monospaced())
-                        .foregroundStyle(snapshot?.state == .ready ? Color.appLive : .secondary)
+                        .foregroundStyle(
+                            snapshot?.state == .ready
+                                ? Color.appLive
+                                : GlassPalette.secondaryText
+                        )
                 }
                 Text(tunnelSummary(rule))
                     .font(.caption.monospaced())
@@ -419,7 +423,7 @@ struct ProfessionalConnectionsView: View {
                         )
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .macGlassButton(prominent: true)
             }
         }
     }

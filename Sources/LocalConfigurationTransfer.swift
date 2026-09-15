@@ -169,7 +169,14 @@ struct LocalConfigurationTransferView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text(mode.title).font(.title2.weight(.semibold)); Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
+            HStack {
+                Text(mode.title).font(AppTypography.pageTitle)
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -179,7 +186,7 @@ struct LocalConfigurationTransferView: View {
                         Button("选择配置包…", systemImage: "folder") { chooseImport() }
                         if !filename.isEmpty { Text(filename).font(.caption).foregroundStyle(.secondary) }
                         if let plan {
-                            Text("\(plan.incoming.count) 项配置，\(changes.count) 项变更").font(.headline)
+                            Text("\(plan.incoming.count) 项配置，\(changes.count) 项变更").font(AppTypography.cardTitle)
                             if plan.ignoredDeletions > 0 { Text("已忽略 \(plan.ignoredDeletions) 条删除记录。").font(.caption).foregroundStyle(.secondary) }
                             Text("包中未包含的本机配置会保留。导入的本地命令保持关闭，串口设备需在本机重新选择。").font(.caption).foregroundStyle(.secondary)
                             ForEach($changes) { $change in
@@ -191,11 +198,13 @@ struct LocalConfigurationTransferView: View {
                                         }
                                     }
                                     ConfigurationChangeDetails(local: change.local, incoming: change.remote, incomingTitle: "配置包")
-                                }.padding(12).background(Color.appSurface, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                                .padding(12)
+                                .applePanel(padding: 0, radius: AppleDesign.Radius.card)
                             }
                         }
                     } else if let package = exportPackage {
-                        Text("\(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }.count) 台主机 · \(package.objects.count) 项配置").font(.headline)
+                        Text("\(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }.count) 台主机 · \(package.objects.count) 项配置").font(AppTypography.cardTitle)
                         Text("文件包含主机地址和连接配置，请选择本机保存位置。").font(.caption).foregroundStyle(.secondary)
                         ForEach(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }) { object in
                             HStack { Text(object.name); Spacer(); Text(object.kind.uppercased()).font(.caption).foregroundStyle(.secondary) }
@@ -203,19 +212,27 @@ struct LocalConfigurationTransferView: View {
                     }
                     if let error { Text(error).foregroundStyle(Color.appError).textSelection(.enabled) }
                     if completed { Label(importing ? "配置已导入" : "配置包已保存", systemImage: "checkmark.circle.fill").foregroundStyle(Color.green) }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+                .foregroundStyle(GlassPalette.primaryText)
             }
             Divider()
             HStack {
                 Spacer()
                 if importing {
-                    Button("应用预览并导入") { applyImport() }.buttonStyle(.borderedProminent)
+                    Button("应用预览并导入") { applyImport() }.macGlassButton(prominent: true)
                         .disabled(plan == nil || completed || changes.contains { $0.choice == .unresolved })
                 } else {
-                    Button("保存配置包…") { saveExport() }.buttonStyle(.borderedProminent).disabled(exportPackage == nil)
+                    Button("保存配置包…") { saveExport() }.macGlassButton(prominent: true).disabled(exportPackage == nil)
                 }
-            }.padding(16)
-        }.frame(minWidth: 600, idealWidth: 740, minHeight: 500, idealHeight: 680).background(Color.appGround)
+            }
+            .padding(16)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
+        }
+        .frame(minWidth: 600, idealWidth: 740, minHeight: 500, idealHeight: 680)
+        .background(ServerDashBackdrop())
             .onAppear { prepareExport() }
     }
     private func prepareExport() {

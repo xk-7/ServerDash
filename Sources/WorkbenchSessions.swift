@@ -541,7 +541,10 @@ struct WorkbenchSessionPane: View {
                 Label(controller.name, systemImage: controller.kind.icon)
                 Spacer(); Text(controller.status.title).foregroundStyle(.secondary)
                 if controller.status != .connected { Button("重新连接") { controller.reconnect() } }
-            }.padding(10).background(.bar)
+            }
+            .padding(10)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             if let error = controller.lastError { Text(error).foregroundStyle(.red).font(.caption).padding(8) }
             TerminalDisplaySearchBar(search: controller.displaySearch, onClose: controller.focus)
             WorkbenchTerminalRepresentable(controller: controller)

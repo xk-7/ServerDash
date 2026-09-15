@@ -80,7 +80,8 @@ struct AIChatView: View {
             Divider()
             composer
         }
-        .background(Color.appGround)
+        .foregroundStyle(GlassPalette.primaryText)
+        .background(Color.clear)
         .task {
             await workspace.load()
             if let controller { workspace.prepare(controller) }
@@ -91,9 +92,14 @@ struct AIChatView: View {
         .onChange(of: conversationID) { _, _ in pendingCommand = nil; showingConsent = false }
         .sheet(isPresented: $showingSettings) {
             VStack(spacing: 0) {
-                HStack { Text("AI 设置").font(.headline); Spacer(); Button("完成") { showingSettings = false } }.padding()
+                HStack { Text("AI 设置").font(AppTypography.sectionTitle); Spacer(); Button("完成") { showingSettings = false } }
+                    .padding()
+                    .macGlassChromeBar()
                 AISettingsView(settings: settings)
-            }.frame(width: 680, height: 720)
+                    .macHighContrastContentSurface()
+            }
+            .frame(width: 680, height: 720)
+            .macGlassSheetRoot()
         }
         .sheet(isPresented: $showingModels) {
             AIModelPicker(profile: activeProfile, settings: settings, key: { try settings.key(for: activeProfile) }) { model in
@@ -110,11 +116,16 @@ struct AIChatView: View {
         }
         .sheet(isPresented: Binding(get: { contextPreview != nil }, set: { if !$0 { contextPreview = nil } })) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("终端附件预览").font(.headline)
+                Text("终端附件预览").font(AppTypography.sectionTitle)
                 Text("最多 16 KiB；发送时重新采集当前可见屏幕。可能包含密码、令牌或业务数据，不提供可靠自动脱敏。关闭自动附件后仍可手动粘贴内容。").font(.caption).foregroundStyle(.secondary)
                 ScrollView { Text(contextPreview ?? "").font(.callout.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 HStack { Spacer(); Button("完成") { contextPreview = nil }.keyboardShortcut(.defaultAction) }
-            }.padding(20).frame(width: 640, height: 480)
+            }
+            .padding(20)
+            .frame(width: 640, height: 480)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+            .padding(AppleDesign.Spacing.md)
+            .macGlassSheetRoot()
         }
         .alert("允许向 AI 服务附带终端上下文？", isPresented: $showingConsent) {
             Button("允许此连接") {
@@ -144,7 +155,7 @@ struct AIChatView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("AI 助手", systemImage: "sparkles").font(.headline)
+                Label("AI 助手", systemImage: "sparkles").font(AppTypography.sectionTitle)
                 Spacer()
                 Button { showingConversations = true } label: { Image(systemName: "bubble.left.and.bubble.right") }
                     .help("对话管理（最多 50 个）").accessibilityLabel("AI 对话管理")
@@ -180,9 +191,11 @@ struct AIChatView: View {
                 Label("地址已修改，请新建对话。旧历史不会转发。", systemImage: "lock.shield")
                     .font(.caption2).foregroundStyle(Color.appWarning)
                 Button("为新地址新建对话") { newConversation(profile: settings.profile(activeProfile.provider)) }
-                    .font(.caption).buttonStyle(.bordered)
+                    .font(.caption).macGlassButton()
             }
-        }.padding(12)
+        }
+        .padding(12)
+        .background(AppleChromeBackground())
     }
 
     private var messageList: some View {
@@ -193,10 +206,11 @@ struct AIChatView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             Image(systemName: mode == .ops ? "terminal" : "bubble.left.and.text.bubble.right")
                                 .font(.system(size: 28)).foregroundStyle(Color.accentColor)
-                            Text(mode == .ops ? "把问题带到终端旁边" : "独立思考，随时提问").font(.title3.weight(.semibold))
+                            Text(mode == .ops ? "把问题带到终端旁边" : "独立思考，随时提问")
+                                .font(AppTypography.cardTitle)
                             Text("生成命令、解释参数、分析日志或编写脚本。回复仅供参考，执行前请检查。").font(.callout).foregroundStyle(.secondary)
                             ForEach(["生成 Shell 命令", "解释命令", "分析错误日志", "编写 Bash / Python / Ansible 脚本"], id: \.self) { title in
-                                Button(title) { draft.wrappedValue = title + "：" }.buttonStyle(.bordered)
+                                Button(title) { draft.wrappedValue = title + "：" }.macGlassButton()
                             }
                         }.padding(.vertical, 24)
                     }
@@ -262,7 +276,7 @@ struct AIChatView: View {
                         controller.hostView.tools.composerVisible = true
                     }
                     Button("执行…") { pendingCommand = .init(target: target, command: block.text) }
-                }.font(.caption).buttonStyle(.bordered)
+                }.font(.caption).macGlassButton()
             }
         }.padding(10).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
     }
@@ -288,6 +302,7 @@ struct AIChatView: View {
             }
             TextField("描述需求，或粘贴命令与日志…", text: draft, axis: .vertical)
                 .lineLimit(3...8).textFieldStyle(.roundedBorder)
+                .foregroundStyle(Color(nsColor: .textColor))
                 .accessibilityLabel("AI 消息输入")
             HStack {
                 Toggle("跟随回复", isOn: $followsOutput).toggleStyle(.checkbox).font(.caption)
@@ -298,12 +313,14 @@ struct AIChatView: View {
                 if busy {
                     Button("停止") { if let id = conversationID { workspace.stop(id) } }
                 } else {
-                    Button("发送") { send() }.buttonStyle(.borderedProminent)
+                    Button("发送") { send() }.macGlassButton(prominent: true)
                         .disabled(!workspace.loaded || destinationChanged || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             Text("聊天保存在本机；发送内容交由所配置的 AI 服务处理。请勿提交秘密。").font(.caption2).foregroundStyle(.secondary)
-        }.padding(12)
+        }
+        .padding(12)
+        .background(AppleChromeBackground())
     }
 
     private func newConversation(profile: AIProviderProfile? = nil) {
@@ -390,6 +407,8 @@ private struct AIConversationBrowser: View {
                     }.padding(.vertical, 4)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .macHighContrastContentSurface()
             .searchable(text: $search, prompt: "搜索对话名称")
             .navigationTitle("本地对话 · \(workspace.conversations.count)/50")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
@@ -399,7 +418,9 @@ private struct AIConversationBrowser: View {
             .confirmationDialog("删除此对话及全部消息？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
                 Button("删除对话", role: .destructive) { if let id = deleting { Task { await workspace.delete(id) } }; deleting = nil }
             }
-        }.frame(width: 620, height: 520)
+        }
+        .frame(width: 620, height: 520)
+        .macGlassSheetRoot()
     }
 }
 
@@ -463,7 +484,7 @@ struct AISettingsView: View {
             }.font(.caption).foregroundStyle(.secondary)
             Section {
                 HStack {
-                    Button("保存设置") { _ = save() }.buttonStyle(.borderedProminent).disabled(testing)
+                    Button("保存设置") { _ = save() }.macGlassButton(prominent: true).disabled(testing)
                     Button(testing ? "停止测试" : "测试连接") { if testing { cancelTest(); status = "已停止测试。" } else { testConnection() } }
                     if testing { ProgressView().controlSize(.small) }
                 }
@@ -471,6 +492,7 @@ struct AISettingsView: View {
                 if let status { Text(status).font(.caption).textSelection(.enabled) }
             }
         }.formStyle(.grouped)
+            .macGlassFormBackground()
             .onAppear { load(settings.defaultProvider) }
             .onDisappear { cancelTest(); key = "" }
             .onChange(of: profile) { old, new in
@@ -543,19 +565,29 @@ private struct AIModelPicker: View {
     @State private var requestID = UUID()
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Text("\(profile.provider.title) · 模型").font(.headline); Spacer(); Button("取消") { dismiss() } }
-            TextField("搜索模型名称或 ID", text: $search).textFieldStyle(.roundedBorder)
+            HStack {
+                Text("\(profile.provider.title) · 模型").font(AppTypography.cardTitle)
+                Spacer()
+                Button("取消") { dismiss() }
+            }
+            TextField("搜索模型名称或 ID", text: $search)
+                .textFieldStyle(.roundedBorder)
+                .foregroundStyle(Color(nsColor: .textColor))
             List(models.filter { search.isEmpty || $0.id.localizedCaseInsensitiveContains(search) || $0.name.localizedCaseInsensitiveContains(search) }) { model in
                 Button { manual = model.id } label: {
                     VStack(alignment: .leading) { Text(model.id); Text(model.name).font(.caption).foregroundStyle(.secondary) }
                 }.buttonStyle(.plain).accessibilityLabel("选择 \(model.id)")
             }
+            .scrollContentBackground(.hidden)
+            .macHighContrastContentSurface(cornerRadius: AppleDesign.Radius.chip)
             HStack {
                 Button(loading ? "停止刷新" : "刷新模型列表") { if loading { cancel() } else { refresh() } }
                     .disabled(!profile.provider.discoverySupported)
                 if loading { ProgressView().controlSize(.small) }
             }
-            TextField("手动填写模型 ID / 推理接入点 ID", text: $manual).textFieldStyle(.roundedBorder)
+            TextField("手动填写模型 ID / 推理接入点 ID", text: $manual)
+                .textFieldStyle(.roundedBorder)
+                .foregroundStyle(Color(nsColor: .textColor))
             Text(profile.provider == .volcengine ? "请从方舟控制台复制已开通的模型 ID 或 ep- 接入点 ID。" : "列表来自当前服务，不代表具备调用权限或支持所有参数。刷新仅查询目录，不发送对话。也可手动填写 ID。")
                 .font(.caption).foregroundStyle(.secondary)
             if let status { Text(status).font(.caption).foregroundStyle(Color.appWarning) }
@@ -563,8 +595,13 @@ private struct AIModelPicker: View {
                 let id = manual.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !id.isEmpty, id.utf8.count <= 256, !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { status = AIError.configuration.localizedDescription; return }
                 select(id); dismiss()
-            }.buttonStyle(.borderedProminent).disabled(manual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-        }.padding(20).frame(width: 540, height: 540)
+            }.macGlassButton(prominent: true).disabled(manual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+        }
+        .padding(20)
+        .frame(width: 540, height: 540)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+        .padding(AppleDesign.Spacing.md)
+        .macGlassSheetRoot()
             .onAppear { models = mayCache ? settings.models(for: profile) : []; manual = profile.model }
             .onDisappear { cancel() }
             .onChange(of: profile) { _, _ in cancel(); models = []; manual = profile.model }

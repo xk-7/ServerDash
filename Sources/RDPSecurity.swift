@@ -4,7 +4,14 @@ import Security
 
 enum RDPCredentials {
     static let service = "com.serverdash.rdp.credentials"
+    #if SERVERDASH_MAC_QA
+    private static let qaCredentials = InMemoryCredentialStore()
+    #endif
+
     static func read(_ id: UUID) throws -> String? {
+        #if SERVERDASH_MAC_QA
+        return qaCredentials.read(id.uuidString)
+        #else
         var query = base(id)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -14,23 +21,35 @@ enum RDPCredentials {
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
         guard let data = item as? Data, let password = String(data: data, encoding: .utf8) else { throw KeychainError.invalidData }
         return password
+        #endif
     }
     static func save(_ password: String, id: UUID) throws {
+        #if SERVERDASH_MAC_QA
+        qaCredentials.write(password, account: id.uuidString)
+        #else
         let query = base(id)
         let attributes: [String: Any] = [kSecValueData as String: Data(password.utf8),
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecAttrSynchronizable as String: false]
         let status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
+        #endif
     }
     static func delete(_ id: UUID) throws {
+        #if SERVERDASH_MAC_QA
+        qaCredentials.delete(id.uuidString)
+        #else
         let status = SecItemDelete(base(id) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError.unexpectedStatus(status) }
+        #endif
     }
+
+    #if !SERVERDASH_MAC_QA
     private static func base(_ id: UUID) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
          kSecAttrAccount as String: id.uuidString]
     }
+    #endif
 }
 
 struct RDPCertificateEvidence: Equatable, Sendable {

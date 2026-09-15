@@ -2,6 +2,9 @@ import Foundation
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#endif
 
 struct SessionImportWizard: View {
     private enum Step: Int {
@@ -44,9 +47,11 @@ struct SessionImportWizard: View {
                 case .result: resultView
                 }
             }
+            .sessionWizardContentShell()
             .navigationTitle(navigationTitle)
             .toolbar { toolbarContent }
         }
+        .sessionWizardBackdrop()
         .sessionWizardFrame()
         .onAppear {
             guard !initializedSource else { return }
@@ -95,7 +100,13 @@ struct SessionImportWizard: View {
                         .foregroundStyle(item == source ? Color.appAccent : .secondary)
                         .frame(width: 30)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(item.title).font(.headline).foregroundStyle(.primary)
+                        Text(item.title)
+#if os(macOS)
+                            .font(AppTypography.cardTitle)
+#else
+                            .font(.headline)
+#endif
+                            .foregroundStyle(.primary)
                         Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -110,6 +121,7 @@ struct SessionImportWizard: View {
             .accessibilityLabel("\(item.title)，\(item.subtitle)")
             .accessibilityAddTraits(item == source ? .isSelected : [])
         }
+        .sessionWizardDenseSurface()
     }
 
     private var inputView: some View {
@@ -120,7 +132,12 @@ struct SessionImportWizard: View {
                 .foregroundStyle(Color.appAccent)
                 .accessibilityHidden(true)
             VStack(spacing: 8) {
-                Text("从 \(source.title) 导入").font(.title2.bold())
+                Text("从 \(source.title) 导入")
+#if os(macOS)
+                    .font(AppTypography.sectionTitle)
+#else
+                    .font(.title2.bold())
+#endif
                 Text("选择配置文件、导出文件、配置目录或 ZIP。文件只在本次导入期间读取。")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
@@ -129,7 +146,7 @@ struct SessionImportWizard: View {
             Button("选择配置文件或目录", systemImage: "folder") {
                 showingFileImporter = true
             }
-            .buttonStyle(.borderedProminent)
+            .sessionWizardPrimaryButton()
             .controlSize(.large)
             .frame(minHeight: 44)
 
@@ -160,7 +177,7 @@ struct SessionImportWizard: View {
                     importSummary(preview)
                         .frame(width: 250)
                         .padding(20)
-                        .background(Color.appSurface)
+                        .sessionWizardSummarySurface()
                     Divider()
                     candidateList(preview)
                 }
@@ -224,12 +241,17 @@ struct SessionImportWizard: View {
             }
 #endif
         }
+        .sessionWizardDenseSurface()
     }
 
     private func importSummary(_ preview: SessionImportPreview) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             Label("导入摘要", systemImage: "checklist")
+#if os(macOS)
+                .font(AppTypography.cardTitle)
+#else
                 .font(.headline)
+#endif
             summaryRow(
                 "来源",
                 preview.detectedSources.isEmpty
@@ -251,13 +273,23 @@ struct SessionImportWizard: View {
     private func compactImportSummary(_ preview: SessionImportPreview) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("已选择 \(selectedImportCount) 个会话").font(.headline)
+                Text("已选择 \(selectedImportCount) 个会话")
+#if os(macOS)
+                    .font(AppTypography.cardTitle)
+#else
+                    .font(.headline)
+#endif
                 Text("\(preview.duplicateCount) 个重复项默认跳过").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
         }
         .padding()
+#if os(macOS)
+        .foregroundStyle(GlassPalette.primaryText)
+        .background(AppleChromeBackground())
+#else
         .background(.regularMaterial)
+#endif
     }
 
     private func summaryRow(_ title: String, _ value: String) -> some View {
@@ -272,7 +304,12 @@ struct SessionImportWizard: View {
             Spacer()
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 58)).foregroundStyle(Color.appLive)
-            Text("会话已导入").font(.title2.bold())
+            Text("会话已导入")
+#if os(macOS)
+                .font(AppTypography.sectionTitle)
+#else
+                .font(.title2.bold())
+#endif
             if let result {
                 Text("成功导入 \(result.importedCount) 个会话，跳过 \(result.skippedCount) 个。")
                     .foregroundStyle(.secondary)
@@ -281,7 +318,7 @@ struct SessionImportWizard: View {
                         .font(.callout)
                 }
             }
-            Button("完成") { dismiss() }.buttonStyle(.borderedProminent).controlSize(.large)
+            Button("完成") { dismiss() }.sessionWizardPrimaryButton().controlSize(.large)
             Spacer()
         }
         .padding()
@@ -302,7 +339,7 @@ struct SessionImportWizard: View {
                 Button("继续") { step = .input }
             case .preview:
                 Button("确定（\(selectedImportCount)）", action: commit)
-                    .buttonStyle(.borderedProminent)
+                    .sessionWizardPrimaryButton()
                     .disabled(selectedImportCount == 0 || isWorking)
             case .input, .result:
                 EmptyView()
@@ -447,7 +484,13 @@ private struct SessionImportCandidateRow: View {
                 .disabled(!candidate.isValid || candidate.isDuplicate && !importsDuplicate)
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
-                    Text(candidate.record.name).font(.headline).lineLimit(1)
+                    Text(candidate.record.name)
+#if os(macOS)
+                        .font(AppTypography.cardTitle)
+#else
+                        .font(.headline)
+#endif
+                        .lineLimit(1)
                     Spacer()
                     Text(candidate.source.title).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -594,6 +637,7 @@ struct SessionExportWizard: View {
                     Section { ProgressView("正在生成导出文件…") }
                 }
             }
+            .sessionWizardDenseSurface()
             .navigationTitle("导出会话")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -607,11 +651,13 @@ struct SessionExportWizard: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("导出", action: prepareExport)
-                        .buttonStyle(.borderedProminent)
+                        .sessionWizardPrimaryButton()
                         .disabled(chosenServers.isEmpty || isWorking || target.exportAvailability != .available)
                 }
             }
         }
+        .sessionWizardContentShell()
+        .sessionWizardBackdrop()
         .sessionWizardFrame()
         .interactiveDismissDisabled(isWorking)
         .onAppear {
@@ -694,6 +740,54 @@ private extension View {
         frame(minWidth: 760, idealWidth: 900, minHeight: 600, idealHeight: 720)
 #else
         self
+#endif
+    }
+
+    @ViewBuilder
+    func sessionWizardBackdrop() -> some View {
+#if os(macOS)
+        background(ServerDashBackdrop())
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func sessionWizardContentShell() -> some View {
+#if os(macOS)
+        padding(AppleDesign.Spacing.sm)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func sessionWizardDenseSurface() -> some View {
+#if os(macOS)
+        scrollContentBackground(.hidden)
+            .foregroundStyle(Color(nsColor: .textColor))
+            .background(Color(nsColor: .controlBackgroundColor))
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func sessionWizardSummarySurface() -> some View {
+#if os(macOS)
+        macGlassSurface(role: .card, cornerRadius: AppleDesign.Radius.card)
+#else
+        background(Color.appSurface)
+#endif
+    }
+
+    @ViewBuilder
+    func sessionWizardPrimaryButton() -> some View {
+#if os(macOS)
+        macGlassButton(prominent: true)
+#else
+        buttonStyle(.borderedProminent)
 #endif
     }
 }

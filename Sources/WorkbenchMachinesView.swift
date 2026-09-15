@@ -45,12 +45,21 @@ struct MachineManagementView: View {
     @Query(sort: \MachineTagRecord.name) private var tags: [MachineTagRecord]
     @AppStorage("hideIPInformation") private var hideIP = false
     @AppStorage("machineViewMode") private var mode = MachineViewMode.grid.rawValue
+    #if SERVERDASH_MAC_QA
+    @State private var group = ""
+    @State private var tag = ""
+    @State private var sort = ServerBrowserSort.name.rawValue
+    @State private var monitoring = ServerMonitorFilter.all.rawValue
+    @State private var protocolFilter = "all"
+    @State private var showsGroups = true
+    #else
     @SceneStorage("machines.filter.group") private var group = ""
     @SceneStorage("machines.filter.tag") private var tag = ""
     @SceneStorage("machines.sort") private var sort = ServerBrowserSort.name.rawValue
     @SceneStorage("machines.filter.monitoring") private var monitoring = ServerMonitorFilter.all.rawValue
     @SceneStorage("machines.filter.protocol") private var protocolFilter = "all"
     @SceneStorage("machines.groups.visible") private var showsGroups = true
+    #endif
     @State private var selection = Set<String>()
     @State private var organization = false
     @State private var batchEdit = false
@@ -67,6 +76,7 @@ struct MachineManagementView: View {
     @State private var editingSerial: SerialConnectionRecord?
     @State private var availableWidth: CGFloat = 0
     @State private var projectionCache = MachineBrowserProjectionCache()
+    @EnvironmentObject private var glassEntranceStore: GlassCardEntranceStore
 
     let servers: [ServerRecord]
     var rdpMachines: [RDPConnectionRecord] = []
@@ -87,6 +97,9 @@ struct MachineManagementView: View {
     private var selected: [WorkbenchMachine] { all.filter { selection.contains($0.id) } }
     private var hasFilters: Bool { !searchText.isEmpty || !group.isEmpty || !tag.isEmpty || protocolFilter != "all" || monitoring != "all" }
     private var query: MachineBrowserQuery { .init(search: searchText, group: group, tag: tag, kind: protocolFilter, monitoring: monitoring, sort: sort) }
+    private var entranceRegistry: GlassCardEntranceRegistry {
+        glassEntranceStore.registry(for: "machines")
+    }
 
     var body: some View {
         let machines = all
@@ -144,13 +157,15 @@ struct MachineManagementView: View {
                 }
                 VStack(spacing: 0) {
                     filters(compact: !layout.showsGroupPanel, filtered: filtered, projection: projection)
+                        .foregroundStyle(GlassPalette.primaryText)
+                        .background(AppleChromeBackground())
                     Divider()
                     if filtered.isEmpty { emptyState }
                     else if mode == MachineViewMode.list.rawValue { machineTable(filtered: filtered, compact: layout.usesCompactTable, tagColors: tagColors) }
                     else { machineGrid(filtered: filtered, tagColors: tagColors) }
                 }
             }
-            .background(Color.appGround)
+            .background(Color.clear)
             .onChange(of: geometry.size.width, initial: true) { _, width in availableWidth = width }
         }
     }
@@ -177,6 +192,7 @@ struct MachineManagementView: View {
                     .help("WebDAV 配置同步").accessibilityIdentifier("machines.toolbar.sync")
             }
             Button("新建主机", systemImage: "plus", action: onAdd)
+                .macGlassButton(prominent: true)
                 .help("新建主机（⌘N）").accessibilityIdentifier("machines.toolbar.new")
         }
     }
@@ -227,7 +243,16 @@ struct MachineManagementView: View {
             HStack {
                 Toggle("全选", isOn: Binding(get: { !filtered.isEmpty && selection.count == filtered.count },
                                              set: { selection = $0 ? Set(filtered.map(\.id)) : [] })).toggleStyle(.checkbox)
-                Text(selection.isEmpty ? "\(filtered.count) 台" : "已选 \(selection.count) 台").foregroundStyle(.secondary)
+                Text(selection.isEmpty ? "\(filtered.count) 台" : "已选 \(selection.count) 台")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("machines.filtered.count")
+                #if SERVERDASH_MAC_QA
+                Text("滚动位置")
+                    .accessibilityLabel(scrollAnchor?.uuidString ?? "top")
+                    .accessibilityIdentifier("machines.scroll.anchor")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                #endif
                 if !selection.isEmpty {
                     Button("整理") { batchGroup = ""; batchTag = ""; batchEdit = true }
                     Button("导出配置包") { localTransfer = .exportSelected(selection) }
@@ -276,9 +301,13 @@ struct MachineManagementView: View {
     }
     private func machineGrid(filtered: [WorkbenchMachine], tagColors: [String: Color]) -> some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
-                ForEach(filtered) { item in
-                    VStack(alignment: .leading, spacing: 9) {
+            ServerDashGlassEffectContainer(spacing: 26) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 250), spacing: 26)],
+                    spacing: 26
+                ) {
+                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
+                        VStack(alignment: .leading, spacing: 9) {
                         HStack {
                             Image(systemName: item.symbol).font(.title3).foregroundStyle(.secondary)
                             protocolBadge(item.kind)
@@ -288,7 +317,7 @@ struct MachineManagementView: View {
                         }
                         Button { show(item) } label: {
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(item.name).font(.headline).lineLimit(1).help(item.name)
+                                Text(item.name).font(AppTypography.cardTitle).lineLimit(1).help(item.name)
                                 Text(hideIP ? "连接地址已隐藏" : item.address).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                                     .help(hideIP ? "连接地址已隐藏" : item.address)
                                 machineSystem(item)
@@ -303,13 +332,23 @@ struct MachineManagementView: View {
                         }.buttonStyle(.plain)
                         Divider()
                         Button { connect(item) } label: { Label(item.kind == "VNC" ? "打开屏幕共享" : "快速连接", systemImage: "bolt.horizontal").frame(maxWidth: .infinity) }
-                    }.applePanel(radius: AppleDesign.Radius.card)
-                        .overlay { RoundedRectangle(cornerRadius: AppleDesign.Radius.card).stroke(selection.contains(item.id) ? Color.appAccent : .clear, lineWidth: 2) }
-                        .contextMenu { itemMenu(item) }
-                        .id(item.uuid)
+                            .macGlassButton()
+                        }.applePanel(radius: AppleDesign.Radius.card)
+                            .overlay { RoundedRectangle(cornerRadius: AppleDesign.Radius.card).stroke(selection.contains(item.id) ? Color.appAccent : .clear, lineWidth: 2) }
+                            .contextMenu { itemMenu(item) }
+                            .id(item.uuid)
+                            .appleInteractiveSurface()
+                            .glassCardEntrance(id: item.id, index: index, registry: entranceRegistry)
+                            .modifier(MachineCardQAPerformanceAccessibility())
+                    }
                 }
-            }.scrollTargetLayout().padding(12)
-        }.scrollPosition(id: $scrollAnchor, anchor: .top)
+                .scrollTargetLayout()
+            }
+            .padding(20)
+        }
+        .scrollClipDisabled()
+        .accessibilityIdentifier("machines.grid.scroll")
+        .scrollPosition(id: $scrollAnchor, anchor: .top)
     }
 
     private func machineTable(filtered: [WorkbenchMachine], compact: Bool, tagColors: [String: Color]) -> some View {
@@ -335,7 +374,10 @@ struct MachineManagementView: View {
                     TableColumn("") { machineConnectButton($0) }.width(36)
                 }
             }
-        }.contextMenu(forSelectionType: String.self) { ids in
+        }
+        .foregroundStyle(Color(nsColor: .textColor))
+        .background(Color(nsColor: .controlBackgroundColor))
+        .contextMenu(forSelectionType: String.self) { ids in
             if ids.count == 1, let item = all.first(where: { ids.contains($0.id) }) { itemMenu(item) }
             if !ids.isEmpty {
                 Button("整理所选主机") { selection = ids; batchGroup = ""; batchTag = ""; batchEdit = true }
@@ -368,19 +410,23 @@ struct MachineManagementView: View {
     }
     private var emptyState: some View {
         VStack(spacing: 18) {
-            Spacer()
             Image(systemName: "server.rack").font(.largeTitle).foregroundStyle(.secondary)
-            Text(hasFilters ? "没有匹配的主机" : "还没有任何主机").font(.title2.weight(.semibold))
+            Text(hasFilters ? "没有匹配的主机" : "还没有任何主机").font(AppTypography.pageTitle)
             Text(hasFilters ? "调整搜索、协议、分组或标签。" : "新建主机，或导入已有连接配置。").foregroundStyle(.secondary)
             if !hasFilters {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 175))], spacing: 12) {
                     ForEach(SessionTransferSource.allCases.filter { [.xShell, .finalShell, .secureCRT, .mobaXterm, .xTerminal, .putty].contains($0) }) { source in
                         Button { selectedImport = source } label: { Label("从 \(source.title) 导入", systemImage: source.symbol).frame(maxWidth: .infinity, alignment: .leading).padding(10) }
+                            .macGlassButton()
                     }
                 }.frame(maxWidth: 720)
             }
-            Spacer()
-        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(AppleDesign.Spacing.lg)
+        .frame(maxWidth: 760)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+        .padding(AppleDesign.Spacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     @ViewBuilder private func machineStatus(_ item: WorkbenchMachine) -> some View {
         if case .ssh(let server) = item {
@@ -436,29 +482,40 @@ struct MachineManagementView: View {
         }
     }
     private var batchEditor: some View {
-        VStack(spacing: 16) {
-            Text("整理 \(selection.count) 台主机").font(.title2)
-            Form {
-                TextField("移动到分组（留空不变）", text: $batchGroup)
-                TextField("添加标签（逗号分隔）", text: $batchTag)
-            }.formStyle(.grouped)
-            HStack { Button("取消") { batchEdit = false }; Spacer(); Button("应用") {
-                for item in selected {
-                    let input = MachineOrganization.cleanName(batchGroup)
-                    let name = groups.first { $0.name.localizedCaseInsensitiveCompare(input) == .orderedSame }?.name ?? input
-                    if !name.isEmpty { item.setGroup(name) }
-                    let added = batchTag.split(whereSeparator: { ",，;；".contains($0) }).map { value in
-                        let input = MachineOrganization.cleanName(String(value))
-                        return tags.first { $0.name.localizedCaseInsensitiveCompare(input) == .orderedSame }?.name ?? input
-                    }.filter { !$0.isEmpty }
-                    if !added.isEmpty { item.setTags(Array(Set(item.tags + added)).sorted()) }
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 16) {
+                Text("整理 \(selection.count) 台主机").font(AppTypography.pageTitle)
+                Form {
+                    TextField("移动到分组（留空不变）", text: $batchGroup)
+                    TextField("添加标签（逗号分隔）", text: $batchTag)
                 }
-                do {
-                    try MachineOrganization.include(names: selected.map(\.group), tags: selected.flatMap(\.tags), context: context)
-                    try context.save(); batchEdit = false
-                } catch { self.error = error.localizedDescription }
-            }.buttonStyle(.borderedProminent) }
-        }.padding(20).frame(width: 440, height: 250)
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .macHighContrastContentSurface(cornerRadius: AppleDesign.Radius.thumbnail)
+                HStack { Button("取消") { batchEdit = false }; Spacer(); Button("应用") {
+                    for item in selected {
+                        let input = MachineOrganization.cleanName(batchGroup)
+                        let name = groups.first { $0.name.localizedCaseInsensitiveCompare(input) == .orderedSame }?.name ?? input
+                        if !name.isEmpty { item.setGroup(name) }
+                        let added = batchTag.split(whereSeparator: { ",，;；".contains($0) }).map { value in
+                            let input = MachineOrganization.cleanName(String(value))
+                            return tags.first { $0.name.localizedCaseInsensitiveCompare(input) == .orderedSame }?.name ?? input
+                        }.filter { !$0.isEmpty }
+                        if !added.isEmpty { item.setTags(Array(Set(item.tags + added)).sorted()) }
+                    }
+                    do {
+                        try MachineOrganization.include(names: selected.map(\.group), tags: selected.flatMap(\.tags), context: context)
+                        try context.save(); batchEdit = false
+                    } catch { self.error = error.localizedDescription }
+                }.macGlassButton(prominent: true) }
+            }
+            .padding(20)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+            .padding(20)
+        }
+        .frame(width: 440, height: 250)
+        .font(AppTypography.body)
     }
     private func deleteSelected() {
         let victims = selected
@@ -503,7 +560,12 @@ private struct MachineRDPLiveState: View {
     @ObservedObject var controller: RDPSessionController
     var body: some View {
         Text(controller.needsPassword ? "等待密码" : controller.state.rawValue)
-            .font(.caption).foregroundStyle(controller.state == .failed ? Color.appError : .secondary)
+            .font(.caption)
+            .foregroundStyle(
+                controller.state == .failed
+                    ? Color.appError
+                    : GlassPalette.secondaryText
+            )
     }
 }
 
@@ -521,7 +583,11 @@ private struct MachineSerialControllerState: View {
     @ObservedObject var controller: WorkbenchSessionController
     var body: some View {
         Text(controller.status.title).font(.caption)
-            .foregroundStyle(controller.status == .failed ? Color.appError : .secondary)
+            .foregroundStyle(
+                controller.status == .failed
+                    ? Color.appError
+                    : GlassPalette.secondaryText
+            )
     }
 }
 
@@ -549,6 +615,21 @@ private struct MachineLiveState: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// The 1,000-host fixture measures rendering, filtering, and scrolling. Exposing
+/// every synthetic card to XCTest would make each assertion serialize a 1,000-
+/// node accessibility tree and measure the test driver instead of ServerDash.
+/// Normal QA matrices and the shipping application retain full card semantics.
+private struct MachineCardQAPerformanceAccessibility: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if SERVERDASH_MAC_QA
+        content.accessibilityHidden(MacUIFixture.configuration.hostCount >= 1_000)
+        #else
+        content
+        #endif
     }
 }
 

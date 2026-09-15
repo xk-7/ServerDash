@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if os(macOS)
+import AppKit
+#endif
 
 struct TerminalToolsBar: View {
     @ObservedObject var tools: TerminalTools
@@ -49,6 +52,7 @@ struct TerminalToolsBar: View {
                 if tools.composerVisible { HStack {
                     TextField("命令（历史 / Linux / 片段补全）", text: $tools.command)
                         .textFieldStyle(.roundedBorder).font(.callout.monospaced())
+                        .terminalToolsTextInput()
                         #if os(iOS)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         #endif
@@ -80,7 +84,13 @@ struct TerminalToolsBar: View {
             }.font(.caption).padding(.horizontal, 8).frame(minHeight: 36)
             }
         }
-        .buttonStyle(.borderless).background(.bar)
+        .buttonStyle(.borderless)
+#if os(macOS)
+        .foregroundStyle(GlassPalette.primaryText)
+        .background(AppleChromeBackground())
+#else
+        .background(.bar)
+#endif
         .onChange(of: highlights.rules) { _, _ in tools.redraw() }
         .sheet(isPresented: $showingShellIntegration) {
             NavigationStack {
@@ -91,12 +101,16 @@ struct TerminalToolsBar: View {
                         Button("Zsh：填入集成命令") { prepareIntegration(TerminalShellIntegration.zsh) }
                     }
                     Section { Text("已有 OSC 133 集成的 Shell 无需重复设置。不支持的 Shell 请使用命令栏。历史记录不是密码保险箱：涉及私密参数的操作请关闭记录，或在命令前加一个空格。") }
-                }.formStyle(.grouped).navigationTitle("Shell 集成")
+                }
+                .formStyle(.grouped)
+                .terminalToolsDenseSurface()
+                .navigationTitle("Shell 集成")
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showingShellIntegration = false } } }
             }
             #if os(macOS)
             .frame(width: 570, height: 430)
             #endif
+            .terminalToolsSheetRoot()
         }
         .sheet(isPresented: $tools.showingRules) { TerminalHighlightEditor(settings: highlights) }
         .sheet(isPresented: $tools.showingHistory) {
@@ -121,6 +135,7 @@ struct TerminalToolsBar: View {
                     }
                     Section { Button("清空所有服务器的命令历史", role: .destructive) { history.clear() } }
                 }
+                .terminalToolsDenseSurface()
                 .searchable(text: $historySearch, prompt: "搜索命令")
                 .navigationTitle("命令历史")
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { tools.showingHistory = false } } }
@@ -128,6 +143,7 @@ struct TerminalToolsBar: View {
             #if os(macOS)
             .frame(width: 620, height: 560)
             #endif
+            .terminalToolsSheetRoot()
         }
         .confirmationDialog("向当前面板发送命令？", isPresented: Binding(get: { pendingCommand != nil }, set: { if !$0 { pendingCommand = nil } })) {
             Button("确认发送") {
@@ -205,12 +221,14 @@ private struct TerminalHighlightEditor: View {
                 Section { Text("只装饰可见终端文字，不改变输出、复制内容或发送数据。复杂表达式达到时间预算时会跳过该行，避免阻塞终端。") }
             }
             .formStyle(.grouped)
+            .terminalToolsDenseSurface()
             }.navigationTitle("关键词高亮")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
         #if os(macOS)
         .frame(width: 600, height: 640)
         #endif
+        .terminalToolsSheetRoot()
     }
     private var showsCustom: Bool {
         #if os(macOS)
@@ -247,7 +265,9 @@ struct TerminalDisplaySearchBar: View {
         if search.isVisible {
             HStack(spacing: 8) {
                 TextField("搜索终端内容", text: $search.text).focused($focused)
-                    .textFieldStyle(.roundedBorder).onSubmit { search.search() }
+                    .textFieldStyle(.roundedBorder)
+                    .terminalToolsTextInput()
+                    .onSubmit { search.search() }
                     .onChange(of: search.text) { _, _ in search.search() }
                     #if os(macOS)
                     .onExitCommand { close() }
@@ -263,4 +283,34 @@ struct TerminalDisplaySearchBar: View {
         }
     }
     private func close() { search.close(); onClose() }
+}
+
+private extension View {
+    @ViewBuilder
+    func terminalToolsTextInput() -> some View {
+#if os(macOS)
+        foregroundStyle(Color(nsColor: .textColor))
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func terminalToolsDenseSurface() -> some View {
+#if os(macOS)
+        scrollContentBackground(.hidden)
+            .macHighContrastContentSurface()
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func terminalToolsSheetRoot() -> some View {
+#if os(macOS)
+        macGlassSheetRoot()
+#else
+        self
+#endif
+    }
 }

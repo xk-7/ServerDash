@@ -430,7 +430,7 @@ struct RemoteEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("远程文件编辑器", systemImage: "doc.text").font(.headline)
+                Label("远程文件编辑器", systemImage: "doc.text").font(AppTypography.sectionTitle)
                 Spacer()
                 Button("关闭标签") {
                     if let doc=store.selected { if doc.isDirty {pendingClose=doc.id} else {store.close(doc.id)} }
@@ -438,7 +438,10 @@ struct RemoteEditorView: View {
                 if store.busy { ProgressView().controlSize(.small); Button("取消操作") { store.cancel() } }
                 Button("完成") { Task { if await store.flushDrafts() { dismiss() } } }
                     .keyboardShortcut(.cancelAction).disabled(store.flushingDrafts)
-            }.padding(14)
+            }
+            .padding(14)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             Divider()
             ScrollView(.horizontal) {
                 HStack(spacing: 3) {
@@ -451,13 +454,26 @@ struct RemoteEditorView: View {
                             .background(store.selectedID == doc.id ? Color.accentColor.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                     }
                 }.padding(5)
-            }.background(.bar)
+            }
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             if let doc = store.selected {
                 HStack(spacing: 12) {
-                    VStack(alignment: .leading) { Text(doc.title).font(.headline); Text("\(doc.serverName) · \(doc.path)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    VStack(alignment: .leading) {
+                        Text(doc.title).font(AppTypography.cardTitle)
+                        Text("\(doc.serverName) · \(doc.path)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 10)
                     Button { searchFocused = true } label: { Image(systemName:"magnifyingglass") }.keyboardShortcut("f").help("搜索文件")
-                    TextField("搜索", text: $search).textFieldStyle(.roundedBorder).frame(width:140).focused($searchFocused).onSubmit { searchStep += 1 }
+                    TextField("搜索", text: $search)
+                        .textFieldStyle(.roundedBorder)
+                        .foregroundStyle(Color(nsColor: .textColor))
+                        .frame(width:140)
+                        .focused($searchFocused)
+                        .onSubmit { searchStep += 1 }
                     Button { searchStep -= 1 } label: { Image(systemName:"chevron.up") }.help("上一个匹配").disabled(search.isEmpty)
                     Button { searchStep += 1 } label: { Image(systemName:"chevron.down") }.help("下一个匹配").disabled(search.isEmpty)
                     Picker("编码", selection: Binding(get: { doc.encoding }, set: { store.changeEncoding($0,id:doc.id) })) {
@@ -466,8 +482,11 @@ struct RemoteEditorView: View {
                     Button { if doc.isDirty { pendingReload = doc.id } else { store.reload(doc.id) } } label: { Image(systemName:"arrow.clockwise") }.help("重新读取远程文件").disabled(!store.canSave(doc.id))
                     Button { exportLocal(doc) } label: { Image(systemName:"square.and.arrow.down") }.help("下载当前文档与本地更改")
                     Button("另存为…") { saveAsID=doc.id; saveAsPath=doc.path }.disabled(!store.canSave(doc.id))
-                    Button("保存") { store.save(doc.id) }.buttonStyle(.borderedProminent).keyboardShortcut("s").disabled(!store.canSave(doc.id) || !doc.isDirty)
-                }.padding(12)
+                    Button("保存") { store.save(doc.id) }.macGlassButton(prominent: true).keyboardShortcut("s").disabled(!store.canSave(doc.id) || !doc.isDirty)
+                }
+                .padding(12)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
                 Divider()
                 NativeRemoteCodeEditor(store: store, documentID: doc.id, text: doc.text, search: search, searchStep: searchStep)
                     .id(doc.id).frame(maxWidth:.infinity,maxHeight:.infinity).clipped()
@@ -478,15 +497,28 @@ struct RemoteEditorView: View {
                     if let metrics = store.textMetrics[doc.id] {
                         Text("\(metrics.lines) 行 · \(doc.encoding.rawValue)")
                     } else { Text(doc.encoding.rawValue) }
-                }.font(.caption).foregroundStyle(.secondary).padding(10)
+                }
+                .font(.caption)
+                .foregroundStyle(GlassPalette.secondaryText)
+                .padding(10)
+                .background(AppleChromeBackground())
                 if !store.canSave(doc.id), !store.busy {
                     Text("此恢复草稿尚未连接主机。请在该主机的文件面板中重新打开文件，以核验连接并保存。")
                         .font(.caption).foregroundStyle(.secondary).padding(8)
                 }
-            } else { ContentUnavailableView("未打开文件", systemImage:"doc.text", description:Text("在 SFTP 文件面板中选择“编辑”。")).frame(maxHeight:.infinity) }
+            } else {
+                ContentUnavailableView(
+                    "未打开文件",
+                    systemImage:"doc.text",
+                    description:Text("在 SFTP 文件面板中选择“编辑”。")
+                )
+                .padding(AppleDesign.Spacing.lg)
+                .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+                .frame(maxHeight:.infinity)
+            }
         }
         .frame(minWidth: 860, idealWidth:1100, minHeight:600, idealHeight:740)
-        .background(Color.appGround)
+        .background(ServerDashBackdrop())
         .alert("文件操作失败",isPresented:Binding(get:{store.error != nil},set:{if !$0 {store.error=nil}})) { Button("好") {store.error=nil} } message:{Text(store.error ?? "")}
         .confirmationDialog("关闭并丢弃这个文件的本地草稿？",isPresented:Binding(get:{pendingClose != nil},set:{if !$0 {pendingClose=nil}})) {
             Button("丢弃并关闭",role:.destructive) {if let id=pendingClose {store.close(id)}; pendingClose=nil}
@@ -530,7 +562,7 @@ struct LocalFileCopiesView:View {
     private var copies:[RemoteLocalCopy]{store.localCopies.filter{serverID == nil || $0.serverID==serverID}}
     var body:some View {
         VStack(alignment:.leading,spacing:14){
-            HStack{Label("本地副本与上传修改",systemImage:"arrow.up.doc").font(.title2.bold());Spacer();Button("完成"){dismiss()}}
+            HStack{Label("本地副本与上传修改",systemImage:"arrow.up.doc").font(AppTypography.pageTitle);Spacer();Button("完成"){dismiss()}}
             Text("在本地应用中编辑副本后，选择“上传修改”明确写回远端。上传前会核对远端版本，失败时保留副本。")
                 .font(.callout).foregroundStyle(.secondary)
             if copies.isEmpty {
@@ -541,12 +573,12 @@ struct LocalFileCopiesView:View {
                     VStack(alignment:.leading,spacing:8){
                         HStack(alignment:.top){
                             VStack(alignment:.leading,spacing:4){
-                                Text(copy.title).font(.headline)
+                                Text(copy.title).font(AppTypography.cardTitle)
                                 Text("\(copy.serverName) · \(copy.remotePath)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
                             Button("打开副本"){if !NSWorkspace.shared.open(URL(fileURLWithPath:copy.localPath)){store.error="无法打开本地副本，请用访达检查文件是否存在。"}}
-                            Button("上传修改"){store.uploadLocalCopy(copy.id)}.buttonStyle(.borderedProminent).disabled(!store.canUploadLocalCopy(copy))
+                            Button("上传修改"){store.uploadLocalCopy(copy.id)}.macGlassButton(prominent: true).disabled(!store.canUploadLocalCopy(copy))
                         }
                         HStack{
                             Text(copy.localPath).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -564,7 +596,12 @@ struct LocalFileCopiesView:View {
                 Spacer()
                 if store.busy{Button("取消操作"){store.cancel()}}
             }
-        }.padding(20).frame(width:900,height:520).background(Color.appGround)
+        }
+        .padding(20)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+        .padding(AppleDesign.Spacing.md)
+        .frame(width:900,height:520)
+        .background(ServerDashBackdrop())
         .alert("本地副本操作失败",isPresented:Binding(get:{store.error != nil},set:{if !$0{store.error=nil}})){
             Button("好"){store.error=nil}
         }message:{Text(store.error ?? "")}

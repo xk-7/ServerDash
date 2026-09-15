@@ -26,7 +26,7 @@ struct TerminalAppearanceSettingsView: View {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
                 HStack {
                     Text("终端预览")
-                        .font(.title3.weight(.bold))
+                        .font(AppTypography.cardTitle)
                     Spacer()
                     Picker("预览外观", selection: $previewDark) {
                         Text("浅色").tag(false)
@@ -96,7 +96,7 @@ struct TerminalSessionAppearanceView: View {
             HStack {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("终端外观")
-                        .font(.title2.weight(.bold))
+                        .font(AppTypography.sectionTitle)
                     Text("调整只作用于当前会话，立即生效且不会重新连接。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -106,6 +106,7 @@ struct TerminalSessionAppearanceView: View {
                     .keyboardShortcut(.cancelAction)
             }
             .padding(AppleDesign.Spacing.lg)
+            .macGlassChromeBar()
             Divider()
 
             HSplitView {
@@ -130,6 +131,7 @@ struct TerminalSessionAppearanceView: View {
                 .padding(AppleDesign.Spacing.lg)
                 .frame(minWidth: 360)
             }
+            .macHighContrastContentSurface()
 
             Divider()
             HStack {
@@ -147,11 +149,13 @@ struct TerminalSessionAppearanceView: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .macGlassButton(prominent: true)
             }
             .padding(AppleDesign.Spacing.md)
+            .macGlassChromeBar()
         }
         .frame(width: 900, height: 700)
+        .macGlassSheetRoot()
     }
 }
 
@@ -310,7 +314,7 @@ private struct TerminalAppearanceEditor: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             Label(title, systemImage: symbol)
-                .font(.headline)
+                .font(AppTypography.cardTitle)
             content()
         }
         .applePanel(padding: AppleDesign.Spacing.md, radius: AppleDesign.Radius.card)

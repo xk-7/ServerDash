@@ -3,11 +3,20 @@ import SwiftUI
 
 struct DashboardOverviewView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var glassEntranceStore: GlassCardEntranceStore
+    #if SERVERDASH_MAC_QA
+    @State private var searchText = ""
+    @State private var selectedGroup = ""
+    @State private var selectedTag = ""
+    @State private var sortRawValue = ServerBrowserSort.name.rawValue
+    @State private var monitoringRawValue = ServerMonitorFilter.all.rawValue
+    #else
     @SceneStorage("dashboard.filter.search") private var searchText = ""
     @SceneStorage("dashboard.filter.group") private var selectedGroup = ""
     @SceneStorage("dashboard.filter.tag") private var selectedTag = ""
     @SceneStorage("dashboard.sort") private var sortRawValue = ServerBrowserSort.name.rawValue
     @SceneStorage("dashboard.filter.monitoring") private var monitoringRawValue = ServerMonitorFilter.all.rawValue
+    #endif
 
     let servers: [ServerRecord]
     @Binding var scrollAnchor: UUID?
@@ -19,6 +28,10 @@ struct DashboardOverviewView: View {
         ServerBrowserQuery(search: searchText, group: selectedGroup, tag: selectedTag,
                            sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name,
                            monitoring: ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all)
+    }
+
+    private var entranceRegistry: GlassCardEntranceRegistry {
+        glassEntranceStore.registry(for: "dashboard")
     }
 
     var body: some View {
@@ -36,7 +49,7 @@ struct DashboardOverviewView: View {
                         } label: {
                             Label("刷新全部", systemImage: "arrow.clockwise")
                         }
-                        .buttonStyle(.bordered)
+                        .macGlassButton(prominent: false)
                         .disabled(servers.isEmpty)
                         .help("刷新全部服务器")
                         .accessibilityLabel("刷新全部服务器")
@@ -57,8 +70,16 @@ struct DashboardOverviewView: View {
                         .accessibilityLabel("更多刷新选项")
                         .accessibilityIdentifier("dashboard.refresh.options")
 
+                        #if SERVERDASH_MAC_QA
+                        Text("刷新计数")
+                            .accessibilityLabel("\(appState.qaRefreshInvocationCount)")
+                            .accessibilityIdentifier("dashboard.refresh.invocations")
+                            .frame(width: 1, height: 1)
+                            .opacity(0.01)
+                        #endif
+
                         Button("添加服务器", systemImage: "plus", action: onAdd)
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                 }
 
@@ -69,21 +90,27 @@ struct DashboardOverviewView: View {
                         Text("集中查看资源状态，打开 SSH 终端，或管理远程文件。")
                     } actions: {
                         Button("添加服务器", systemImage: "plus", action: onAdd)
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 360)
                     .applePanel()
                 } else {
-                    DashboardFleetSummary(serverCount: servers.count, state: appState.fleetSummaryState)
+                    DashboardFleetSummary(
+                        serverCount: servers.count,
+                        state: appState.fleetSummaryState,
+                        entranceRegistry: entranceRegistry
+                    )
 
                     ServerBrowserControls(
                         servers: servers, search: $searchText, group: $selectedGroup,
                         tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
                     )
+                    .padding(AppleDesign.Spacing.md)
+                    .applePanel(padding: 0, radius: AppleDesign.Radius.card)
 
                     HStack {
                         Text("服务器概览")
-                            .font(.headline)
+                            .font(AppTypography.sectionTitle)
                             .accessibilityAddTraits(.isHeader)
                         if query.hasFilters {
                             Text("\(DisplayFormat.integer(visibleServers.count)) / \(DisplayFormat.integer(servers.count)) 台")
@@ -99,27 +126,43 @@ struct DashboardOverviewView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     }
+                    .foregroundStyle(GlassPalette.primaryText)
 
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 280), spacing: AppleDesign.Spacing.md, alignment: .top)],
-                        alignment: .leading,
-                        spacing: AppleDesign.Spacing.md
-                    ) {
-                        ForEach(visibleServers) { server in
-                            VPSSummaryCard(
-                                server: server,
-                                runtime: appState.runtime(for: server),
-                                refreshInterval: appState.refreshInterval,
-                                onVisibilityChange: { visible in
-                                    appState.setMonitorVisible(visible, serverID: server.id)
-                                },
-                                onSelect: { onSelect(server) },
-                                onOpenTerminal: { onOpenTerminal(server) }
-                            )
-                            .id(server.id)
+                    ServerDashGlassEffectContainer(spacing: AppleDesign.Spacing.lg) {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(
+                                    .adaptive(minimum: 280),
+                                    spacing: AppleDesign.Spacing.lg + AppleDesign.Spacing.xs,
+                                    alignment: .top
+                                )
+                            ],
+                            alignment: .leading,
+                            spacing: AppleDesign.Spacing.lg + AppleDesign.Spacing.xs
+                        ) {
+                            ForEach(Array(visibleServers.enumerated()), id: \.element.id) { index, server in
+                                VPSSummaryCard(
+                                    server: server,
+                                    runtime: appState.runtime(for: server),
+                                    refreshInterval: appState.refreshInterval,
+                                    onVisibilityChange: { visible in
+                                        appState.setMonitorVisible(visible, serverID: server.id)
+                                    },
+                                    onSelect: { onSelect(server) },
+                                    onOpenTerminal: { onOpenTerminal(server) }
+                                )
+                                .id(server.id)
+                                .glassCardEntrance(
+                                    id: server.id,
+                                    index: index,
+                                    registry: entranceRegistry
+                                )
+                            }
                         }
+                        .scrollTargetLayout()
                     }
-                    .scrollTargetLayout()
+                    .padding(.horizontal, AppleDesign.Spacing.xs)
+                    .padding(.vertical, AppleDesign.Spacing.xxs)
                     if visibleServers.isEmpty {
                         ContentUnavailableView {
                             Label("没有匹配的服务器", systemImage: "line.3.horizontal.decrease.circle")
@@ -142,6 +185,7 @@ struct DashboardOverviewView: View {
             .frame(maxWidth: AppleDesign.Layout.contentWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .scrollClipDisabled()
         .scrollPosition(id: $scrollAnchor, anchor: .center)
         .onChange(of: visibleServers.map(\.id)) { _, ids in
             if let scrollAnchor, !ids.contains(scrollAnchor) { self.scrollAnchor = ids.first }
@@ -152,41 +196,89 @@ struct DashboardOverviewView: View {
 private struct DashboardFleetSummary: View {
     let serverCount: Int
     @ObservedObject var state: FleetMonitoringSummaryState
+    let entranceRegistry: GlassCardEntranceRegistry
 
     private var summary: FleetMonitoringSummary { state.value }
     private var pendingCount: Int { max(0, serverCount - summary.onlineCount - summary.issueCount) }
 
     var body: some View {
-        AppleUnifiedPanel {
-            HStack(alignment: .top, spacing: 0) {
-                DashboardSummaryCard(
+        ViewThatFits(in: .horizontal) {
+            summaryCards(spacing: -14, compact: false)
+                .frame(minWidth: 760)
+            summaryCards(spacing: -7, compact: true)
+        }
+        .padding(.horizontal, AppleDesign.Spacing.xs)
+        .padding(.bottom, AppleDesign.Spacing.xs)
+    }
+
+    private func summaryCards(spacing: CGFloat, compact: Bool) -> some View {
+        ServerDashGlassEffectContainer(spacing: abs(spacing)) {
+            HStack(alignment: .top, spacing: spacing) {
+                summaryCard(
+                    id: "dashboard.summary.all",
+                    index: 0,
                     title: "全部服务器",
                     value: DisplayFormat.integer(serverCount),
                     subtitle: summary.onlineCount > 0
                         ? "在线平均 CPU \(DisplayFormat.percent(summary.averageCPU))"
                         : "等待资源采集",
-                    icon: "server.rack", tint: .primary
+                    icon: "server.rack",
+                    tint: GlassPalette.primaryText,
+                    compact: compact,
+                    verticalOffset: 0
                 )
-                Divider().padding(.vertical, AppleDesign.Spacing.lg)
-                DashboardSummaryCard(
+                summaryCard(
+                    id: "dashboard.summary.online",
+                    index: 1,
                     title: "在线",
                     value: DisplayFormat.integer(summary.onlineCount),
                     subtitle: summary.refreshingCount > 0
                         ? "\(DisplayFormat.integer(summary.refreshingCount)) 台正在刷新"
                         : (pendingCount > 0 ? "\(DisplayFormat.integer(pendingCount)) 台等待检测" : "已完成状态检测"),
-                    icon: "checkmark.circle", tint: .appLive
+                    icon: "checkmark.circle",
+                    tint: .appLive,
+                    compact: compact,
+                    verticalOffset: compact ? 3 : 6
                 )
-                Divider().padding(.vertical, AppleDesign.Spacing.lg)
-                DashboardSummaryCard(
+                summaryCard(
+                    id: "dashboard.summary.issues",
+                    index: 2,
                     title: "需要关注",
                     value: DisplayFormat.integer(summary.issueCount),
                     subtitle: summary.issueCount > 0 ? "连接中断或认证异常" : "暂无已知连接异常",
                     icon: "exclamationmark.circle",
-                    tint: summary.issueCount > 0 ? .appError : .secondary
+                    tint: summary.issueCount > 0 ? .appError : GlassPalette.secondaryText,
+                    compact: compact,
+                    verticalOffset: compact ? 6 : 12
                 )
             }
-            .fixedSize(horizontal: false, vertical: true)
         }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func summaryCard(
+        id: String,
+        index: Int,
+        title: String,
+        value: String,
+        subtitle: String,
+        icon: String,
+        tint: Color,
+        compact: Bool,
+        verticalOffset: CGFloat
+    ) -> some View {
+        DashboardSummaryCard(
+            title: title,
+            value: value,
+            subtitle: subtitle,
+            icon: icon,
+            tint: tint,
+            compact: compact
+        )
+        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+        .offset(y: verticalOffset)
+        .zIndex(Double(3 - index))
+        .glassCardEntrance(id: id, index: index, registry: entranceRegistry)
     }
 }
 
@@ -196,11 +288,12 @@ private struct DashboardSummaryCard: View {
     let subtitle: String
     let icon: String
     let tint: Color
+    let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
             Label(title, systemImage: icon)
-                .font(.callout)
+                .font(AppTypography.label)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(value)
@@ -213,7 +306,8 @@ private struct DashboardSummaryCard: View {
                 .lineLimit(2, reservesSpace: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppleDesign.Spacing.lg)
+        .frame(minHeight: compact ? 104 : 116, alignment: .topLeading)
+        .padding(compact ? AppleDesign.Spacing.md : AppleDesign.Spacing.lg)
         .accessibilityElement(children: .combine)
     }
 }
@@ -245,7 +339,7 @@ private struct VPSSummaryCard: View {
                     }
                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                         Text(server.displayName)
-                            .font(.title3.weight(.semibold))
+                            .font(AppTypography.cardTitle)
                             .lineLimit(1)
                             .help(server.displayName)
                         Text(hideIPInformation ? "[IP]" : server.host)
@@ -307,7 +401,11 @@ private struct VPSSummaryCard: View {
             HStack(spacing: AppleDesign.Spacing.xs) {
                 Text(footerText)
                     .font(.caption)
-                    .foregroundStyle(status == .failed || status == .offline ? Color.appError : .secondary)
+                    .foregroundStyle(
+                        status == .failed || status == .offline
+                            ? Color.appError
+                            : GlassPalette.secondaryText
+                    )
                     .lineLimit(1)
                     .help(footerText)
                 Spacer(minLength: AppleDesign.Spacing.xxs)
@@ -387,7 +485,7 @@ struct ServerDetailView: View {
 
             ServerMonitorLayoutView(server: server, runtime: runtime)
         }
-        .background(Color.appGround)
+        .background(Color.clear)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay {
             if let presentedOverlay {
@@ -468,12 +566,13 @@ private struct ServerDetailHeader: View {
             Button(action: onBack) {
                 Image(systemName: "chevron.backward")
             }
+            .macGlassButton()
             .help("返回\(backTitle)")
             .accessibilityLabel("返回\(backTitle)")
             .keyboardShortcut("[", modifiers: .command)
 
             Text(server.displayName)
-                .font(.headline)
+                .font(AppTypography.sectionTitle)
                 .lineLimit(1)
                 .help(server.displayName)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -503,11 +602,12 @@ private struct ServerDetailHeader: View {
             .help("服务器操作")
             .accessibilityLabel("服务器操作")
         }
-        .buttonStyle(.bordered)
         .controlSize(.regular)
         .padding(.horizontal, AppleDesign.Spacing.md)
         .padding(.vertical, AppleDesign.Spacing.xs)
-        .background(Color.appGround)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+        .padding(.horizontal, AppleDesign.Spacing.md)
+        .padding(.top, AppleDesign.Spacing.xs)
     }
 
     private var standardHeader: some View {
@@ -516,13 +616,14 @@ private struct ServerDetailHeader: View {
                 Button(action: onBack) {
                     Image(systemName: "chevron.backward")
                 }
+                .macGlassButton()
                 .help("返回\(backTitle)")
                 .accessibilityLabel("返回\(backTitle)")
                 .keyboardShortcut("[", modifiers: .command)
 
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text(server.displayName)
-                        .font(.title2.weight(.semibold))
+                        .font(AppTypography.pageTitle)
                         .lineLimit(1)
                         .help(server.displayName)
                     Text(headerSubtitle)
@@ -557,12 +658,13 @@ private struct ServerDetailHeader: View {
                 } label: {
                     Label("更多", systemImage: "ellipsis.circle")
                 }
+                .macGlassButton()
                 .help("服务器操作")
             }
         }
-        .buttonStyle(.bordered)
         .controlSize(.regular)
         .padding(AppleDesign.Spacing.lg)
-        .background(Color.appGround)
+        .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+        .padding([.horizontal, .top], AppleDesign.Spacing.lg)
     }
 }

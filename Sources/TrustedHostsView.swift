@@ -154,34 +154,43 @@ struct EventLogView: View {
 
     var body: some View {
         let rows = serverID.map { store.events(for: $0) } ?? store.events
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
-                    Text("事件记录")
-                        .font(.title2.weight(.bold))
-                    Text("\(DisplayFormat.integer(rows.count)) 条事件")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
+                        Text("事件记录")
+                            .font(AppTypography.sectionTitle)
+                        Text("\(DisplayFormat.integer(rows.count)) 条事件")
+                            .font(.caption)
+                            .foregroundStyle(GlassPalette.secondaryText)
+                    }
+                    Spacer()
+                    Button("关闭", systemImage: "xmark", action: onDismiss)
+                        .labelStyle(.iconOnly)
+                        .macGlassButton()
+                        .help("关闭")
                 }
-                Spacer()
-                Button("关闭", systemImage: "xmark", action: onDismiss)
-                    .labelStyle(.iconOnly)
-                    .help("关闭")
-            }
-            .padding(AppleDesign.Spacing.lg)
+                .padding(AppleDesign.Spacing.lg)
+                .macGlassChromeBar()
 
-            Divider()
+                Divider()
 
-            Table(rows) {
-                TableColumn("时间") {
-                    Text($0.date.formatted(date: .omitted, time: .standard)).monospacedDigit()
+                Table(rows) {
+                    TableColumn("时间") {
+                        Text($0.date.formatted(date: .omitted, time: .standard)).monospacedDigit()
+                    }
+                    .width(90)
+                    TableColumn("模块") { Text($0.module.title) }.width(70)
+                    TableColumn("事件") { Text($0.message).lineLimit(2) }
                 }
-                .width(90)
-                TableColumn("模块") { Text($0.module.title) }.width(70)
-                TableColumn("事件") { Text($0.message).lineLimit(2) }
+                .macHighContrastContentSurface(cornerRadius: AppleDesign.Radius.thumbnail)
             }
+            .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+            .padding(20)
         }
         .frame(width: 760, height: 500)
+        .font(AppTypography.body)
     }
 }
 
@@ -191,31 +200,40 @@ struct DiagnosticsPreviewView: View {
     let onCopy: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
-            HStack {
-                Text("连接诊断")
-                    .font(.title2.weight(.bold))
-                Spacer()
-                Button("关闭", systemImage: "xmark", action: onDismiss)
-                    .labelStyle(.iconOnly)
-                    .help("关闭")
+        ZStack {
+            ServerDashBackdrop()
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                HStack {
+                    Text("连接诊断")
+                        .font(AppTypography.sectionTitle)
+                    Spacer()
+                    Button("关闭", systemImage: "xmark", action: onDismiss)
+                        .labelStyle(.iconOnly)
+                        .macGlassButton()
+                        .help("关闭")
+                }
+                Text("复制前已脱敏：不包含密码、私钥、口令和终端正文。")
+                    .font(.caption)
+                    .foregroundStyle(GlassPalette.secondaryText)
+                ScrollView {
+                    Text(text)
+                        .font(.body.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(AppleDesign.Spacing.md)
+                }
+                .macHighContrastContentSurface(cornerRadius: AppleDesign.Radius.thumbnail)
+                HStack {
+                    Spacer()
+                    Button("复制", action: onCopy)
+                        .macGlassButton(prominent: true)
+                }
             }
-            Text("复制前已脱敏：不包含密码、私钥、口令和终端正文。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ScrollView {
-                Text(text)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HStack {
-                Spacer()
-                Button("复制", action: onCopy)
-                    .buttonStyle(.borderedProminent)
-            }
+            .padding(AppleDesign.Spacing.lg)
+            .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+            .padding(20)
         }
-        .padding(AppleDesign.Spacing.lg)
         .frame(width: 560, height: 420)
+        .font(AppTypography.body)
     }
 }

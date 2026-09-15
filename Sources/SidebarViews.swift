@@ -14,10 +14,13 @@ struct AppSidebar: View {
                 Image(systemName: "server.rack")
                     .font(.title2.weight(.medium))
                     .frame(width: 36, height: 36)
-                    .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.thumbnail))
+                    .macGlassSurface(
+                        role: .floatingControl,
+                        cornerRadius: AppleDesign.Radius.thumbnail
+                    )
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("ServerDash").font(.headline)
+                    Text("ServerDash").font(AppTypography.cardTitle)
                     Text("服务器工作台").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -81,11 +84,12 @@ struct AppSidebar: View {
                     .contentShape(Rectangle())
                 }
                 .help("打开设置")
+                .accessibilityIdentifier("sidebar.settings")
             }
             .buttonStyle(.borderless)
             .padding(AppleDesign.Spacing.md)
         }
-        .background(AppleChromeBackground())
+        .background(Color.clear)
     }
 
     private var selectionBinding: Binding<SidebarDestination?> {
@@ -230,7 +234,7 @@ struct TerminalSessionsLandingView: View {
                     symbol: "terminal"
                 ) {
                     Button("选择机器", systemImage: "plus", action: onChooseServer)
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                 }
                 if sessions.isEmpty {
                     ContentUnavailableView {
@@ -239,7 +243,7 @@ struct TerminalSessionsLandingView: View {
                         Text("选择一台服务器以建立 SSH 连接。\n使用 ⌘T 新建标签页，⌃Tab 切换会话。")
                     } actions: {
                         Button("选择机器", action: onChooseServer)
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 360)
                     .applePanel()
@@ -252,10 +256,13 @@ struct TerminalSessionsLandingView: View {
                                         .font(.title3)
                                         .foregroundStyle(.secondary)
                                         .frame(width: 36, height: 36)
-                                        .background(Color.appGround, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.chip))
+                                        .macGlassSurface(
+                                            role: .floatingControl,
+                                            cornerRadius: AppleDesign.Radius.chip
+                                        )
                                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                                         Text(session.serverName)
-                                            .font(.headline).lineLimit(1)
+                                            .font(AppTypography.cardTitle).lineLimit(1)
                                         Text("\(session.config.username)@\(hideIPInformation ? "[IP]" : session.config.host)")
                                             .font(.caption.monospaced())
                                             .foregroundStyle(.secondary)
@@ -274,7 +281,6 @@ struct TerminalSessionsLandingView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .appleInteractiveSurface(radius: AppleDesign.Radius.chip)
                             .accessibilityElement(children: .combine)
                             .accessibilityHint("切换到此终端会话")
                             if index < sessions.count - 1 {

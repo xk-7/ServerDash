@@ -81,6 +81,7 @@ struct MonitoringHistoryView: View {
             }
         }
         .frame(minWidth: 820, minHeight: 620)
+        .macGlassSheetRoot()
         .task(id: queryIdentity) {
             await loadHistory()
         }
@@ -189,7 +190,7 @@ struct MonitoringHistoryView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                         Text(series.metric.title)
-                            .font(.headline)
+                            .font(AppTypography.cardTitle)
                         Text(
                             "\(series.resolution.title) · " +
                             "\(DisplayFormat.integer(series.points.count)) 个绘制点"
@@ -255,7 +256,7 @@ struct MonitoringHistoryView: View {
             HStack {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                     Text("历史存储")
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                     Text("原始值 24 小时 · 1 分钟聚合 30 天 · 15 分钟聚合 1 年")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -298,7 +299,7 @@ struct MonitoringHistoryView: View {
             if !gaps.isEmpty {
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
                     Text("Data Gap")
-                        .font(.headline)
+                        .font(AppTypography.cardTitle)
                     ForEach(gaps.prefix(20)) { gap in
                         HStack {
                             Image(systemName: gap.isCollectorSide ? "laptopcomputer.trianglebadge.exclamationmark" : "server.rack")

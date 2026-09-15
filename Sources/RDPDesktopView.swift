@@ -34,7 +34,7 @@ struct RDPDesktopPane: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Circle().fill(controller.state == .connected ? Color.green : Color.secondary).frame(width: 7, height: 7)
-                Text(controller.configuration.name).font(.headline)
+                Text(controller.configuration.name).font(AppTypography.cardTitle)
                 Text(controller.state.rawValue).foregroundStyle(.secondary)
                 Spacer()
                 Menu("发送按键") {
@@ -49,7 +49,10 @@ struct RDPDesktopPane: View {
                 if controller.state == .connected || controller.state == .connecting || controller.state == .reconnecting {
                     Button("断开") { controller.disconnect() }
                 } else { Button("重新连接") { controller.connect() } }
-            }.padding(12).background(.bar)
+            }
+            .padding(12)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
             ZStack {
                 Color.black
                 RDPDesktopRepresentable(controller: controller, monitor: nil)
@@ -58,10 +61,16 @@ struct RDPDesktopPane: View {
                         Image(systemName: "desktopcomputer").font(.system(size: 48)).foregroundStyle(.secondary)
                         Text(controller.message).multilineTextAlignment(.center)
                         if controller.needsPassword {
-                            SecureField("Windows 密码", text: $password).textFieldStyle(.roundedBorder).frame(width: 260)
-                            Button("连接") { controller.connect(password: password); password = "" }.buttonStyle(.borderedProminent)
+                            SecureField("Windows 密码", text: $password)
+                                .textFieldStyle(.roundedBorder)
+                                .foregroundStyle(Color(nsColor: .textColor))
+                                .frame(width: 260)
+                            Button("连接") { controller.connect(password: password); password = "" }
+                                .macGlassButton(prominent: true)
                         } else if controller.state == .connecting { ProgressView() }
-                    }.padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .padding(24)
+                    .applePanel(padding: 0, radius: AppleDesign.Radius.card)
                 }
             }
             HStack {
@@ -73,7 +82,11 @@ struct RDPDesktopPane: View {
                 }
                 if let frame = controller.frame { Text("\(frame.width) × \(frame.height) · \(frame.colorDepth) 位").monospacedDigit() }
                 if !clipboard.message.isEmpty { Text(clipboard.message).foregroundStyle(.orange) }
-            }.font(.caption).padding(10).background(.bar)
+            }
+            .font(.caption)
+            .foregroundStyle(GlassPalette.secondaryText)
+            .padding(10)
+            .background(AppleChromeBackground())
         }
         .onAppear { controller.setVisible(true) }
         .onDisappear { controller.setVisible(false) }

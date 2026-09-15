@@ -68,6 +68,22 @@ import and export on macOS, iPhone, and iPad. ZIPFoundation is distributed
 under the MIT License; the complete license is preserved at
 `Vendor/ZIPFoundation/LICENSE`.
 
+## macOS interface fonts
+
+The macOS `ServerDash` and isolated `ServerDashMacQA` application targets each
+bundle five static font files for the Liquid Glass workbench:
+
+- Outfit SemiBold, Bold, and ExtraBold. Copyright 2021 The Outfit Project Authors.
+- Plus Jakarta Sans Regular and Medium. Copyright 2020 The Plus Jakarta Sans Project Authors.
+
+Both families are distributed under the SIL Open Font License 1.1. The exact
+license texts shipped with the application are preserved as
+`MacResources/Fonts/Outfit-OFL.txt` and
+`MacResources/Fonts/PlusJakartaSans-OFL.txt`; source and file inventory are in
+`MacResources/Fonts/README.md`. These font files and license resources are not
+added to the `ServerDashMobile` iOS application target. Chinese glyphs use the
+platform fallback chain.
+
 ## Apple-native design guidance
 
 ServerDash's Apple-native design rules were adapted from

@@ -2,8 +2,68 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DERIVED_DATA="${SERVERDASH_DERIVED_DATA:-${ROOT_DIR}/.build/concurrency-gate}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+fail_configuration() {
+    printf 'Invalid strict-concurrency configuration: %s\n' "$*" >&2
+    exit 64
+}
+
+canonical_directory_path() {
+    local label="$1"
+    local candidate="$2"
+    local existing component parent suffix=""
+
+    [[ -n "${candidate}" ]] || fail_configuration "${label} must not be empty."
+    if [[ "${candidate}" != /* ]]; then
+        candidate="${ROOT_DIR}/${candidate}"
+    fi
+    while [[ "${candidate}" != "/" && "${candidate}" == */ ]]; do
+        candidate="${candidate%/}"
+    done
+    case "/${candidate#/}/" in
+        */../*) fail_configuration \
+            "${label} must not contain '..' path components: ${candidate}" ;;
+    esac
+
+    existing="${candidate}"
+    while [[ ! -e "${existing}" && ! -L "${existing}" ]]; do
+        component="${existing##*/}"
+        case "${component}" in
+            ""|.) ;;
+            *) suffix="/${component}${suffix}" ;;
+        esac
+        parent="${existing%/*}"
+        existing="${parent:-/}"
+        while [[ "${existing}" != "/" && "${existing}" == */ ]]; do
+            existing="${existing%/}"
+        done
+    done
+    [[ -d "${existing}" ]] || fail_configuration "${label} is not a directory path: ${candidate}"
+    existing="$(cd "${existing}" && pwd -P)"
+    printf '%s%s\n' "${existing}" "${suffix}"
+}
+
+if [[ -L "${ROOT_DIR}/.build" ]]; then
+    fail_configuration "${ROOT_DIR}/.build must not be a symbolic link."
+fi
+if [[ -e "${ROOT_DIR}/.build" && ! -d "${ROOT_DIR}/.build" ]]; then
+    fail_configuration "${ROOT_DIR}/.build must be a directory."
+fi
+if [[ "${SERVERDASH_DERIVED_DATA+x}" == "x" ]]; then
+    [[ -n "${SERVERDASH_DERIVED_DATA}" ]] || \
+        fail_configuration "SERVERDASH_DERIVED_DATA must not be empty."
+fi
+
+BUILD_ROOT="$(canonical_directory_path "Build root" "${ROOT_DIR}/.build")"
+DERIVED_DATA="$(canonical_directory_path \
+    "SERVERDASH_DERIVED_DATA" \
+    "${SERVERDASH_DERIVED_DATA:-${BUILD_ROOT}/concurrency-gate}")"
+case "${DERIVED_DATA}" in
+    "${BUILD_ROOT}"/*) ;;
+    *) fail_configuration \
+        "Derived data must resolve below ${BUILD_ROOT}; received ${DERIVED_DATA}" ;;
+esac
 LOG_FILE="${SERVERDASH_BUILD_LOG:-${DERIVED_DATA}/build.log}"
 
 "${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --verify-only >/dev/null 2>&1 || \
@@ -38,21 +98,46 @@ if [[ ${BUILD_STATUS} -ne 0 ]]; then
     exit ${BUILD_STATUS}
 fi
 
+set +e
+xcodebuild \
+    -project "${ROOT_DIR}/ServerDash.xcodeproj" \
+    -scheme ServerDashGlassUITests \
+    -configuration Debug \
+    -destination "platform=macOS" \
+    -derivedDataPath "${DERIVED_DATA}" \
+    -skipPackagePluginValidation \
+    -onlyUsePackageVersionsFromResolvedFile \
+    -disableAutomaticPackageResolution \
+    CODE_SIGN_IDENTITY=- \
+    CODE_SIGNING_ALLOWED=YES \
+    COMPILER_INDEX_STORE_ENABLE=NO \
+    SWIFT_STRICT_CONCURRENCY=complete \
+    build-for-testing >>"${LOG_FILE}" 2>&1
+QA_BUILD_STATUS=$?
+set -e
+
+if [[ ${QA_BUILD_STATUS} -ne 0 ]]; then
+    echo "Strict-concurrency Mac QA build failed. Last 80 log lines:" >&2
+    tail -80 "${LOG_FILE}" >&2
+    exit ${QA_BUILD_STATUS}
+fi
+
 FIRST_PARTY_WARNINGS="${DERIVED_DATA}/first-party-warnings.txt"
 awk -v root="${ROOT_DIR}/" '
-    index($0, root "Sources/") || index($0, root "Tests/") || index($0, root "Native/") {
+    index($0, root "Sources/") || index($0, root "Tests/") || index($0, root "Native/") ||
+    index($0, root "MacQA/") || index($0, root "ServerDashGlassUITests/") {
         start = index($0, root)
         relative = substr($0, start + length(root))
         path = relative
         sub(/:[0-9]+(:[0-9]+)?: warning:.*/, "", path)
-        if (path ~ /^(Sources|Tests|Native)\/.*\.(swift|m|mm|c|cc|cpp|h)$/ && $0 ~ /: warning:/) {
+        if (path ~ /^(Sources|Tests|Native|MacQA|ServerDashGlassUITests)\/.*\.(swift|m|mm|c|cc|cpp|h)$/ && $0 ~ /: warning:/) {
             print $0
         }
     }
     /^@__swiftmacro_.*ServerDash.*: warning:/ {
         print $0
     }
-    /(^|[[:space:]"])(Sources|Tests|Native)\/[^:]+\.(swift|m|mm|c|cc|cpp|h):[0-9]+(:[0-9]+)?: warning:/ {
+    /(^|[[:space:]"])(Sources|Tests|Native|MacQA|ServerDashGlassUITests)\/[^:]+\.(swift|m|mm|c|cc|cpp|h):[0-9]+(:[0-9]+)?: warning:/ {
         print $0
     }
 ' "${LOG_FILE}" | sort -u >"${FIRST_PARTY_WARNINGS}"

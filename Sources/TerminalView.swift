@@ -125,9 +125,15 @@ private struct TerminalWorkspaceContent: View {
     @State private var workspaceError: String?
     @State private var snippetPendingExecution: TerminalSnippetRequest?
     @State private var showingAppearance = false
+    #if SERVERDASH_MAC_QA
+    @State private var showingInspector = false
+    @State private var inspectorTab = "status"
+    @State private var inspectorWidth = 390.0
+    #else
     @SceneStorage("terminal.inspector.visible") private var showingInspector = false
     @SceneStorage("terminal.inspector.tab") private var inspectorTab = "status"
     @SceneStorage("terminal.inspector.width") private var inspectorWidth = 390.0
+    #endif
     @Environment(\.openWindow) private var openWindow
 
     @State private var showingBatch = false
@@ -381,6 +387,7 @@ private struct TerminalWorkspaceContent: View {
             .controlSize(.regular)
             .frame(height: 44)
             .padding(.horizontal, AppleDesign.Spacing.xs)
+            .foregroundStyle(GlassPalette.primaryText)
             .background(AppleChromeBackground())
 
             Rectangle()
@@ -426,8 +433,11 @@ private struct TerminalWorkspaceContent: View {
                 } description: {
                     Text("选择机器打开终端；新建标签或分屏可建立独立连接。")
                 } actions: {
-                    Button("选择机器") { showingServerPicker = true }.buttonStyle(.borderedProminent)
+                    Button("选择机器") { showingServerPicker = true }.macGlassButton(prominent: true)
                 }
+                .frame(maxWidth: 560, minHeight: 300)
+                .applePanel()
+                .padding(AppleDesign.Spacing.lg)
             }
             }
             if capabilities.canUseSSHTools, let selectedController {
@@ -535,7 +545,7 @@ private struct TerminalWorkspaceContent: View {
     @ViewBuilder private var inspectorContent: some View {
             if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("RDP 状态", systemImage: "desktopcomputer").font(.headline)
+                    Label("RDP 状态", systemImage: "desktopcomputer").font(AppTypography.cardTitle)
                     Text(controller.configuration.name)
                     Text("NLA/CredSSP · TLS 1.2+")
                     Text("远程桌面不提供 SSH AI、命令片段或终端录制。")
@@ -641,7 +651,7 @@ struct TerminalInspectorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
-                Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
+                Text("终端检查器").font(AppTypography.cardTitle).accessibilityAddTraits(.isHeader)
                 Text(controller.serverName)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Picker("检查器内容", selection: $selectedTab) {
@@ -677,7 +687,8 @@ struct TerminalInspectorView: View {
             }
             }
         }
-        .background(Color.appGround)
+        .foregroundStyle(GlassPalette.primaryText)
+        .background(AppleChromeBackground())
     }
 
     @ViewBuilder private var statusContent: some View {
@@ -766,7 +777,7 @@ struct TerminalInspectorView: View {
 
     private func snippetRow(_ snippet: CommandSnippetRecord) -> some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
-            Text(snippet.title).font(.headline).lineLimit(2)
+            Text(snippet.title).font(AppTypography.cardTitle).lineLimit(2)
             Text(snippet.category).font(.caption).foregroundStyle(.secondary)
             Text(snippet.command)
                 .font(.caption.monospaced()).lineLimit(4).textSelection(.enabled)
@@ -855,10 +866,11 @@ private struct TerminalSessionPane: View {
                     }
                     Spacer(minLength: AppleDesign.Spacing.sm)
                     Button("重新连接", action: onReconnect)
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                 }
                 .padding(AppleDesign.Spacing.sm)
-                .background(Color.appSurface)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
             }
 
             Divider()
@@ -885,10 +897,10 @@ private struct TerminalSessionPane: View {
                     .accessibilityLabel("终端字号 \(Int(controller.appearanceProfile.fontSize)) 点")
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
             .padding(.horizontal, AppleDesign.Spacing.sm)
             .frame(height: 30)
-            .background(Color.appGround)
+            .foregroundStyle(GlassPalette.secondaryText)
+            .background(AppleChromeBackground())
         }
     }
 }

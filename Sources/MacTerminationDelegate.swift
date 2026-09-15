@@ -1,10 +1,16 @@
 import AppKit
+import SwiftUI
 
-private final class ShutdownProgressContentView: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
-        dirtyRect.fill()
-        super.draw(dirtyRect)
+private struct ShutdownProgressGlassBackground: View {
+    var body: some View {
+        ZStack {
+            ServerDashBackdrop()
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .macGlassSurface(role: .overlay, cornerRadius: MacGlassTokens.cornerRadius)
+                .padding(8)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -23,19 +29,27 @@ final class ShutdownProgressPanel {
         )
         panel.title = "正在退出 ServerDash"
         panel.isReleasedWhenClosed = false
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
         panel.standardWindowButton(.closeButton)?.isEnabled = false
+        panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
 
         let progress = NSProgressIndicator()
         progress.style = .spinning
         progress.controlSize = .regular
+        progress.appearance = NSAppearance(named: .darkAqua)
         progress.startAnimation(nil)
         progress.setAccessibilityLabel("退出进度")
 
         label = NSTextField(labelWithString: "正在保存编辑草稿…")
-        label.font = .systemFont(ofSize: NSFont.systemFontSize)
-        label.textColor = .secondaryLabelColor
+        label.font = NSFont(name: "PlusJakartaSans-Medium", size: NSFont.systemFontSize)
+            ?? .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        label.textColor = .white
         label.setAccessibilityElement(true)
         label.setAccessibilityRole(.staticText)
         label.setAccessibilityLabel("退出状态")
@@ -45,9 +59,18 @@ final class ShutdownProgressPanel {
         stack.alignment = .centerY
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let content = ShutdownProgressContentView()
+        let content = NSView()
+        content.wantsLayer = true
+        content.layer?.backgroundColor = NSColor.clear.cgColor
+        let background = NSHostingView(rootView: ShutdownProgressGlassBackground())
+        background.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(background)
         content.addSubview(stack)
         NSLayoutConstraint.activate([
+            background.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            background.topAnchor.constraint(equalTo: content.topAnchor),
+            background.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -24),
             stack.centerYAnchor.constraint(equalTo: content.centerYAnchor)
@@ -135,7 +158,31 @@ final class ShutdownProgressDelayController {
     private var progressPanel: ShutdownProgressPanel?
     private let progressDelay = ShutdownProgressDelayController()
 
+    #if SERVERDASH_MAC_QA
+    var fixtureWindowFactory: (() -> NSWindow)?
+    private var retainedFixtureWindow: NSWindow?
+
+    /// XCTest can launch a second macOS process without issuing the normal
+    /// reopen event. The QA app declares no window scene, so this delegate is the
+    /// sole owner of its one deterministic, isolated review window.
+    /// This code is not compiled into the shipping ServerDash application.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard retainedFixtureWindow == nil, let factory = fixtureWindowFactory else { return }
+        let window = factory()
+        retainedFixtureWindow = window
+        MacUIFixture.configureWindow(window)
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate()
+    }
+    #endif
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if SERVERDASH_MAC_QA
+        // The isolated fixture owns no user drafts, transfers, recordings, or
+        // live connections. Exit synchronously so a screenshot matrix cannot
+        // overlap two QA processes with different route arguments.
+        return .terminateNow
+        #else
         guard !waiting else { return .terminateLater }
         waiting = true
         scheduleProgress(message: "正在保存编辑草稿…")
@@ -168,6 +215,7 @@ final class ShutdownProgressDelayController {
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+        #endif
     }
 
     private func scheduleProgress(message: String) {

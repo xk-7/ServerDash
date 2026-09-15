@@ -89,7 +89,9 @@ enum MainContentRoute: Equatable {
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    #if !SERVERDASH_MAC_QA
     @Environment(\.openSettings) private var openSettings
+    #endif
     @EnvironmentObject private var appState: AppState
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
     @Query(sort: \RDPConnectionRecord.name) private var rdpMachines: [RDPConnectionRecord]
@@ -97,6 +99,8 @@ struct ContentView: View {
     @Query(sort: \SSHKeyRecord.name) private var sshKeys: [SSHKeyRecord]
     @Query(sort: \ConnectionRouteRecord.updatedAt) private var connectionRoutes: [ConnectionRouteRecord]
     @Query(sort: \PortForwardRuleRecord.updatedAt) private var portForwardRules: [PortForwardRuleRecord]
+
+    @StateObject private var glassEntranceStore = GlassCardEntranceStore()
 
     @State private var searchText = ""
     @State private var showingNewServer = false
@@ -151,6 +155,7 @@ struct ContentView: View {
 
     var body: some View {
         lifecycleView
+            .environmentObject(glassEntranceStore)
     }
 
     private var navigationView: some View {
@@ -159,13 +164,13 @@ struct ContentView: View {
                 selection: sidebarDestination,
                 terminalCount: appState.terminalRegistry.workspace.tabs.count,
                 onNavigate: navigate,
-                onSettings: { openSettings() }
+                onSettings: openWorkbenchSettings
             )
             .navigationSplitViewColumnWidth(min: 210, ideal: 228, max: 260)
         } detail: {
             detailContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.appGround)
+                .background(Color.clear)
         }
         .navigationSplitViewStyle(.balanced)
         .navigationTitle("ServerDash")
@@ -175,6 +180,14 @@ struct ContentView: View {
             refresh: { Task { await appState.refreshAll(servers) } },
             retryFailed: { Task { await appState.refreshAll(servers, failedOnly: true) } }
         ))
+    }
+
+    private func openWorkbenchSettings() {
+        #if SERVERDASH_MAC_QA
+        appState.showQASettings()
+        #else
+        openSettings()
+        #endif
     }
 
     private var presentationView: some View {

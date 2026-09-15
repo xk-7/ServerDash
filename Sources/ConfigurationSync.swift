@@ -204,6 +204,7 @@ actor WebDAVSyncTransport {
         }
     }
     func fetch(_ endpoint: WebDAVSyncEndpoint) async throws -> (Data?, String?) {
+        try MacUIFixtureIsolationPolicy.requireNetworkAllowed()
         let request = request(endpoint, method: "GET")
         let (stream, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else { throw ConfigurationSyncError.invalidPackage }
@@ -218,6 +219,7 @@ actor WebDAVSyncTransport {
         return (data, etag)
     }
     func put(_ data: Data, endpoint: WebDAVSyncEndpoint, etag: String?) async throws {
+        try MacUIFixtureIsolationPolicy.requireNetworkAllowed()
         if let etag, !Self.isStrongETag(etag) { throw ConfigurationSyncError.unsupportedConditionalWrites }
         try await verifyConditionalWrites(endpoint)
         try Task.checkCancellation()

@@ -126,7 +126,12 @@ struct OpenAICompatibleClient: AIStreamingClient {
         stream(request: request, provider: .openAI)
     }
     func stream(request: URLRequest, provider: AIProviderID) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        if MacUIFixtureIsolationPolicy.blocksNetwork {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: MacUIFixtureIsolationError.networkDisabled)
+            }
+        }
+        return AsyncThrowingStream { continuation in
             let delegate = AIStreamDelegate(continuation: continuation, provider: provider)
             let configuration = URLSessionConfiguration.ephemeral
             if let protocolClasses { configuration.protocolClasses = protocolClasses }

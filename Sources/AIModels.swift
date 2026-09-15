@@ -61,6 +61,7 @@ enum AIError: LocalizedError {
     static func safeDescription(_ error: Error) -> String {
         // Never expose server error bodies, request URLs, API keys or prompt echoes.
         if let error = error as? AIError { return error.localizedDescription }
+        if let error = error as? MacUIFixtureIsolationError { return error.localizedDescription }
         if error is CancellationError || (error as? URLError)?.code == .cancelled { return AIError.cancelled.localizedDescription }
         return AIError.network.localizedDescription
     }
@@ -83,6 +84,9 @@ struct AIConfiguration: Codable, Equatable, Sendable {
 }
 
 enum AIKeychain {
+    #if SERVERDASH_MAC_QA
+    private static let qaCredentials = InMemoryCredentialStore()
+    #else
     private static func baseQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -91,8 +95,12 @@ enum AIKeychain {
             kSecAttrSynchronizable as String: false
         ]
     }
+    #endif
 
     static func read() throws -> String {
+        #if SERVERDASH_MAC_QA
+        return qaCredentials.read("active-provider") ?? ""
+        #else
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -101,8 +109,13 @@ enum AIKeychain {
         if status == errSecItemNotFound { return "" }
         guard status == errSecSuccess, let data = item as? Data, let value = String(data: data, encoding: .utf8) else { throw AIError.keychain }
         return value
+        #endif
     }
     static func save(_ key: String) throws {
+        #if SERVERDASH_MAC_QA
+        if key.isEmpty { qaCredentials.delete("active-provider") }
+        else { qaCredentials.write(key, account: "active-provider") }
+        #else
         let query = baseQuery()
         if key.isEmpty {
             let status = SecItemDelete(query as CFDictionary)
@@ -115,6 +128,7 @@ enum AIKeychain {
         if status == errSecItemNotFound {
             guard SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil) == errSecSuccess else { throw AIError.keychain }
         } else if status != errSecSuccess { throw AIError.keychain }
+        #endif
     }
 }
 

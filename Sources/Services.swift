@@ -17,9 +17,40 @@ enum KeychainError: LocalizedError {
     }
 }
 
+#if SERVERDASH_MAC_QA
+/// A lock-protected credential store used by the separately bundled Mac QA app.
+/// Keeping the values in process prevents an isolated UI run from reading or
+/// changing the user's Keychain, and the type is absent from production builds.
+final class InMemoryCredentialStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String] = [:]
+
+    func write(_ value: String, account: String) {
+        lock.withLock { values[account] = value }
+    }
+
+    func read(_ account: String) -> String? {
+        lock.withLock { values[account] }
+    }
+
+    func contains(_ account: String) -> Bool {
+        lock.withLock { values[account] != nil }
+    }
+
+    func delete(_ account: String) {
+        lock.withLock { values[account] = nil }
+    }
+}
+#endif
+
 enum KeychainService {
     static let serviceName = "com.serverdash.credentials"
 
+    #if SERVERDASH_MAC_QA
+    private static let qaCredentials = InMemoryCredentialStore()
+    #endif
+
+    #if !SERVERDASH_MAC_QA
     private static var accessibility: CFString {
 #if os(iOS)
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly
@@ -27,8 +58,12 @@ enum KeychainService {
         kSecAttrAccessibleWhenUnlocked
 #endif
     }
+    #endif
 
     static func savePassword(_ password: String, for credentialID: UUID) throws {
+        #if SERVERDASH_MAC_QA
+        qaCredentials.write(password, account: credentialID.uuidString)
+        #else
         let account = credentialID.uuidString
         let data = Data(password.utf8)
         let query: [String: Any] = [
@@ -52,9 +87,13 @@ enum KeychainService {
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)
         }
+        #endif
     }
 
     static func password(for credentialID: UUID) throws -> String? {
+        #if SERVERDASH_MAC_QA
+        return qaCredentials.read(credentialID.uuidString)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
@@ -74,6 +113,7 @@ enum KeychainService {
             throw KeychainError.invalidData
         }
         return password
+        #endif
     }
 
     static func hasPassword(for credentialID: UUID) -> Bool {
@@ -81,6 +121,9 @@ enum KeychainService {
     }
 
     static func hasSecret(account: String) -> Bool {
+        #if SERVERDASH_MAC_QA
+        return qaCredentials.contains(account)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
@@ -88,6 +131,7 @@ enum KeychainService {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+        #endif
     }
 
     static func deletePassword(for credentialID: UUID) throws {
@@ -95,6 +139,9 @@ enum KeychainService {
     }
 
     static func saveSecret(_ value: String, account: String) throws {
+        #if SERVERDASH_MAC_QA
+        qaCredentials.write(value, account: account)
+        #else
         let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -114,9 +161,13 @@ enum KeychainService {
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)
         }
+        #endif
     }
 
     static func secret(account: String) throws -> String? {
+        #if SERVERDASH_MAC_QA
+        return qaCredentials.read(account)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
@@ -136,9 +187,13 @@ enum KeychainService {
             throw KeychainError.invalidData
         }
         return value
+        #endif
     }
 
     static func deleteSecret(account: String) throws {
+        #if SERVERDASH_MAC_QA
+        qaCredentials.delete(account)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
@@ -148,6 +203,7 @@ enum KeychainService {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }
+        #endif
     }
 
     static func passphraseAccount(for keyID: UUID) -> String {

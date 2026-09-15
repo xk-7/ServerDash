@@ -23,7 +23,7 @@ struct IdentityManagementView: View {
                     Button("新建身份", systemImage: "plus") {
                         showingNewIdentity = true
                     }
-                    .buttonStyle(.borderedProminent)
+                    .macGlassButton(prominent: true)
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                 }
 
@@ -34,7 +34,7 @@ struct IdentityManagementView: View {
                         Text("创建身份后，可将同一凭据安全地关联到多台服务器。")
                     } actions: {
                         Button("新建身份") { showingNewIdentity = true }
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 360)
                     .applePanel()
@@ -51,7 +51,6 @@ struct IdentityManagementView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .appleInteractiveSurface(radius: AppleDesign.Radius.chip)
                             .contextMenu {
                                 Button("编辑身份", systemImage: "pencil") {
                                     editingIdentity = identity
@@ -134,7 +133,7 @@ private struct IdentityRow: View {
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text(identity.name)
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                     .lineLimit(1)
                 Text(identity.username)
                     .font(.caption.monospaced())
@@ -189,8 +188,19 @@ struct IdentityEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(identity == nil ? "新建身份" : "编辑身份")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                }
+                .padding(AppleDesign.Spacing.md)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+                Divider()
+                Form {
                 Section("身份") {
                     TextField("名称", text: $name)
                     TextField("用户名", text: $username)
@@ -225,19 +235,25 @@ struct IdentityEditorView: View {
                         .lineLimit(2...4)
                 }
             }
-            .formStyle(.grouped)
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(Color(nsColor: .textColor))
+                .background(Color(nsColor: .controlBackgroundColor))
 
-            Divider()
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("保存") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!isValid)
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("取消") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Button("保存") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .macGlassButton(prominent: true)
+                        .disabled(!isValid)
+                }
+                .padding(AppleDesign.Spacing.md)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
             }
-            .padding(AppleDesign.Spacing.md)
         }
         .frame(width: 520, height: 480)
         .alert(
@@ -325,7 +341,7 @@ struct SSHKeyManagementView: View {
                     symbol: "key"
                 ) {
                     Button("导入密钥", systemImage: "plus") { showingNewKey = true }
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                         .keyboardShortcut("k", modifiers: [.command, .shift])
                 }
 
@@ -336,7 +352,7 @@ struct SSHKeyManagementView: View {
                         Text("导入本地私钥文件后，可在身份中复用。")
                     } actions: {
                         Button("导入密钥") { showingNewKey = true }
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                     .frame(maxWidth: .infinity, minHeight: 360)
                     .applePanel()
@@ -352,7 +368,6 @@ struct SSHKeyManagementView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .appleInteractiveSurface(radius: AppleDesign.Radius.chip)
                             .contextMenu {
                                 Button("编辑密钥", systemImage: "pencil") { editingKey = key }
                                 Divider()
@@ -432,7 +447,7 @@ private struct SSHKeyRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 30)
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
-                Text(key.name).font(.headline).lineLimit(1)
+                Text(key.name).font(AppTypography.cardTitle).lineLimit(1)
                 Text(key.fingerprint)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
@@ -481,8 +496,19 @@ struct SSHKeyEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(key == nil ? "导入 SSH 密钥" : "编辑 SSH 密钥")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                }
+                .padding(AppleDesign.Spacing.md)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+                Divider()
+                Form {
                 Section("密钥") {
                     TextField("名称", text: $name)
                     HStack {
@@ -510,28 +536,34 @@ struct SSHKeyEditorView: View {
                     }
                 }
             }
-            .formStyle(.grouped)
-            .disabled(isInspecting)
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(Color(nsColor: .textColor))
+                .background(Color(nsColor: .controlBackgroundColor))
+                .disabled(isInspecting)
 
-            Divider()
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button {
-                    inspectAndSave()
-                } label: {
-                    if isInspecting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("验证并保存")
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("取消") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Button {
+                        inspectAndSave()
+                    } label: {
+                        if isInspecting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("验证并保存")
+                        }
                     }
+                    .keyboardShortcut(.defaultAction)
+                    .macGlassButton(prominent: true)
+                    .disabled(name.isEmpty || filePath.isEmpty || isInspecting)
                 }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(name.isEmpty || filePath.isEmpty || isInspecting)
+                .padding(AppleDesign.Spacing.md)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
             }
-            .padding(AppleDesign.Spacing.md)
         }
         .frame(width: 560, height: 520)
         .alert(
@@ -682,7 +714,7 @@ struct SnippetManagementView: View {
                     symbol: "curlybraces"
                 ) {
                     Button("新建片段", systemImage: "plus") { showingNewSnippet = true }
-                        .buttonStyle(.borderedProminent)
+                        .macGlassButton(prominent: true)
                         .keyboardShortcut("s", modifiers: [.command, .shift])
                 }
                 AppleSearchField(prompt: "搜索名称、命令或分类", text: $searchText)
@@ -698,7 +730,7 @@ struct SnippetManagementView: View {
                 } actions: {
                     if searchText.isEmpty {
                         Button("新建片段") { showingNewSnippet = true }
-                            .buttonStyle(.borderedProminent)
+                            .macGlassButton(prominent: true)
                     }
                 }
             } else {
@@ -785,7 +817,7 @@ private struct SnippetRow: View {
         HStack(spacing: AppleDesign.Spacing.md) {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
                 HStack {
-                    Text(snippet.title).font(.headline).lineLimit(1)
+                    Text(snippet.title).font(AppTypography.cardTitle).lineLimit(1)
                     Text(snippet.category)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -833,8 +865,19 @@ struct SnippetEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
+        ZStack {
+            ServerDashBackdrop()
+            VStack(spacing: 0) {
+                HStack {
+                    Text(snippet == nil ? "新建代码片段" : "编辑代码片段")
+                        .font(AppTypography.pageTitle)
+                    Spacer()
+                }
+                .padding(AppleDesign.Spacing.md)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
+                Divider()
+                Form {
                 Section("代码片段") {
                     TextField("名称", text: $title)
                     TextField("分类", text: $category)
@@ -846,18 +889,24 @@ struct SnippetEditorView: View {
                     Toggle("收藏", isOn: $isFavorite)
                 }
             }
-            .formStyle(.grouped)
-            Divider()
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("保存") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(title.isEmpty || command.isEmpty)
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(Color(nsColor: .textColor))
+                .background(Color(nsColor: .controlBackgroundColor))
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("取消") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Button("保存") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .macGlassButton(prominent: true)
+                        .disabled(title.isEmpty || command.isEmpty)
+                }
+                .padding(AppleDesign.Spacing.md)
+                .foregroundStyle(GlassPalette.primaryText)
+                .background(AppleChromeBackground())
             }
-            .padding(AppleDesign.Spacing.md)
         }
         .frame(width: 560, height: 440)
         .alert(

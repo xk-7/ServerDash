@@ -1065,7 +1065,7 @@ private struct GPUDetailStatusHeader: View {
                 )
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text("GPU 状态")
-                    .font(.headline)
+                    .font(AppTypography.cardTitle)
                 HStack(spacing: AppleDesign.Spacing.xs) {
                     Text(summary.deviceCount == 0 ? "未检测到设备" : "NVIDIA")
                         .font(.caption)

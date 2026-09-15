@@ -30,20 +30,36 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsPage.allCases, selection: pageSelection) {
-                Label($0.title, systemImage: $0.symbol).tag($0)
-            }.listStyle(.sidebar).navigationTitle("设置")
+        ZStack {
+            ServerDashBackdrop()
+
+            NavigationSplitView {
+                List(SettingsPage.allCases, selection: pageSelection) {
+                    Label($0.title, systemImage: $0.symbol).tag($0)
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .navigationTitle("设置")
                 .navigationSplitViewColumnWidth(min: 155, ideal: 170, max: 210)
-        } detail: {
-            VStack(alignment: .leading, spacing: 0) {
-                Label(page.title, systemImage: page.symbol)
-                    .font(.title2.weight(.semibold)).padding(20)
-                Divider()
-                detail.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }.background(Color.appGround)
+            } detail: {
+                VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                    Label(page.title, systemImage: page.symbol)
+                        .font(AppTypography.pageTitle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(AppleDesign.Spacing.md)
+                        .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .foregroundStyle(Color(nsColor: .textColor))
+                        .applePanel(padding: 0, radius: AppleDesign.Radius.panel)
+                }
+                .padding(AppleDesign.Spacing.md)
+                .background(Color.clear)
+            }
         }
         .frame(minWidth: 820, idealWidth: 1000, minHeight: 620, idealHeight: 740)
+        .font(AppTypography.body)
         .preferredColorScheme((AppAppearance(rawValue: appearance) ?? .system).colorScheme)
         .onAppear { reloadTimeout() }
         .onChange(of: pageID) { _, _ in reloadTimeout() }
@@ -70,7 +86,7 @@ struct SettingsView: View {
                     Text("标签与连接由工作区持有，切换页面后保持运行。").foregroundStyle(.secondary)
                     LabeledContent("版本", value: MacSettingsValidation.versionLabel())
                 }
-            }.formStyle(.grouped)
+            }.formStyle(.grouped).scrollContentBackground(.hidden)
         case .terminal:
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -99,7 +115,7 @@ struct SettingsView: View {
                             Toggle("网络速率使用 bit/s", isOn: $networkBits)
                 }
                 MonitoringFilterSettingsView()
-            }.formStyle(.grouped)
+            }.formStyle(.grouped).scrollContentBackground(.hidden)
         case .files: DesktopFileSettingsView()
         case .shortcuts:
             VStack {
@@ -109,6 +125,7 @@ struct SettingsView: View {
                         LabeledContent(item.0) { Text(item.1).font(.body.monospaced()).foregroundStyle(.secondary) }.padding(.vertical, 6)
                     }
                 }
+                .scrollContentBackground(.hidden)
                 Text("快捷键与菜单栏保持一致；macOS 保留的系统快捷键由系统处理。").font(.caption).foregroundStyle(.secondary).padding(16)
             }
         case .security:
@@ -146,7 +163,7 @@ struct SettingsView: View {
                     ))
                     Text("默认关闭。启用后，受管服务器会访问 ipinfo.io；关闭会停止后续查询并清理 ServerDash 内存中的位置缓存。").font(.caption).foregroundStyle(.secondary)
                 }
-            }.formStyle(.grouped)
+            }.formStyle(.grouped).scrollContentBackground(.hidden)
         case .sync: WebDAVSyncView(embedded: true)
         case .recording: RecordingSettingsView()
         case .ai: AISettingsView()

@@ -52,8 +52,13 @@ enum AppleDesign {
     enum Radius {
         static let chip: CGFloat = 6
         static let thumbnail: CGFloat = 12
+#if os(macOS)
+        static let card: CGFloat = MacGlassTokens.cornerRadius
+        static let panel: CGFloat = MacGlassTokens.cornerRadius
+#else
         static let card: CGFloat = 18
         static let panel: CGFloat = 22
+#endif
         static let hero: CGFloat = 26
         static let pill: CGFloat = 999
     }
@@ -130,12 +135,20 @@ extension Color {
 }
 
 struct ApplePanelModifier: ViewModifier {
+#if !os(macOS)
     @Environment(\.colorSchemeContrast) private var contrast
+#endif
 
     var padding: CGFloat = 16
     var radius: CGFloat = AppleDesign.Radius.panel
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+#if os(macOS)
+        content
+            .padding(padding)
+            .modifier(MacGlassSurfaceModifier(role: .panel, cornerRadius: radius))
+#else
         content
             .padding(padding)
             .background(Color.appSurface)
@@ -148,10 +161,20 @@ struct ApplePanelModifier: ViewModifier {
                     )
             }
             .shadow(color: .black.opacity(0.025), radius: 3, y: 1)
+#endif
     }
 }
 
 extension View {
+    @ViewBuilder
+    func macGlassFormBackground() -> some View {
+#if os(macOS)
+        self.scrollContentBackground(.hidden)
+#else
+        self
+#endif
+    }
+
     func applePanel(
         padding: CGFloat = AppleDesign.Spacing.md,
         radius: CGFloat = AppleDesign.Radius.panel
@@ -159,30 +182,68 @@ extension View {
         modifier(ApplePanelModifier(padding: padding, radius: radius))
     }
 
-    func appleInteractiveSurface(radius: CGFloat = AppleDesign.Radius.card) -> some View {
-        modifier(AppleInteractiveSurface(radius: radius))
+    func appleInteractiveSurface(
+        radius: CGFloat = AppleDesign.Radius.card,
+        isEnabled: Bool = true
+    ) -> some View {
+        modifier(AppleInteractiveSurface(radius: radius, isEnabled: isEnabled))
     }
 }
 
 private struct AppleInteractiveSurface: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(macOS)
+    @Environment(\.macGlassReduceMotionOverride) private var reduceMotionOverride
+#endif
     @State private var hovering = false
     let radius: CGFloat
+    let isEnabled: Bool
 
+    private var effectiveReduceMotion: Bool {
+#if os(macOS)
+        reduceMotionOverride ?? reduceMotion
+#else
+        reduceMotion
+#endif
+    }
+
+    @ViewBuilder
     func body(content: Content) -> some View {
+#if os(macOS)
+        content
+            .scaleEffect(hovering && isEnabled && !effectiveReduceMotion ? MacGlassTokens.hoverScale : 1)
+            .zIndex(hovering && isEnabled ? 1 : 0)
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        hovering && isEnabled ? Color.white.opacity(0.32) : .clear,
+                        lineWidth: 1
+                    )
+                    .allowsHitTesting(false)
+            }
+            .shadow(
+                color: hovering && isEnabled ? Color.appAccent.opacity(0.22) : .clear,
+                radius: 18
+            )
+            .onHover { hovering = isEnabled && $0 }
+            .animation(effectiveReduceMotion ? nil : AppleDesign.quick, value: hovering)
+#else
         content
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(hovering ? Color.appAccent.opacity(0.45) : .clear, lineWidth: 1)
+                    .strokeBorder(hovering && isEnabled ? Color.appAccent.opacity(0.45) : .clear, lineWidth: 1)
                     .allowsHitTesting(false)
             }
-            .onHover { hovering = $0 }
-            .animation(reduceMotion ? nil : AppleDesign.quick, value: hovering)
+            .onHover { hovering = isEnabled && $0 }
+            .animation(effectiveReduceMotion ? nil : AppleDesign.quick, value: hovering)
+#endif
     }
 }
 
 struct AppleUnifiedPanel<Content: View>: View {
+#if !os(macOS)
     @Environment(\.colorSchemeContrast) private var contrast
+#endif
 
     @ViewBuilder let content: Content
 
@@ -190,7 +251,19 @@ struct AppleUnifiedPanel<Content: View>: View {
         self.content = content()
     }
 
+    @ViewBuilder
     var body: some View {
+#if os(macOS)
+        VStack(spacing: 0) {
+            content
+        }
+        .modifier(
+            MacGlassSurfaceModifier(
+                role: .panel,
+                cornerRadius: AppleDesign.Radius.panel
+            )
+        )
+#else
         VStack(spacing: 0) {
             content
         }
@@ -203,6 +276,7 @@ struct AppleUnifiedPanel<Content: View>: View {
                     lineWidth: 1
                 )
         }
+#endif
     }
 }
 
@@ -213,11 +287,19 @@ struct AppleSectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
             Text(title)
+#if os(macOS)
+                .font(AppTypography.sectionTitle)
+#else
                 .font(.title2.weight(.semibold))
+#endif
                 .accessibilityAddTraits(.isHeader)
             if let subtitle {
                 Text(subtitle)
+#if os(macOS)
+                    .font(AppTypography.body)
+#else
                     .font(.callout)
+#endif
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -245,10 +327,24 @@ struct AppleWorkspaceHeader<Actions: View>: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 44, height: 44)
+#if os(macOS)
+                .macGlassSurface(
+                    role: .floatingControl,
+                    cornerRadius: AppleDesign.Radius.thumbnail
+                )
+#else
                 .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.thumbnail))
+#endif
                 .accessibilityHidden(true)
             AppleSectionHeader(title: title, subtitle: subtitle)
         }
+#if os(macOS)
+        .foregroundStyle(
+            GlassPalette.primaryText,
+            GlassPalette.secondaryText,
+            GlassPalette.tertiaryText
+        )
+#endif
     }
 
     var body: some View {
@@ -273,31 +369,82 @@ struct AppleSearchField: View {
     @Binding var text: String
     @FocusState private var isFocused: Bool
 
+    @ViewBuilder
     var body: some View {
+#if os(macOS)
+        searchContents
+            .padding(AppleDesign.Spacing.xs)
+            .modifier(
+                MacGlassSurfaceModifier(
+                    role: .search,
+                    cornerRadius: AppleDesign.Radius.chip
+                )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: AppleDesign.Radius.chip, style: .continuous)
+                    .strokeBorder(
+                        isFocused ? Color.white.opacity(0.78) : .clear,
+                        lineWidth: isFocused ? 2 : 1
+                    )
+                    .allowsHitTesting(false)
+            }
+#else
+        searchContents
+            .padding(AppleDesign.Spacing.xs)
+            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.chip))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppleDesign.Radius.chip)
+                    .strokeBorder(isFocused ? Color.appAccent : Color.appHairline.opacity(0.5), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+#endif
+    }
+
+    private var searchContents: some View {
         HStack(spacing: AppleDesign.Spacing.xs) {
             Image(systemName: "magnifyingglass")
+#if os(macOS)
+                .foregroundStyle(GlassPalette.secondaryText)
+#else
                 .foregroundStyle(.secondary)
+#endif
                 .accessibilityHidden(true)
-            TextField(prompt, text: $text)
+            Group {
+#if os(macOS)
+                ZStack(alignment: .leading) {
+                    if text.isEmpty {
+                        Text(prompt)
+                            .foregroundStyle(GlassPalette.secondaryText)
+                            .lineLimit(1)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                    TextField("", text: $text)
+                        .foregroundStyle(GlassPalette.primaryText)
+                }
+#else
+                TextField(prompt, text: $text)
+#endif
+            }
                 .textFieldStyle(.plain)
+#if os(macOS)
+                .font(AppTypography.body)
+#endif
                 .focused($isFocused)
                 .accessibilityLabel(prompt)
             if !text.isEmpty {
                 Button { text = "" } label: {
                     Image(systemName: "xmark.circle.fill")
+#if os(macOS)
+                        .foregroundStyle(GlassPalette.secondaryText)
+#else
                         .foregroundStyle(.secondary)
+#endif
                 }
                 .buttonStyle(.plain)
                 .help("清除搜索")
                 .accessibilityLabel("清除搜索")
             }
-        }
-        .padding(AppleDesign.Spacing.xs)
-        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppleDesign.Radius.chip))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppleDesign.Radius.chip)
-                .strokeBorder(isFocused ? Color.appAccent : Color.appHairline.opacity(0.5), lineWidth: 1)
-                .allowsHitTesting(false)
         }
     }
 }
@@ -317,7 +464,12 @@ struct ServerStatusBadge: View {
     var body: some View {
         HStack(spacing: AppleDesign.Spacing.xxs) {
             StatusDot(status: status, size: 6)
-            Text(status.title).font(.caption.weight(.medium))
+            Text(status.title)
+#if os(macOS)
+                .font(AppTypography.label)
+#else
+                .font(.caption.weight(.medium))
+#endif
         }
         .foregroundStyle(tint)
         .padding(.horizontal, AppleDesign.Spacing.xs)
@@ -329,26 +481,45 @@ struct ServerStatusBadge: View {
 }
 
 struct AppleChromeBackground: View {
+#if !os(macOS)
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+#endif
 
+    @ViewBuilder
     var body: some View {
+#if os(macOS)
+        Color.clear
+            .modifier(MacGlassSurfaceModifier(role: .chrome, cornerRadius: 0))
+#else
         if reduceTransparency {
             Color.appSurface
         } else {
             Rectangle()
                 .fill(contrast == .increased ? .thickMaterial : .regularMaterial)
         }
+#endif
     }
 }
 
 struct AppleDismissibleOverlay<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(macOS)
+    @Environment(\.macGlassReduceMotionOverride) private var reduceMotionOverride
+#endif
 
     let maxWidth: CGFloat
     let maxHeight: CGFloat
     let onDismiss: () -> Void
     @ViewBuilder let content: Content
+
+    private var effectiveReduceMotion: Bool {
+#if os(macOS)
+        reduceMotionOverride ?? reduceMotion
+#else
+        reduceMotion
+#endif
+    }
 
     init(
         maxWidth: CGFloat,
@@ -362,6 +533,7 @@ struct AppleDismissibleOverlay<Content: View>: View {
         self.content = content()
     }
 
+    @ViewBuilder
     var body: some View {
         ZStack {
             Color.black.opacity(0.22)
@@ -371,6 +543,14 @@ struct AppleDismissibleOverlay<Content: View>: View {
 
             content
                 .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+#if os(macOS)
+                .modifier(
+                    MacGlassSurfaceModifier(
+                        role: .overlay,
+                        cornerRadius: AppleDesign.Radius.hero
+                    )
+                )
+#else
                 .background(Color.appGround)
                 .clipShape(
                     RoundedRectangle(
@@ -379,6 +559,7 @@ struct AppleDismissibleOverlay<Content: View>: View {
                     )
                 )
                 .shadow(color: .black.opacity(0.22), radius: 28, y: 12)
+#endif
                 .contentShape(
                     RoundedRectangle(
                         cornerRadius: AppleDesign.Radius.hero,
@@ -389,7 +570,7 @@ struct AppleDismissibleOverlay<Content: View>: View {
         }
         .appleExitCommand(perform: onDismiss)
         .transition(
-            reduceMotion
+            effectiveReduceMotion
                 ? .opacity
                 : .opacity.combined(with: .scale(scale: 0.98))
         )
@@ -426,10 +607,18 @@ struct MonitorSectionPanel<Content: View>: View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                 Text(title)
+#if os(macOS)
+                    .font(AppTypography.cardTitle)
+#else
                     .font(.headline)
+#endif
                 if let subtitle {
                     Text(subtitle)
+#if os(macOS)
+                        .font(AppTypography.label)
+#else
                         .font(.caption)
+#endif
                         .foregroundStyle(.secondary)
                 }
             }
@@ -461,14 +650,26 @@ struct MonitorStatTile: View {
                 )
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
+#if os(macOS)
+                    .font(AppTypography.label)
+#else
                     .font(.caption)
+#endif
                     .foregroundStyle(.secondary)
                 Text(value)
+#if os(macOS)
+                    .font(AppTypography.button)
+#else
                     .font(.callout.weight(.semibold))
+#endif
                     .monospacedDigit()
                 if let detail {
                     Text(detail)
+#if os(macOS)
+                        .font(AppTypography.label)
+#else
                         .font(.caption2)
+#endif
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -511,7 +712,11 @@ struct MonitorLegend: View {
                         .fill(item.color)
                         .frame(width: 7, height: 7)
                     Text(item.title)
+#if os(macOS)
+                        .font(AppTypography.label)
+#else
                         .font(.caption2)
+#endif
                         .foregroundStyle(.secondary)
                 }
             }

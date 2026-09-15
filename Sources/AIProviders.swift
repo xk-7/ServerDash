@@ -124,26 +124,44 @@ protocol AICredentialStore {
 }
 
 struct AIProviderKeychain: AICredentialStore {
+    #if SERVERDASH_MAC_QA
+    private static let qaCredentials = InMemoryCredentialStore()
+    #endif
+
+    #if !SERVERDASH_MAC_QA
     private func query(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.serverdash.ai.api-key",
          kSecAttrAccount as String: account, kSecAttrSynchronizable as String: false]
     }
+    #endif
     func read(_ account: String) throws -> String {
+        #if SERVERDASH_MAC_QA
+        return Self.qaCredentials.read(account) ?? ""
+        #else
         var q = query(account); q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(q as CFDictionary, &result)
         if status == errSecItemNotFound { return "" }
         guard status == errSecSuccess, let data = result as? Data, let key = String(data: data, encoding: .utf8) else { throw AIError.keychain }
         return key
+        #endif
     }
     func write(_ key: String, account: String) throws {
+        #if SERVERDASH_MAC_QA
+        Self.qaCredentials.write(key, account: account)
+        #else
         let attributes: [String: Any] = [kSecValueData as String: Data(key.utf8), kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
         let status = SecItemAdd(query(account).merging(attributes) { _, new in new } as CFDictionary, nil)
         guard status == errSecSuccess else { throw AIError.keychain }
+        #endif
     }
     func delete(_ account: String) throws {
+        #if SERVERDASH_MAC_QA
+        Self.qaCredentials.delete(account)
+        #else
         let status = SecItemDelete(query(account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw AIError.keychain }
+        #endif
     }
 }
 

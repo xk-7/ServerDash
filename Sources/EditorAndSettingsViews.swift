@@ -58,7 +58,7 @@ struct ServerEditorView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(server == nil ? "添加服务器" : "编辑服务器")
-                        .font(.title2.bold())
+                        .font(AppTypography.pageTitle)
                     Text(statusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -66,6 +66,8 @@ struct ServerEditorView: View {
                 Spacer()
             }
             .padding(20)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
 
             Divider()
 
@@ -151,6 +153,8 @@ struct ServerEditorView: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
+            .foregroundStyle(Color(nsColor: .textColor))
+            .applePanel(padding: 0, radius: 0)
             .disabled(isValidating)
 
             Divider()
@@ -173,13 +177,15 @@ struct ServerEditorView: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .macGlassButton(prominent: true)
                 .disabled(!isValid || isValidating)
             }
             .padding(16)
+            .foregroundStyle(GlassPalette.primaryText)
+            .background(AppleChromeBackground())
         }
         .frame(width: 620, height: 680)
-        .background(Color.appGround)
+        .background(ServerDashBackdrop())
         .sheet(isPresented: $showsRoute) { if let server { SSHConnectionRouteEditor(server: server) } }
         .interactiveDismissDisabled(isValidating)
         .task {
