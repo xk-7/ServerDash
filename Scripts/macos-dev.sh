@@ -19,8 +19,8 @@ Commands:
   test [...]                    Run the macOS ServerDash scheme tests.
   generate-check               Verify the checked-in project matches project.yml.
 
-Extra build/test arguments are passed to xcodebuild. Direct xcodebuild -target builds
-are unsupported because target builds bypass the shared scheme bootstrap action.
+Extra build/test arguments are passed to xcodebuild. Use the shared schemes for
+supported builds and tests; target build phases repair missing RDP links defensively.
 EOF
 }
 

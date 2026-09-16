@@ -230,12 +230,14 @@ Check a worktree before opening Xcode:
 ./Scripts/macos-dev.sh open
 ```
 
-The shared `ServerDash` scheme automatically prepares the pinned RDP dependency
-before Xcode resolves its build graph. A cold build downloads hash-verified
-official archives and compiles both Mac architectures. Later worktrees reuse the
-verified payload in `~/Library/Caches/com.serverdash.app/Native/RDP`; the current
-and most recently used previous payload are retained. The iOS targets do not link
-these libraries. See [dependency provenance and licenses](Vendor/RDP/README.md).
+The shared `ServerDash` scheme and the Mac target's first build phase automatically
+prepare the pinned RDP dependency. The project links the verified static archive
+through build settings instead of registering an ignored XCFramework file reference,
+so Xcode can start even after `.build/rdp` has been removed. A cold build downloads
+hash-verified official archives and compiles both Mac architectures. Later worktrees
+reuse the verified payload in `~/Library/Caches/com.serverdash.app/Native/RDP`; the
+current and most recently used previous payload are retained. The iOS targets do not
+link these libraries. See [dependency provenance and licenses](Vendor/RDP/README.md).
 
 To prepare or verify the dependency without opening Xcode:
 
@@ -252,10 +254,9 @@ Build and test the Mac app through the wrapper:
 ./Scripts/macos-dev.sh test -only-testing:ServerDashTests
 ```
 
-The wrapper and Xcode both use the shared scheme. A direct
-`xcodebuild -target ServerDash` invocation is unsupported because it bypasses the
-scheme pre-action that materializes the local XCFramework. Use the
-`-scheme ServerDash` option for custom command lines.
+The wrapper and Xcode both use the shared scheme. Target build phases also repair
+missing RDP links, but custom command lines should use `-scheme ServerDash` so they
+retain the tested build, test, and pre-action composition.
 
 Build the universal iPhone/iPad app for Simulator:
 
