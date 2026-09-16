@@ -103,6 +103,7 @@ jobs:
           mkdir -p .build/ci-logs
           exec > >(tee .build/ci-logs/workflow-guards.log) 2>&1
           bash Scripts/test-dev-workflow.sh
+          bash Scripts/test-xcode-rdp-bootstrap-config.sh
           bash Scripts/test-rdp-cache.sh
           bash Scripts/test-ci-release-verifier.sh
 
@@ -164,6 +165,7 @@ jobs:
         env:
           SERVERDASH_DERIVED_DATA: ${{ github.workspace }}/.build/ci-strict
           SERVERDASH_BUILD_LOG: ${{ github.workspace }}/.build/ci-logs/strict-build.log
+          SERVERDASH_VERIFY_RDP_COLD_BOOTSTRAP: 1
         run: bash Scripts/check-app-concurrency.sh
 
       - name: Run macOS tests without rebuilding

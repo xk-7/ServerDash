@@ -136,6 +136,7 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 - [x] 1,000 台主机的最终实际 UI 测量为 **9.542 秒**：筛选 3.423 秒、恢复全量结果 4.457 秒、单次 `4,160pt` 连续滚动 1.662 秒；本机验收上限为 30 秒。该数字用于本轮交互可用性验收，不作为跨设备性能承诺。
 - [x] macOS 全量门禁最终复跑 **425/425 项通过、零失败、零跳过**。
 - [x] 严格并发检查最终复跑通过，第一方源码、测试及宏展开编译告警为 **0**。依赖告警计数为 SwiftTerm 87、ZIPFoundation 4、NIOSSH 0、Citadel 0；RDP/WinPR 在 bootstrap 阶段单独记录，不并入上述计数。
+- [x] 2026-09-16 从实际 Xcode 失败日志确认，清理 `.build` 后工程中的 XCFramework 文件引用会在 Scheme pre-action 前被校验。现已移除该构建图引用，改由两个 Mac Target 的首个阶段恢复缓存并通过静态库搜索路径链接；从完全缺少 `.build/rdp` 开始的 `ServerDash` Scheme、裸 `ServerDash` Target、裸 `ServerDashMacQA` Target 和严格并发门禁均重新构建成功。
 - [x] `ServerDash` 和 `ServerDashMacQA` 两个 macOS 目标均打包五个字体文件与对应 OFL 声明；`ServerDashMobile` iOS 目标未包含这些 Mac 字体资源。
 - [x] macOS 14/15 本轮完成 deployment target 与编译兼容检查。
 - [ ] macOS 14/15 真机／运行时界面矩阵；本轮未在这两个系统上运行，不记录旧系统运行通过。

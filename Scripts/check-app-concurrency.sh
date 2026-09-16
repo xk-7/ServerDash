@@ -66,8 +66,21 @@ case "${DERIVED_DATA}" in
 esac
 LOG_FILE="${SERVERDASH_BUILD_LOG:-${DERIVED_DATA}/build.log}"
 
-"${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --verify-only >/dev/null 2>&1 || \
-    "${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --quiet
+case "${SERVERDASH_VERIFY_RDP_COLD_BOOTSTRAP:-0}" in
+    0)
+        "${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --verify-only >/dev/null 2>&1 || \
+            "${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --quiet
+        ;;
+    1)
+        # Remove only the ignored worktree links. The content-addressed cache stays
+        # intact so the Xcode build itself must materialize and verify the links.
+        rm -rf "${ROOT_DIR}/.build/rdp"
+        ;;
+    *)
+        fail_configuration \
+            "SERVERDASH_VERIFY_RDP_COLD_BOOTSTRAP must be 0 or 1."
+        ;;
+esac
 
 if [[ "${REUSE_BUILD:-0}" != "1" ]]; then
     rm -rf "${DERIVED_DATA}"
@@ -96,6 +109,10 @@ if [[ ${BUILD_STATUS} -ne 0 ]]; then
     echo "Strict-concurrency build failed. Last 80 log lines:" >&2
     tail -80 "${LOG_FILE}" >&2
     exit ${BUILD_STATUS}
+fi
+
+if [[ "${SERVERDASH_VERIFY_RDP_COLD_BOOTSTRAP:-0}" == "1" ]]; then
+    "${ROOT_DIR}/Scripts/ensure-rdp-dependencies.sh" --verify-only --quiet
 fi
 
 set +e

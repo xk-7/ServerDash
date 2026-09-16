@@ -235,9 +235,9 @@ Mac 日常构建和测试统一通过包装脚本：
 ./Scripts/macos-dev.sh test -only-testing:ServerDashTests
 ```
 
-包装脚本和 Xcode 都使用共享 Scheme。不要直接运行
-`xcodebuild -target ServerDash`，因为 Target 入口会绕过负责生成本地
-XCFramework 的 Scheme pre-action；自定义命令行也必须使用 `-scheme ServerDash`。
+包装脚本和 Xcode 都使用共享 Scheme。Mac Target 的首个构建阶段也会防御性地
+恢复缺失的 RDP 链接，因此清理 `.build` 后 Xcode 仍可启动构建；自定义命令行
+应继续使用 `-scheme ServerDash`，以保留已经验证的构建、测试和预操作组合。
 
 构建通用 iPhone/iPad Simulator App：
 

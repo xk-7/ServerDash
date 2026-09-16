@@ -19,8 +19,13 @@ SwiftData、同步包、凭据格式、连接协议或移动端能力。
   7bf377779ce2b4d31d14d4ecd0b41a2c4ff2f39bb6bf1a98ed0750e778bc593e。
 - 清空产物后的 arm64 与 x86_64 源码冷构建通过，用时约 180 秒。
 - 缓存校验约 1.15 秒；使用不可达下载地址的离线命中约 2.42 秒。
-- 移除工作区 .build/rdp 后，通过共享 ServerDash Scheme 构建，预操作自动恢复
-  链接并成功生成应用，用时约 49 秒。
+- 2026-09-16 复现发现，Xcode GUI 的一次 Run 在清理 `.build` 后先校验工程中的
+  XCFramework 文件引用，Scheme pre-action 未获得执行机会。工程现改为通过静态库
+  搜索路径链接，并在 Mac Target 首个构建阶段再次执行自举，不再让缺失的忽略文件
+  阻断构建图。
+- 移除工作区 `.build/rdp` 后直接执行共享 `ServerDash` Scheme，预操作恢复链接、
+  Target 自举阶段完成复核并成功链接应用。CI 严格并发构建也会先移除工作区链接，
+  持续覆盖这一回归场景。
 - 第二个临时工作区在不可达下载地址下复用同一产物，没有触发源码重建。
 - 空缓存且断网时不会留下归档或 XCFramework，并输出 macos-dev.sh bootstrap
   修复命令。

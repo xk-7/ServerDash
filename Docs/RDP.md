@@ -79,9 +79,10 @@ Scripts/macos-dev.sh bootstrap
 Scripts/macos-dev.sh build
 ```
 
-`bootstrap` 校验或从锁定源码构建共享的通用 RDP 缓存；Scheme 的预操作也会在
-Xcode 点击 Build 时自动完成同一检查。命令行构建必须使用共享 Scheme 或上述包装
-脚本，不能用 `xcodebuild -target` 绕过依赖自举。
+`bootstrap` 校验或从锁定源码构建共享的通用 RDP 缓存；Scheme 的预操作和 Mac
+Target 的首个构建阶段都会完成同一检查。工程通过静态库搜索路径引用产物，不在
+构建图中登记可能被清理的 XCFramework 文件，因此删除 `.build/rdp` 后也能开始
+自举。命令行仍应使用共享 Scheme 或上述包装脚本，以保留完整的构建与测试配置。
 
 共享缓存默认位于 `~/Library/Caches/com.serverdash.app/Native/RDP`。每个
 `artifacts/<内容键>/` 目录只包含 XCFramework、必需头文件和构建清单；源码下载、

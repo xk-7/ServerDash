@@ -173,7 +173,6 @@
 		8862FBFFF8FCB548419A8F73 /* DisplayFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB4D429C12E8558788B4533 /* DisplayFormat.swift */; };
 		88D89F88B5EF58F6C6BFE5D5 /* TerminalSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */; };
 		8A22D637A2F653379B561B50 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 9E510A86D21DC34CA5CF6CCE /* libz.tbd */; };
-		8C4935EA30889CA8813A0554 /* ServerDashRDP.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */; };
 		8E8077147BFA5B278F1BF2D8 /* AIProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 591FF81D314B8BB8687742AE /* AIProviderTests.swift */; };
 		901E02342A4F9A02B5B480DC /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 70B6B824137C0C8BE8DDACBC /* ZIPFoundation */; };
 		90BC550556157E01A255199B /* DisplayFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB4D429C12E8558788B4533 /* DisplayFormat.swift */; };
@@ -220,7 +219,6 @@
 		B90260B98437203C3CA0B6F1 /* WorkbenchOrganization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144546F70D65043772008DB9 /* WorkbenchOrganization.swift */; };
 		B91D4193E35C9C70C7C11AE6 /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C0CAFE89439CF85C159C42F /* AIProviders.swift */; };
 		B9AC17F3FAED46803D2D012A /* CompactMonitorInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C596C227F6119F5C298C8812 /* CompactMonitorInspector.swift */; };
-		BA2CAF20BFC71BBEBEA3B1E3 /* ServerDashRDP.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */; };
 		BA98622863480239968A738A /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
 		BACC71C6D175B7E33C7EFA0A /* RDPSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D91E27B832EFE05AA546F3 /* RDPSecurity.swift */; };
 		BAE8B974A04A77E4530DA1E7 /* TerminalWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */; };
@@ -451,7 +449,6 @@
 		A087F4D0389EB68AF253DCB3 /* ServerDashGlassUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashGlassUITests.swift; sourceTree = "<group>"; };
 		A2842B41AFC38BF899197783 /* SSHConfigImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfigImport.swift; sourceTree = "<group>"; };
 		A34467018A36BFB85EE165E3 /* MacFilePolishTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFilePolishTests.swift; sourceTree = "<group>"; };
-		A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ServerDashRDP.xcframework; path = .build/rdp/ServerDashRDP.xcframework; sourceTree = "<group>"; };
 		A7ED559DD4EE9AD4BC5A6821 /* ServerDashMacQAApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashMacQAApp.swift; sourceTree = "<group>"; };
 		A8D631EF7AAC344FFBC9D7FA /* SessionTransferViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransferViews.swift; sourceTree = "<group>"; };
 		A9327787B88863BC6CEE1DB2 /* DesktopFileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopFileSettingsView.swift; sourceTree = "<group>"; };
@@ -528,7 +525,6 @@
 			files = (
 				C0C009A22A7A68DAEB4FEEB8 /* SwiftTerm in Frameworks */,
 				DDC6150CBFAFD2B7E8325513 /* ZIPFoundation in Frameworks */,
-				8C4935EA30889CA8813A0554 /* ServerDashRDP.xcframework in Frameworks */,
 				17F58AE9A2867CE9CC125CD2 /* MetalKit.framework in Frameworks */,
 				4042AA886B035EE13EBA6C2B /* Carbon.framework in Frameworks */,
 				D4C8C69ACE96FB6D60CEE463 /* AudioToolbox.framework in Frameworks */,
@@ -548,7 +544,6 @@
 			files = (
 				C62064695F3A5FF97484D2B2 /* SwiftTerm in Frameworks */,
 				DEF5530AFE2E007C4C168326 /* ZIPFoundation in Frameworks */,
-				BA2CAF20BFC71BBEBEA3B1E3 /* ServerDashRDP.xcframework in Frameworks */,
 				10FBD04F85EFB49909D8A898 /* MetalKit.framework in Frameworks */,
 				0539460E0924052B348BBC1E /* Carbon.framework in Frameworks */,
 				FD41B5677D6BEB36BF835EE2 /* AudioToolbox.framework in Frameworks */,
@@ -884,7 +879,6 @@
 				9E510A86D21DC34CA5CF6CCE /* libz.tbd */,
 				732A06F8DECF6756FE9AA2D8 /* MetalKit.framework */,
 				E675A39B0515887894D4CEDF /* Security.framework */,
-				A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */,
 				FBD57098CAEAA854B44ABBB8 /* SystemConfiguration.framework */,
 			);
 			name = Frameworks;
@@ -967,6 +961,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = C9209E7A692DE12CD54EC4C0 /* Build configuration list for PBXNativeTarget "ServerDash" */;
 			buildPhases = (
+				ED9A43B07801AA81940DA4C3 /* Prepare verified RDP dependencies */,
 				2F236EA43A97211A7D9A6DA0 /* Sources */,
 				7CFAC8040F15DCA602198D00 /* Resources */,
 				4AC21B498148BC2F4DA8E78F /* Frameworks */,
@@ -1011,6 +1006,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = DFB9D2A036C08844A7F42A4E /* Build configuration list for PBXNativeTarget "ServerDashMacQA" */;
 			buildPhases = (
+				D8767C5F40426242331CC650 /* Prepare verified RDP dependencies */,
 				5823F512C8C92A9F19745F6F /* Sources */,
 				A8BBD340F40F47A07E5164B6 /* Resources */,
 				3F10E573EB66D50E2EBF6C80 /* Frameworks */,
@@ -1133,6 +1129,47 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D8767C5F40426242331CC650 /* Prepare verified RDP dependencies */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Prepare verified RDP dependencies";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nif ! /bin/bash \"${SRCROOT}/Scripts/ensure-rdp-dependencies.sh\" --verify-only --quiet >/dev/null 2>&1; then\n  /bin/bash \"${SRCROOT}/Scripts/ensure-rdp-dependencies.sh\" --quiet\nfi\n";
+		};
+		ED9A43B07801AA81940DA4C3 /* Prepare verified RDP dependencies */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Prepare verified RDP dependencies";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nif ! /bin/bash \"${SRCROOT}/Scripts/ensure-rdp-dependencies.sh\" --verify-only --quiet >/dev/null 2>&1; then\n  /bin/bash \"${SRCROOT}/Scripts/ensure-rdp-dependencies.sh\" --quiet\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2F236EA43A97211A7D9A6DA0 /* Sources */ = {
@@ -1518,10 +1555,6 @@
 				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"\".build/rdp\"",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1536,8 +1569,16 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/.build/rdp/ServerDashRDP.xcframework/macos-arm64_x86_64",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.3;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lServerDashRDP",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app.macqa;
 				PRODUCT_NAME = "ServerDash Mac QA";
 				SDKROOT = macosx;
@@ -1622,10 +1663,6 @@
 				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"\".build/rdp\"",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1640,8 +1677,16 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/.build/rdp/ServerDashRDP.xcframework/macos-arm64_x86_64",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.3;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lServerDashRDP",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app;
 				PRODUCT_NAME = ServerDash;
 				SDKROOT = macosx;
@@ -1717,10 +1762,6 @@
 				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"\".build/rdp\"",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1735,8 +1776,16 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/.build/rdp/ServerDashRDP.xcframework/macos-arm64_x86_64",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.3;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lServerDashRDP",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app;
 				PRODUCT_NAME = ServerDash;
 				SDKROOT = macosx;
@@ -1804,10 +1853,6 @@
 				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = NO;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"\".build/rdp\"",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1822,8 +1867,16 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/.build/rdp/ServerDashRDP.xcframework/macos-arm64_x86_64",
+				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0.3;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lServerDashRDP",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.serverdash.app.macqa;
 				PRODUCT_NAME = "ServerDash Mac QA";
 				SDKROOT = macosx;

@@ -37,11 +37,17 @@ targets:
         buildPhase: resources
         excludes:
           - Fonts/README.md
+    preBuildScripts:
+      - name: Prepare verified RDP dependencies
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          if ! /bin/bash "${SRCROOT}/Scripts/ensure-rdp-dependencies.sh" --verify-only --quiet >/dev/null 2>&1; then
+            /bin/bash "${SRCROOT}/Scripts/ensure-rdp-dependencies.sh" --quiet
+          fi
     dependencies:
       - package: SwiftTerm
       - package: ZIPFoundation
-      - framework: .build/rdp/ServerDashRDP.xcframework
-        embed: false
       - sdk: MetalKit.framework
       - sdk: Carbon.framework
       - sdk: AudioToolbox.framework
@@ -68,6 +74,12 @@ targets:
           - $(SRCROOT)/.build/rdp/universal/Headers/freerdp3
           - $(SRCROOT)/.build/rdp/universal/Headers/winpr3
           - $(SRCROOT)/.build/rdp/universal/Headers
+        LIBRARY_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/.build/rdp/ServerDashRDP.xcframework/macos-arm64_x86_64
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lServerDashRDP
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: ServerDash
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
@@ -98,11 +110,17 @@ targets:
         buildPhase: resources
         excludes:
           - Fonts/README.md
+    preBuildScripts:
+      - name: Prepare verified RDP dependencies
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          if ! /bin/bash "${SRCROOT}/Scripts/ensure-rdp-dependencies.sh" --verify-only --quiet >/dev/null 2>&1; then
+            /bin/bash "${SRCROOT}/Scripts/ensure-rdp-dependencies.sh" --quiet
+          fi
     dependencies:
       - package: SwiftTerm
       - package: ZIPFoundation
-      - framework: .build/rdp/ServerDashRDP.xcframework
-        embed: false
       - sdk: MetalKit.framework
       - sdk: Carbon.framework
       - sdk: AudioToolbox.framework
@@ -130,6 +148,12 @@ targets:
           - $(SRCROOT)/.build/rdp/universal/Headers/freerdp3
           - $(SRCROOT)/.build/rdp/universal/Headers/winpr3
           - $(SRCROOT)/.build/rdp/universal/Headers
+        LIBRARY_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/.build/rdp/ServerDashRDP.xcframework/macos-arm64_x86_64
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -lServerDashRDP
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: ServerDash Mac QA
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
