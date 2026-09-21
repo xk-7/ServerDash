@@ -6,6 +6,14 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String { switch self { case .general: "通用"; case .terminal: "终端"; case .monitoring: "监控"; case .files: "SFTP"; case .shortcuts: "快捷键"; case .security: "安全"; case .sync: "同步"; case .recording: "录制"; case .ai: "AI 助手" } }
     var symbol: String { switch self { case .general: "gearshape"; case .terminal: "terminal"; case .monitoring: "chart.xyaxis.line"; case .files: "folder"; case .shortcuts: "keyboard"; case .security: "lock.shield"; case .sync: "arrow.triangle.2.circlepath"; case .recording: "record.circle"; case .ai: "sparkles" } }
+    var maximumContentWidth: CGFloat {
+        switch self {
+        case .terminal, .files, .sync, .recording, .ai:
+            960
+        case .general, .monitoring, .shortcuts, .security:
+            720
+        }
+    }
 }
 
 struct SettingsView: View {
@@ -40,7 +48,9 @@ struct SettingsView: View {
                 Label(page.title, systemImage: page.symbol)
                     .font(.title2.weight(.semibold)).padding(20)
                 Divider()
-                detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+                detail
+                    .frame(maxWidth: page.maximumContentWidth, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }.background(Color.appGround)
         }
         .frame(minWidth: 820, idealWidth: 1000, minHeight: 620, idealHeight: 740)

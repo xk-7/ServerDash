@@ -232,6 +232,83 @@ final class MacFilePolishTests: XCTestCase {
         let restored = try JSONDecoder().decode([RemoteEditorDraft].self, from: Data(contentsOf: url))
         XCTAssertEqual(restored.first?.text, "new")
     }
+    @MainActor func testTenThousandItemSFTPFilteringSelectionBenchmark() throws {
+        let app = AppState(trustCoordinator: HostTrustCoordinator(), fileServicesEnabled: false)
+        let server = ServerRecord(name: "10k file fixture", host: "fixture.invalid", username: "fixture")
+        let controller = MacSFTPController(server: server, appState: app, automaticallyConnect: false)
+        defer { controller.close() }
+        let items = (0..<10_000).map { index -> RemoteFileItem in
+            let name: String
+            if index.isMultiple(of: 10) {
+                name = ".hidden-\(index).log"
+            } else if index % 20 == 1 {
+                name = "needle-中文-\(index).conf"
+            } else {
+                name = "service-\(index).txt"
+            }
+            return RemoteFileItem(
+                path: "/fixture/\(name)",
+                name: name,
+                kind: .file,
+                size: Int64(index),
+                permissions: "rw-r--r--",
+                owner: "fixture",
+                group: "fixture",
+                modifiedText: "2026-09-21"
+            )
+        }
+
+        let listingStart = ProcessInfo.processInfo.systemUptime
+        controller.applyDirectoryListing(.init(path: "/fixture", items: items))
+        let listingMS = (ProcessInfo.processInfo.systemUptime - listingStart) * 1_000
+        XCTAssertEqual(controller.visibleItems.count, 9_000)
+
+        let showHiddenStart = ProcessInfo.processInfo.systemUptime
+        controller.showHidden = true
+        let showHiddenMS = (ProcessInfo.processInfo.systemUptime - showHiddenStart) * 1_000
+        XCTAssertEqual(controller.visibleItems.count, 10_000)
+
+        let hidden = try XCTUnwrap(items.first { $0.name.hasPrefix(".hidden") })
+        let needle = try XCTUnwrap(items.first { $0.name.hasPrefix("needle") })
+        let ordinary = try XCTUnwrap(items.first { $0.name.hasPrefix("service") })
+        controller.selection = [hidden.id, needle.id, ordinary.id]
+        let hideHiddenStart = ProcessInfo.processInfo.systemUptime
+        controller.showHidden = false
+        let hideHiddenMS = (ProcessInfo.processInfo.systemUptime - hideHiddenStart) * 1_000
+        XCTAssertEqual(controller.selection, [needle.id, ordinary.id])
+
+        let searchStart = ProcessInfo.processInfo.systemUptime
+        controller.search = "needle-中文"
+        let searchMS = (ProcessInfo.processInfo.systemUptime - searchStart) * 1_000
+        XCTAssertEqual(controller.visibleItems.count, 500)
+        XCTAssertEqual(controller.selection, [needle.id])
+
+        let clearSearchStart = ProcessInfo.processInfo.systemUptime
+        controller.search = ""
+        let clearSearchMS = (ProcessInfo.processInfo.systemUptime - clearSearchStart) * 1_000
+        XCTAssertEqual(controller.visibleItems.count, 9_000)
+        XCTAssertEqual(controller.selection, [needle.id], "Clearing a filter must not restore previously pruned selections")
+
+        let totalMS = listingMS + showHiddenMS + hideHiddenMS + searchMS + clearSearchMS
+        XCTAssertLessThan(totalMS, 5_000, "Synthetic filtering should not monopolize the main actor for multiple seconds")
+        let report: [String: Any] = [
+            "items": items.count,
+            "mainThread": Thread.isMainThread,
+            "listingMilliseconds": listingMS,
+            "showHiddenMilliseconds": showHiddenMS,
+            "hideHiddenMilliseconds": hideHiddenMS,
+            "searchMilliseconds": searchMS,
+            "clearSearchMilliseconds": clearSearchMS,
+            "totalMeasuredMilliseconds": totalMS,
+            "visibleNeedleCount": 500,
+            "selectionPruningVerified": true,
+            "notes": "In-memory isolated MacSFTPController listing; measures synchronous main-actor projection updates without network or user data."
+        ]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        let url = URL(fileURLWithPath: "/tmp/serverdash-sftp-list-benchmark.json")
+        try data.write(to: url, options: .atomic)
+        print("SFTP_LIST_BENCHMARK \(String(decoding: data, as: UTF8.self)); report=\(url.path)")
+    }
     func testLargeFileIndexBenchmarkAndHighlightFallback() throws {
         let text = String(repeating: "let 中文配置 = 123 // comment\n", count: 50_000), value = text as NSString
         let offsets = (0..<100).map { value.length - 1 - $0 * 10 }

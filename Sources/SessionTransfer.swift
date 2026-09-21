@@ -975,3 +975,22 @@ enum SessionLocalDiscovery {
 #endif
     }
 }
+
+/// Injectable local-session discovery keeps the production filesystem lookup
+/// out of isolated UI fixtures while preserving the existing application
+/// behavior by default.
+struct SessionImportDiscoveryProvider: Sendable {
+    private let resolve: @Sendable (SessionTransferSource) -> [URL]
+
+    init(resolve: @escaping @Sendable (SessionTransferSource) -> [URL]) {
+        self.resolve = resolve
+    }
+
+    func urls(for source: SessionTransferSource) -> [URL] {
+        resolve(source)
+    }
+
+    static let production = SessionImportDiscoveryProvider { source in
+        SessionLocalDiscovery.urls(for: source)
+    }
+}

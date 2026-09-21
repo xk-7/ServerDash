@@ -1270,8 +1270,9 @@ private enum RouteProxyBridge {
         my $secret = '';
         sub credential_secret {
             my ($account) = @_;
+            my $service = $ENV{'SERVERDASH_KEYCHAIN_SERVICE'} // 'com.serverdash.credentials';
             open(my $keychain, '-|', '/usr/bin/security', 'find-generic-password',
-                '-s', 'com.serverdash.credentials', '-a', $account, '-w') or die "proxy credential unavailable\n";
+                '-s', $service, '-a', $account, '-w') or die "proxy credential unavailable\n";
             local $/;
             my $value = <$keychain> // '';
             close($keychain) or die "proxy credential unavailable\n";

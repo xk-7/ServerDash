@@ -3,7 +3,13 @@ import Foundation
 import Security
 
 enum RDPCredentials {
-    static let service = "com.serverdash.rdp.credentials"
+    static let service: String = {
+#if SERVERDASH_MAC_QA
+        "com.serverdash.app.macqa.rdp.credentials"
+#else
+        "com.serverdash.rdp.credentials"
+#endif
+    }()
     static func read(_ id: UUID) throws -> String? {
         var query = base(id)
         query[kSecReturnData as String] = true

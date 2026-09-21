@@ -168,55 +168,55 @@ struct LocalConfigurationTransferView: View {
     private var importing: Bool { if case .importFile = mode { return true }; return false }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text(mode.title).font(.title2.weight(.semibold)); Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("包含 SSH、RDP、VNC、串口及其分组、标签、连接设置。密码、密钥、录制、文件内容和本机设备绑定不在配置包中。")
-                        .foregroundStyle(.secondary)
-                    if importing {
-                        Button("选择配置包…", systemImage: "folder") { chooseImport() }
-                        if !filename.isEmpty { Text(filename).font(.caption).foregroundStyle(.secondary) }
-                        if let plan {
-                            Text("\(plan.incoming.count) 项配置，\(changes.count) 项变更").font(.headline)
-                            if plan.ignoredDeletions > 0 { Text("已忽略 \(plan.ignoredDeletions) 条删除记录。").font(.caption).foregroundStyle(.secondary) }
-                            Text("包中未包含的本机配置会保留。导入的本地命令保持关闭，串口设备需在本机重新选择。").font(.caption).foregroundStyle(.secondary)
-                            ForEach($changes) { $change in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack { Text(change.name).fontWeight(.medium); Spacer(); Text(change.conflict ? "存在冲突" : (change.choice == .local ? "保留本机" : "导入配置")).font(.caption).foregroundStyle(.secondary) }
-                                    if change.conflict {
-                                        Picker("处理方式", selection: $change.choice) {
-                                            ForEach(SyncChoice.allCases.filter { $0 != .both || ["ssh", "rdp", "vnc", "serial"].contains(change.local?.kind ?? "") }) { Text($0.title).tag($0) }
-                                        }
+        MacEditorSheetScaffold(
+            title: mode.title,
+            saveTitle: importing ? "应用预览并导入" : "保存配置包…",
+            errorMessage: error,
+            saveDisabled: importing
+                ? (plan == nil || completed || changes.contains { $0.choice == .unresolved })
+                : (exportPackage == nil || completed),
+            maxContentWidth: 900,
+            onCancel: { dismiss() },
+            onSave: { importing ? applyImport() : saveExport() }
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("包含 SSH、RDP、VNC、串口及其分组、标签、连接设置。密码、密钥、录制、文件内容和本机设备绑定不在配置包中。")
+                    .foregroundStyle(.secondary)
+                if importing {
+                    Button("选择配置包…", systemImage: "folder") { chooseImport() }
+                    if !filename.isEmpty { Text(filename).font(.caption).foregroundStyle(.secondary) }
+                    if let plan {
+                        Text("\(plan.incoming.count) 项配置，\(changes.count) 项变更").font(.headline)
+                        if plan.ignoredDeletions > 0 { Text("已忽略 \(plan.ignoredDeletions) 条删除记录。").font(.caption).foregroundStyle(.secondary) }
+                        Text("包中未包含的本机配置会保留。导入的本地命令保持关闭，串口设备需在本机重新选择。").font(.caption).foregroundStyle(.secondary)
+                        ForEach($changes) { $change in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack { Text(change.name).fontWeight(.medium); Spacer(); Text(change.conflict ? "存在冲突" : (change.choice == .local ? "保留本机" : "导入配置")).font(.caption).foregroundStyle(.secondary) }
+                                if change.conflict {
+                                    Picker("处理方式", selection: $change.choice) {
+                                        ForEach(SyncChoice.allCases.filter { $0 != .both || ["ssh", "rdp", "vnc", "serial"].contains(change.local?.kind ?? "") }) { Text($0.title).tag($0) }
                                     }
-                                    ConfigurationChangeDetails(local: change.local, incoming: change.remote, incomingTitle: "配置包")
-                                }.padding(12).background(Color.appSurface, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                                ConfigurationChangeDetails(local: change.local, incoming: change.remote, incomingTitle: "配置包")
                             }
-                        }
-                    } else if let package = exportPackage {
-                        Text("\(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }.count) 台主机 · \(package.objects.count) 项配置").font(.headline)
-                        Text("文件包含主机地址和连接配置，请选择本机保存位置。").font(.caption).foregroundStyle(.secondary)
-                        ForEach(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }) { object in
-                            HStack { Text(object.name); Spacer(); Text(object.kind.uppercased()).font(.caption).foregroundStyle(.secondary) }
+                            .padding(12)
+                            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
-                    if let error { Text(error).foregroundStyle(Color.appError).textSelection(.enabled) }
-                    if completed { Label(importing ? "配置已导入" : "配置包已保存", systemImage: "checkmark.circle.fill").foregroundStyle(Color.green) }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
-            }
-            Divider()
-            HStack {
-                Spacer()
-                if importing {
-                    Button("应用预览并导入") { applyImport() }.buttonStyle(.borderedProminent)
-                        .disabled(plan == nil || completed || changes.contains { $0.choice == .unresolved })
-                } else {
-                    Button("保存配置包…") { saveExport() }.buttonStyle(.borderedProminent).disabled(exportPackage == nil)
+                } else if let package = exportPackage {
+                    Text("\(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }.count) 台主机 · \(package.objects.count) 项配置").font(.headline)
+                    Text("文件包含主机地址和连接配置，请选择本机保存位置。").font(.caption).foregroundStyle(.secondary)
+                    ForEach(package.objects.filter { ["ssh", "rdp", "vnc", "serial"].contains($0.kind) }) { object in
+                        HStack { Text(object.name); Spacer(); Text(object.kind.uppercased()).font(.caption).foregroundStyle(.secondary) }
+                    }
                 }
-            }.padding(16)
-        }.frame(minWidth: 600, idealWidth: 740, minHeight: 500, idealHeight: 680).background(Color.appGround)
-            .onAppear { prepareExport() }
+                if completed { Label(importing ? "配置已导入" : "配置包已保存", systemImage: "checkmark.circle.fill").foregroundStyle(Color.green) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minWidth: 560, idealWidth: 740, minHeight: 440, idealHeight: 680)
+        .background(Color.appGround)
+        .onAppear { prepareExport() }
     }
     private func prepareExport() {
         guard !importing, exportPackage == nil else { return }

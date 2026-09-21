@@ -9,9 +9,21 @@ import SwiftUI
     func clear() { items = []; serverID = nil; cut = false }
 }
 
+enum FileBrowserChromeMode: Sendable {
+    case full
+    case inspector
+}
+
+private enum InspectorBrowserPopover: String, Identifiable {
+    case path
+    case search
+
+    var id: String { rawValue }
+}
+
 struct SFTPBrowserView: View {
     @ObservedObject var controller: MacSFTPController
-    var compact = false
+    let chromeMode: FileBrowserChromeMode
     @ObservedObject private var clipboard = DesktopFileClipboard.shared
     @ObservedObject private var editor = RemoteEditorStore.shared
     @State private var showingPermissions = false
@@ -25,12 +37,25 @@ struct SFTPBrowserView: View {
     @State private var showingSync = false
     @State private var showingLocalCopies = false
     @State private var showSyncSuggestion = true
+    @State private var inspectorPopover: InspectorBrowserPopover?
+
+    init(controller: MacSFTPController, chromeMode: FileBrowserChromeMode = .full) {
+        _controller = ObservedObject(wrappedValue: controller)
+        self.chromeMode = chromeMode
+    }
+
+    init(controller: MacSFTPController, compact: Bool) {
+        _controller = ObservedObject(wrappedValue: controller)
+        chromeMode = compact ? .inspector : .full
+    }
+
+    private var compact: Bool { chromeMode == .inspector }
 
     var body: some View {
         VStack(spacing: 0) {
             browserToolbar
             Divider()
-            if showSyncSuggestion && DesktopFilePreferences.promptDirectorySync && controller.hasLoadedDirectory {
+            if chromeMode == .full && showSyncSuggestion && DesktopFilePreferences.promptDirectorySync && controller.hasLoadedDirectory {
                 HStack {
                     Button("配置目录同步", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
                     Spacer()
@@ -68,6 +93,9 @@ struct SFTPBrowserView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.appGround)
         .onAppear { controller.beginIfNeeded(); if let access = controller.fileAccess { editor.register(access); DirectorySyncStore.shared.register(access) } }
+        .popover(item: $inspectorPopover) { item in
+            inspectorPopoverContent(item)
+        }
         .alert("新建文件夹", isPresented: $controller.showingNewFolderPrompt) {
             TextField("文件夹名称", text: $controller.promptText)
             Button("取消", role: .cancel) {}
@@ -132,7 +160,15 @@ struct SFTPBrowserView: View {
         }
     }
 
-    private var browserToolbar: some View {
+    @ViewBuilder private var browserToolbar: some View {
+        if chromeMode == .inspector {
+            inspectorToolbar
+        } else {
+            fullToolbar
+        }
+    }
+
+    private var fullToolbar: some View {
         VStack(spacing: 8) {
             HStack(spacing: 6) {
                 Button { Task { await controller.loadDirectory(".") } } label: { Image(systemName: "house") }.help("主目录")
@@ -150,19 +186,136 @@ struct SFTPBrowserView: View {
                 Button { controller.downloadSelectedItems() } label: { Image(systemName: "square.and.arrow.down") }
                     .help("下载所选项目").accessibilityLabel("下载所选项目").disabled(controller.selectedItems.isEmpty)
                 Menu {
-                    Button("新建文件夹", systemImage: "folder.badge.plus") { controller.promptText = ""; controller.showingNewFolderPrompt = true }
-                    Button("新建文件", systemImage: "doc.badge.plus") { controller.promptText = ""; controller.showingNewFilePrompt = true }
-                    Divider()
-                    Button("粘贴", systemImage: "doc.on.clipboard", action: paste).disabled(clipboard.serverID != controller.server.id || clipboard.items.isEmpty)
-                    Button("目录同步…", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
-                    Button("打开编辑器与恢复草稿", systemImage: "doc.text") { showingEditor = true }
-                    Button("本地副本 / 上传修改…",systemImage:"arrow.up.doc"){showingLocalCopies=true}
-                    if controller.hasActiveTransfer { Button("取消当前操作", role: .destructive) { controller.transferTask?.cancel() } }
+                    secondaryFileActions
                 } label: { Image(systemName: "ellipsis.circle") }.help("文件操作")
             }
-        }.controlSize(compact ? .small : .regular).buttonStyle(.borderless)
-            .padding(compact ? 8 : 12).background(.bar)
+        }.controlSize(.regular).buttonStyle(.borderless)
+            .padding(12).background(.bar)
             .disabled(controller.busyMessage != nil && controller.transferTask == nil)
+    }
+
+    private var inspectorToolbar: some View {
+        HStack(spacing: 6) {
+            Button {
+                Task { await controller.loadDirectory(RemotePath.parent(of: controller.currentPath)) }
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .help("上级目录")
+            .accessibilityLabel("上级目录")
+            .disabled(controller.currentPath == "/")
+
+            Button {
+                Task { await controller.loadDirectory(controller.currentPath) }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("刷新")
+            .accessibilityLabel("刷新远程目录")
+
+            Button {
+                inspectorPopover = .path
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "folder")
+                    Text(controller.currentPath)
+                        .font(.caption.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .help("转到远程路径")
+            .accessibilityLabel("当前远程路径 \(controller.currentPath)")
+
+            Button {
+                inspectorPopover = .search
+            } label: {
+                Image(systemName: controller.search.isEmpty ? "magnifyingglass" : "line.3.horizontal.decrease.circle.fill")
+            }
+            .help(controller.search.isEmpty ? "搜索文件" : "正在筛选：\(controller.search)")
+            .accessibilityLabel(controller.search.isEmpty ? "搜索文件" : "编辑文件筛选")
+
+            Menu {
+                Toggle("显示隐藏文件", isOn: $controller.showHidden)
+                Divider()
+                Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
+                Button("上传文件夹", systemImage: "folder.badge.plus") { controller.chooseItemsToUpload(directories: true) }
+                Button("下载所选项目", systemImage: "square.and.arrow.down") { controller.downloadSelectedItems() }
+                    .disabled(controller.selectedItems.isEmpty)
+                Divider()
+                secondaryFileActions
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .help("文件操作")
+            .accessibilityLabel("更多文件操作")
+        }
+        .controlSize(.small)
+        .buttonStyle(.borderless)
+        .padding(8)
+        .background(.bar)
+        .disabled(controller.busyMessage != nil && controller.transferTask == nil)
+    }
+
+    @ViewBuilder private var secondaryFileActions: some View {
+        Button("新建文件夹", systemImage: "folder.badge.plus") { controller.promptText = ""; controller.showingNewFolderPrompt = true }
+        Button("新建文件", systemImage: "doc.badge.plus") { controller.promptText = ""; controller.showingNewFilePrompt = true }
+        Divider()
+        Button("粘贴", systemImage: "doc.on.clipboard", action: paste)
+            .disabled(clipboard.serverID != controller.server.id || clipboard.items.isEmpty)
+        Button("目录同步…", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
+        Button("打开编辑器与恢复草稿", systemImage: "doc.text") { showingEditor = true }
+        Button("本地副本 / 上传修改…", systemImage: "arrow.up.doc") { showingLocalCopies = true }
+        if controller.hasActiveTransfer {
+            Button("取消当前操作", role: .destructive) { controller.transferTask?.cancel() }
+        }
+    }
+
+    @ViewBuilder private func inspectorPopoverContent(_ item: InspectorBrowserPopover) -> some View {
+        switch item {
+        case .path:
+            VStack(alignment: .leading, spacing: 12) {
+                Text("转到远程路径").font(.headline)
+                TextField("远程路径", text: $controller.pathText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.callout.monospaced())
+                    .onSubmit { openInspectorPath() }
+                HStack {
+                    Button("主目录") {
+                        controller.pathText = "."
+                        openInspectorPath()
+                    }
+                    Spacer()
+                    Button("打开") { openInspectorPath() }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(16)
+            .frame(width: 330)
+        case .search:
+            VStack(alignment: .leading, spacing: 12) {
+                Text("筛选当前目录").font(.headline)
+                TextField("搜索文件", text: $controller.search)
+                    .textFieldStyle(.roundedBorder)
+                Toggle("显示隐藏文件", isOn: $controller.showHidden)
+                HStack {
+                    Button("清除") { controller.search = "" }
+                        .disabled(controller.search.isEmpty)
+                    Spacer()
+                    Button("完成") { inspectorPopover = nil }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(16)
+            .frame(width: 300)
+        }
+    }
+
+    private func openInspectorPath() {
+        let path = controller.pathText
+        inspectorPopover = nil
+        Task { await controller.loadDirectory(path) }
     }
     private var fileTable: some View {
         tableContent

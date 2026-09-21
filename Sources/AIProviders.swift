@@ -125,7 +125,7 @@ protocol AICredentialStore {
 
 struct AIProviderKeychain: AICredentialStore {
     private func query(_ account: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.serverdash.ai.api-key",
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: AIKeychain.serviceName,
          kSecAttrAccount as String: account, kSecAttrSynchronizable as String: false]
     }
     func read(_ account: String) throws -> String {

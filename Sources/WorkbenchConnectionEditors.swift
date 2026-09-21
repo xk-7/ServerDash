@@ -1,17 +1,44 @@
 import SwiftData
 import SwiftUI
 
+enum ConnectionEditorCommitIntent: Equatable, Sendable {
+    case saveOnly
+    case saveAndConnect
+
+    static let defaultAction: Self = .saveAndConnect
+    static let secondaryAction: Self = .saveOnly
+
+    var connectsAfterSaving: Bool { self == .saveAndConnect }
+}
+
 struct SSHConnectionRouteEditor: View {
     @Environment(\.dismiss) private var dismiss
     let server: ServerRecord
+    var importSource: SSHConfigImportSource = .userConfiguration
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text("\(server.displayName) · 连接路线与代理").font(.title2.bold()); Spacer(); Button("完成") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(20)
-            Divider()
-            ProfessionalConnectionsView(initialServerID: server.id, routeOnly: true)
-        }.frame(width: 860, height: 700)
+        MacEditorSheetScaffold(
+            title: "连接路线与代理",
+            accessibilityID: "mac.editor.route",
+            showsCancelAction: false,
+            saveTitle: "完成",
+            maxContentWidth: 900,
+            scrollsContent: false,
+            onCancel: {},
+            onSave: { dismiss() }
+        ) {
+            ProfessionalConnectionsView(
+                initialServerID: server.id,
+                routeOnly: true,
+                importSource: importSource
+            )
+                .accessibilityIdentifier("mac.editor.route.content")
+        }
+        .frame(minWidth: 520, idealWidth: 860, minHeight: 380, idealHeight: 600)
     }
 }
+
+private enum VNCEditorFocusField: Hashable { case name, host, port }
+private enum SerialEditorFocusField: Hashable { case name, device }
 
 struct VNCEditorView: View {
     @Environment(\.modelContext) private var context
@@ -26,6 +53,7 @@ struct VNCEditorView: View {
     @State private var error: String?
     @State private var opening = false
     @State private var savedRecord: VNCConnectionRecord?
+    @FocusState private var focusedField: VNCEditorFocusField?
     init(record: VNCConnectionRecord? = nil) {
         self.record = record; _name = State(initialValue: record?.name ?? "")
         _host = State(initialValue: record?.host ?? ""); _port = State(initialValue: record?.port ?? 5900)
@@ -33,30 +61,60 @@ struct VNCEditorView: View {
         _tags = State(initialValue: record?.tagsText ?? ""); _notes = State(initialValue: record?.notes ?? "")
     }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text(record == nil ? "新建 VNC 主机" : "编辑 VNC 主机").font(.title2.bold()); Spacer() }.padding(20)
-            Divider()
+        MacEditorSheetScaffold(
+            title: record == nil ? "新建 VNC 主机" : "编辑 VNC 主机",
+            accessibilityID: "mac.editor.vnc",
+            saveTitle: "保存并打开屏幕共享",
+            errorMessage: error,
+            saveDisabled: opening,
+            maxContentWidth: 620,
+            scrollsContent: false,
+            onCancel: {
+                guard !opening else { return }
+                dismiss()
+            },
+            onSave: { save(intent: .defaultAction) },
+            onValidationError: focusFirstInvalidField
+        ) {
             Form {
                 Section("连接信息") {
-                    TextField("名称", text: $name); TextField("主机地址", text: $host)
+                    TextField("名称", text: $name)
+                        .focused($focusedField, equals: .name)
+                    TextField("主机地址", text: $host)
+                        .focused($focusedField, equals: .host)
+                        .accessibilityIdentifier("mac.editor.vnc.host")
                     TextField("端口", value: $port, format: .number.grouping(.never))
+                        .focused($focusedField, equals: .port)
                     Text("连接时打开 macOS 屏幕共享；登录凭据由系统客户端处理。").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("整理") {
                     TextField("分组", text: $group); TextField("标签（逗号分隔）", text: $tags)
                     TextField("备注", text: $notes, axis: .vertical).lineLimit(2...4)
                 }
-            }.formStyle(.grouped)
-            if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal, 20) }
-            Divider()
-            HStack {
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("保存") { save(connect: false) }
-                Button("保存并打开屏幕共享") { save(connect: true) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-            }.padding(16).disabled(opening)
-        }.frame(width: 550, height: 500)
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .disabled(opening)
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button("保存", systemImage: "square.and.arrow.down") { save(intent: .secondaryAction) }
+                    .disabled(opening)
+            }
+        }
+        .interactiveDismissDisabled(opening)
     }
-    private func save(connect: Bool) {
+    private func focusFirstInvalidField() {
+        if host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .host
+        } else if !(1...65_535).contains(port) {
+            focusedField = .port
+        } else {
+            focusedField = .host
+        }
+    }
+    private func save(intent: ConnectionEditorCommitIntent) {
         do {
             _ = try VNCAddress.url(host: host, port: port)
             let item = savedRecord ?? record ?? VNCConnectionRecord(name: name, host: host, port: port)
@@ -65,7 +123,7 @@ struct VNCEditorView: View {
             if item.modelContext == nil { context.insert(item) }
             try MachineOrganization.include(names: [item.groupName], tags: item.tags, context: context)
             try context.save(); savedRecord = item
-            if connect {
+            if intent.connectsAfterSaving {
                 opening = true
                 Task { do { try await WorkbenchConnectionLauncher.openVNC(item); dismiss() } catch { self.error = error.localizedDescription }; opening = false }
             } else { dismiss() }
@@ -85,6 +143,7 @@ struct SerialEditorView: View {
     @State private var notes: String
     @State private var devices: [SerialDevice] = []
     @State private var error: String?
+    @FocusState private var focusedField: SerialEditorFocusField?
     init(record: SerialConnectionRecord? = nil) {
         self.record = record; _name = State(initialValue: record?.name ?? "")
         _configuration = State(initialValue: record?.configuration ?? SerialPortConfiguration(devicePath: ""))
@@ -92,12 +151,21 @@ struct SerialEditorView: View {
         _tags = State(initialValue: record?.tagsText ?? ""); _notes = State(initialValue: record?.notes ?? "")
     }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Text(record == nil ? "新建串口连接" : "编辑串口连接").font(.title2.bold()); Spacer() }.padding(20)
-            Divider()
+        MacEditorSheetScaffold(
+            title: record == nil ? "新建串口连接" : "编辑串口连接",
+            accessibilityID: "mac.editor.serial",
+            saveTitle: "保存并连接",
+            errorMessage: error,
+            maxContentWidth: 620,
+            scrollsContent: false,
+            onCancel: { dismiss() },
+            onSave: { save(intent: .defaultAction) },
+            onValidationError: focusFirstInvalidField
+        ) {
             Form {
                 Section("设备") {
                     TextField("名称", text: $name)
+                        .focused($focusedField, equals: .name)
                     HStack {
                         Picker("本机设备", selection: $configuration.devicePath) {
                             Text("选择串口…").tag("")
@@ -106,6 +174,8 @@ struct SerialEditorView: View {
                             }
                             ForEach(devices) { device in Text(device.name).tag(device.path) }
                         }
+                        .focused($focusedField, equals: .device)
+                        .accessibilityIdentifier("mac.editor.serial.device")
                         Button { devices = SerialDeviceDiscovery.devices() } label: { Image(systemName: "arrow.clockwise") }.help("刷新串口设备")
                     }
                     if devices.isEmpty { Text("未检测到串口。连接 USB 串口适配器后刷新。").font(.caption).foregroundStyle(.secondary) }
@@ -121,17 +191,22 @@ struct SerialEditorView: View {
                     TextField("分组", text: $group); TextField("标签（逗号分隔）", text: $tags)
                     TextField("备注", text: $notes, axis: .vertical).lineLimit(2...4)
                 }
-            }.formStyle(.grouped)
-            if let error { Text(error).foregroundStyle(.red).font(.caption).padding(.horizontal, 20) }
-            Divider()
-            HStack {
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("保存") { save(connect: false) }
-                Button("保存并连接") { save(connect: true) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-            }.padding(16)
-        }.frame(width: 550, height: 620).onAppear { devices = SerialDeviceDiscovery.devices() }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button("保存", systemImage: "square.and.arrow.down") { save(intent: .secondaryAction) }
+            }
+        }
+        .onAppear { devices = SerialDeviceDiscovery.devices() }
     }
-    private func save(connect: Bool) {
+    private func focusFirstInvalidField() {
+        focusedField = .device
+    }
+    private func save(intent: ConnectionEditorCommitIntent) {
         do {
             try configuration.validate()
             let item = record ?? SerialConnectionRecord(name: name)
@@ -142,27 +217,39 @@ struct SerialEditorView: View {
             if record == nil { context.insert(item) }
             try MachineOrganization.include(names: [item.groupName], tags: item.tags, context: context)
             try context.save()
-            if connect { try WorkbenchConnectionLauncher.openSerial(item, appState: appState, reconnect: true) }; dismiss()
+            if intent.connectsAfterSaving { try WorkbenchConnectionLauncher.openSerial(item, appState: appState, reconnect: true) }; dismiss()
         } catch { self.error = error.localizedDescription }
     }
 }
 
 struct SSHAdvancedEditorSection: View {
     @Binding var draft: SSHAdvancedSettingsDraft
+    let focusedField: FocusState<ServerEditorFocusField?>.Binding
+
     var body: some View {
         Section("高级连接设置") {
             Toggle("保持连接（Keep-Alive）", isOn: $draft.keepAliveEnabled)
             if draft.keepAliveEnabled {
                 TextField("心跳间隔（10–300 秒）", value: $draft.keepAliveInterval, format: .number.grouping(.never))
+                    .focused(focusedField, equals: .keepAliveInterval)
                 TextField("最大失败次数（1–10）", value: $draft.keepAliveCountMax, format: .number.grouping(.never))
+                    .focused(focusedField, equals: .keepAliveCount)
             }
             TextField("TCP 连接超时（5–300 秒）", value: $draft.connectTimeout, format: .number.grouping(.never))
+                .focused(focusedField, equals: .connectTimeout)
             TextField("SSH 认证等待（10–120 秒）", value: $draft.authenticationTimeout, format: .number.grouping(.never))
+                .focused(focusedField, equals: .authenticationTimeout)
             Toggle("保存本机会话输出日志", isOn: $draft.logOutput)
             if draft.logOutput { Text("原始终端输出写入本机 Application Support/ServerDash/SessionLogs，可能包含服务器回显的敏感信息。").font(.caption).foregroundStyle(.secondary) }
             Toggle("启用本地连接命令", isOn: $draft.commandsEnabled)
-            TextField("连接前执行", text: $draft.beforeConnectCommand, axis: .vertical).lineLimit(2...5).font(.system(.body, design: .monospaced))
-            TextField("认证成功后执行", text: $draft.afterConnectCommand, axis: .vertical).lineLimit(2...5).font(.system(.body, design: .monospaced))
+            TextField("连接前执行", text: $draft.beforeConnectCommand, axis: .vertical)
+                .lineLimit(2...5)
+                .font(.system(.body, design: .monospaced))
+                .focused(focusedField, equals: .beforeCommand)
+            TextField("认证成功后执行", text: $draft.afterConnectCommand, axis: .vertical)
+                .lineLimit(2...5)
+                .font(.system(.body, design: .monospaced))
+                .focused(focusedField, equals: .afterCommand)
             Text("命令在本机独立 Shell 中执行，仅在主动打开或重连 SSH 终端时运行；不会在监控、SFTP 或同步时运行。单次命令最长 30 秒。").font(.caption).foregroundStyle(.secondary)
         }
     }

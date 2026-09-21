@@ -2,6 +2,243 @@ import AppKit
 import SwiftData
 import SwiftUI
 
+enum KeychainSecretMutation: Equatable, Sendable {
+    case replace(account: String, value: String)
+    case remove(account: String)
+
+    var account: String {
+        switch self {
+        case let .replace(account, _), let .remove(account): account
+        }
+    }
+
+    func apply() throws {
+        switch self {
+        case let .replace(account, value):
+            try KeychainService.saveSecret(value, account: account)
+        case let .remove(account):
+            try KeychainService.deleteSecret(account: account)
+        }
+    }
+}
+
+private struct KeychainMutationRollbackError: LocalizedError {
+    var errorDescription: String? {
+        "保存失败，且无法恢复本机 Keychain 凭据。请在再次保存前检查钥匙串访问状态。"
+    }
+}
+
+private struct KeychainMutationInProgressError: LocalizedError {
+    var errorDescription: String? {
+        "此配置正在另一个窗口中验证或保存，请稍后重试。"
+    }
+}
+
+/// Applies Keychain changes before the model commit. Accounts and explicit
+/// coordination keys stay exclusively leased across an async operation, so a
+/// second editor cannot persist a model that disagrees with the leased secret.
+enum KeychainMutationTransaction {
+    private struct Snapshot: Sendable {
+        let account: String
+        let originalValue: String?
+        let appliedValue: String?
+    }
+
+    private struct Lease: Sendable {
+        let keys: [String]
+    }
+
+    private struct Transaction: Sendable {
+        let lease: Lease
+        let snapshots: [Snapshot]
+    }
+
+    /// The lock protects only lease bookkeeping and is never held while
+    /// touching Keychain, saving SwiftData, or awaiting network work.
+    private final class Coordinator: @unchecked Sendable {
+        private let lock = NSLock()
+        private var activeKeys = Set<String>()
+
+        func acquire(_ keys: [String]) throws -> Lease {
+            let normalizedKeys = Array(Set(keys.filter { !$0.isEmpty })).sorted()
+            lock.lock()
+            defer { lock.unlock() }
+            guard activeKeys.isDisjoint(with: normalizedKeys) else {
+                throw KeychainMutationInProgressError()
+            }
+            activeKeys.formUnion(normalizedKeys)
+            return Lease(keys: normalizedKeys)
+        }
+
+        func release(_ lease: Lease) {
+            lock.lock()
+            activeKeys.subtract(lease.keys)
+            lock.unlock()
+        }
+    }
+
+    private static let coordinator = Coordinator()
+
+    static func commit(
+        _ mutations: [KeychainSecretMutation],
+        coordinationKeys: [String] = [],
+        persistModel: () throws -> Void
+    ) throws {
+        let transaction = try begin(mutations, coordinationKeys: coordinationKeys)
+        defer { coordinator.release(transaction.lease) }
+
+        do {
+            try persistModel()
+        } catch {
+            let originalError = error
+            try rollback(transaction)
+            throw originalError
+        }
+    }
+
+    @MainActor
+    static func commitAsync<Value>(
+        _ mutations: [KeychainSecretMutation],
+        coordinationKeys: [String] = [],
+        operation: () async throws -> Value
+    ) async throws -> Value {
+        let transaction = try begin(mutations, coordinationKeys: coordinationKeys)
+        defer { coordinator.release(transaction.lease) }
+
+        do {
+            return try await operation()
+        } catch {
+            let originalError = error
+            try rollback(transaction)
+            throw originalError
+        }
+    }
+
+    private static func begin(
+        _ mutations: [KeychainSecretMutation],
+        coordinationKeys: [String]
+    ) throws -> Transaction {
+        var seen = Set<String>()
+        let accounts = mutations.compactMap { mutation -> String? in
+            seen.insert(mutation.account).inserted ? mutation.account : nil
+        }
+        let lease = try coordinator.acquire(coordinationKeys + accounts)
+
+        var originals: [Snapshot] = []
+        var didStartApplyingMutations = false
+        do {
+            for account in accounts {
+                originals.append(Snapshot(
+                    account: account,
+                    originalValue: try KeychainService.secret(account: account),
+                    appliedValue: nil
+                ))
+            }
+
+            didStartApplyingMutations = true
+            for mutation in mutations {
+                try mutation.apply()
+            }
+
+            let snapshots = try originals.map { snapshot in
+                Snapshot(
+                    account: snapshot.account,
+                    originalValue: snapshot.originalValue,
+                    appliedValue: try KeychainService.secret(account: snapshot.account)
+                )
+            }
+            return Transaction(lease: lease, snapshots: snapshots)
+        } catch {
+            let originalError = error
+            defer { coordinator.release(lease) }
+            guard didStartApplyingMutations else { throw originalError }
+            if restore(originals.reversed(), validatingAppliedValue: false) {
+                throw originalError
+            }
+            throw KeychainMutationRollbackError()
+        }
+    }
+
+    private static func rollback(_ transaction: Transaction) throws {
+        guard restore(transaction.snapshots.reversed(), validatingAppliedValue: true) else {
+            throw KeychainMutationRollbackError()
+        }
+    }
+
+    private static func restore<S: Sequence>(
+        _ snapshots: S,
+        validatingAppliedValue: Bool
+    ) -> Bool where S.Element == Snapshot {
+        var succeeded = true
+        for snapshot in snapshots {
+            do {
+                if validatingAppliedValue,
+                   try KeychainService.secret(account: snapshot.account) != snapshot.appliedValue {
+                    // A write outside this coordinator happened while an async
+                    // operation was in flight. Preserve that newer value.
+                    continue
+                }
+                try write(snapshot.originalValue, account: snapshot.account)
+            } catch {
+                succeeded = false
+            }
+        }
+        return succeeded
+    }
+
+    private static func write(_ value: String?, account: String) throws {
+        if let value {
+            try KeychainService.saveSecret(value, account: account)
+        } else {
+            try KeychainService.deleteSecret(account: account)
+        }
+    }
+}
+
+/// Stable, process-local lease keys for model records that influence a
+/// connection but are not themselves Keychain accounts. Editors use these in
+/// addition to the concrete secret accounts so metadata-only saves cannot
+/// race an in-flight connection test.
+enum ConnectionConfigurationCoordination {
+    static func serverRecord(_ id: UUID) -> String {
+        "connection-model.server.\(id.uuidString)"
+    }
+
+    static func identityRecord(_ id: UUID) -> String {
+        "connection-model.identity.\(id.uuidString)"
+    }
+
+    static func sshKeyRecord(_ id: UUID) -> String {
+        "connection-model.ssh-key.\(id.uuidString)"
+    }
+
+    static func routeRecords(for serverID: UUID) -> String {
+        "connection-model.routes.\(serverID.uuidString)"
+    }
+
+    static func sshKey(_ id: UUID) -> [String] {
+        [
+            sshKeyRecord(id),
+            KeychainService.importedKeyAccount(for: id),
+            KeychainService.passphraseAccount(for: id)
+        ]
+    }
+
+    static func serverEditor(draftID: UUID, config: ServerConnectionConfig) -> [String] {
+        var keys = [
+            serverRecord(draftID),
+            routeRecords(for: draftID),
+            draftID.uuidString,
+            config.credentialID.uuidString,
+            identityRecord(config.credentialID)
+        ]
+        if let keyID = config.sshKeyID {
+            keys.append(contentsOf: sshKey(keyID))
+        }
+        return keys
+    }
+}
+
 struct IdentityManagementView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \IdentityRecord.name) private var identities: [IdentityRecord]
@@ -89,8 +326,13 @@ struct IdentityManagementView: View {
                 guard let identity = identityPendingDeletion else { return }
                 do {
                     modelContext.delete(identity)
-                    try modelContext.save()
-                    try KeychainService.deletePassword(for: identity.id)
+                    try KeychainMutationTransaction.commit([
+                        .remove(account: identity.id.uuidString)
+                    ], coordinationKeys: [
+                        ConnectionConfigurationCoordination.identityRecord(identity.id)
+                    ]) {
+                        try modelContext.save()
+                    }
                     identityPendingDeletion = nil
                 } catch {
                     modelContext.rollback()
@@ -160,6 +402,8 @@ private struct IdentityRow: View {
     }
 }
 
+private enum IdentityEditorFocusField: Hashable { case name, username, password }
+
 struct IdentityEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -174,8 +418,11 @@ struct IdentityEditorView: View {
     @State private var authentication: AuthenticationMethod
     @State private var sshKeyID: UUID?
     @State private var password = ""
+    @State private var hasStoredPassword: Bool
+    @State private var removeStoredPassword = false
     @State private var notes: String
     @State private var errorMessage: String?
+    @FocusState private var focusedField: IdentityEditorFocusField?
 
     init(identity: IdentityRecord?, keys: [SSHKeyRecord]) {
         self.identity = identity
@@ -185,15 +432,29 @@ struct IdentityEditorView: View {
         _username = State(initialValue: identity?.username ?? "root")
         _authentication = State(initialValue: identity?.authentication ?? .privateKey)
         _sshKeyID = State(initialValue: identity?.sshKeyID)
+        _hasStoredPassword = State(initialValue: identity.map { KeychainService.hasPassword(for: $0.id) } ?? false)
         _notes = State(initialValue: identity?.notes ?? "")
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        MacEditorSheetScaffold(
+            title: identity == nil ? "新建身份" : "编辑身份",
+            accessibilityID: "mac.editor.identity",
+            errorMessage: errorMessage,
+            saveDisabled: !isValid,
+            maxContentWidth: 620,
+            scrollsContent: false,
+            onCancel: { dismiss() },
+            onSave: save,
+            onValidationError: focusFirstInvalidField
+        ) {
             Form {
                 Section("身份") {
                     TextField("名称", text: $name)
+                        .focused($focusedField, equals: .name)
                     TextField("用户名", text: $username)
+                        .focused($focusedField, equals: .username)
+                        .accessibilityIdentifier("mac.editor.identity.username")
                     Picker("认证方式", selection: $authentication) {
                         ForEach(AuthenticationMethod.allCases) { method in
                             Text(method.title).tag(method)
@@ -204,9 +465,13 @@ struct IdentityEditorView: View {
                 Section("凭据") {
                     if authentication.usesPassword {
                         SecureField(
-                            identity == nil ? "密码" : "新密码（留空则不修改）",
+                            hasStoredPassword ? "新密码（留空则保留已保存密码）" : "密码",
                             text: $password
                         )
+                        .focused($focusedField, equals: .password)
+                        .onChange(of: password) { _, value in
+                            if !value.isEmpty { removeStoredPassword = false }
+                        }
                     }
                     if authentication.usesPrivateKey {
                         Picker("SSH 密钥", selection: $sshKeyID) {
@@ -221,35 +486,20 @@ struct IdentityEditorView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    if hasStoredPassword {
+                        Toggle("移除已保存密码", isOn: $removeStoredPassword)
+                            .disabled(!password.isEmpty)
+                        Text(removeStoredPassword ? "保存后将从本机 Keychain 删除密码。" : "留空会保留本机 Keychain 中的现有密码，即使切换认证方式也不会自动删除。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("备注", text: $notes, axis: .vertical)
                         .lineLimit(2...4)
                 }
             }
             .formStyle(.grouped)
-
-            Divider()
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("保存") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!isValid)
-            }
-            .padding(AppleDesign.Spacing.md)
-        }
-        .frame(width: 520, height: 480)
-        .alert(
-            "无法保存身份",
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button("好") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -259,11 +509,21 @@ struct IdentityEditorView: View {
         (!authentication.usesPrivateKey || sshKeyID != nil)
     }
 
+    private func focusFirstInvalidField() {
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .name
+        } else if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .username
+        } else {
+            focusedField = .password
+        }
+    }
+
     private func save() {
         guard isValid else { return }
         if authentication == .password,
            password.isEmpty,
-           !KeychainService.hasPassword(for: draftID) {
+           (!KeychainService.hasPassword(for: draftID) || removeStoredPassword) {
             errorMessage = "密码身份必须提供密码。"
             return
         }
@@ -285,13 +545,11 @@ struct IdentityEditorView: View {
             record.notes = notes
             record.updatedAt = .now
 
-            if authentication.usesPassword {
-                if !password.isEmpty {
-                    try KeychainService.savePassword(password, for: record.id)
-                }
-            } else {
-                try KeychainService.deletePassword(for: record.id)
-            }
+            let credentialMutations = IdentityPasswordUpdate.mutations(
+                replacement: password,
+                removeStoredPassword: removeStoredPassword,
+                identityID: record.id
+            )
 
             let selectedKey = keys.first { $0.id == record.sshKeyID }
             for server in servers where server.identityID == record.id {
@@ -299,11 +557,49 @@ struct IdentityEditorView: View {
                 server.authentication = record.authentication
                 server.privateKeyPath = selectedKey?.filePath ?? ""
             }
-            try modelContext.save()
+            try KeychainMutationTransaction.commit(
+                credentialMutations,
+                coordinationKeys: [ConnectionConfigurationCoordination.identityRecord(record.id)]
+            ) {
+                try modelContext.save()
+            }
             dismiss()
         } catch {
+            modelContext.rollback()
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+enum IdentityPasswordUpdate {
+    /// Applies only an explicit credential change. An empty replacement keeps
+    /// the existing secret even when the identity's authentication changes.
+    static func apply(
+        replacement: String,
+        removeStoredPassword: Bool,
+        identityID: UUID
+    ) throws {
+        for mutation in mutations(
+            replacement: replacement,
+            removeStoredPassword: removeStoredPassword,
+            identityID: identityID
+        ) {
+            try mutation.apply()
+        }
+    }
+
+    static func mutations(
+        replacement: String,
+        removeStoredPassword: Bool,
+        identityID: UUID
+    ) -> [KeychainSecretMutation] {
+        if !replacement.isEmpty {
+            return [.replace(account: identityID.uuidString, value: replacement)]
+        }
+        if removeStoredPassword {
+            return [.remove(account: identityID.uuidString)]
+        }
+        return []
     }
 }
 
@@ -387,10 +683,13 @@ struct SSHKeyManagementView: View {
             Button("删除密钥", role: .destructive) {
                 guard let key = keyPendingDeletion else { return }
                 do {
-                    try? KeychainService.deleteSecret(account: KeychainService.importedKeyAccount(for: key.id))
-                    try? KeychainService.deleteSecret(account: KeychainService.passphraseAccount(for: key.id))
                     modelContext.delete(key)
-                    try modelContext.save()
+                    try KeychainMutationTransaction.commit([
+                        .remove(account: KeychainService.importedKeyAccount(for: key.id)),
+                        .remove(account: KeychainService.passphraseAccount(for: key.id))
+                    ], coordinationKeys: ConnectionConfigurationCoordination.sshKey(key.id)) {
+                        try modelContext.save()
+                    }
                     keyPendingDeletion = nil
                 } catch {
                     modelContext.rollback()
@@ -455,6 +754,102 @@ private struct SSHKeyRow: View {
     }
 }
 
+enum SSHKeyPassphraseEdit: Equatable, Sendable {
+    case preserve
+    case replace(String)
+    case remove
+}
+
+struct SSHKeyEditorCredentialPlan: Equatable, Sendable {
+    let reuseImportedMaterial: Bool
+    let requiresExplicitExternalFile: Bool
+    let passphraseEdit: SSHKeyPassphraseEdit
+    let resultingHasPassphrase: Bool
+
+    static func make(
+        existingStorageMode: SSHKeyStorageMode?,
+        existingFilePath: String?,
+        proposedFilePath: String,
+        importIntoApp: Bool,
+        newPassphrase: String,
+        removeStoredPassphrase: Bool,
+        hasStoredPassphrase: Bool,
+        explicitFileSelection: Bool = false
+    ) -> Self {
+        let passphraseEdit: SSHKeyPassphraseEdit
+        if !newPassphrase.isEmpty {
+            passphraseEdit = .replace(newPassphrase)
+        } else if removeStoredPassphrase, hasStoredPassphrase {
+            passphraseEdit = .remove
+        } else {
+            passphraseEdit = .preserve
+        }
+        let resultingHasPassphrase = switch passphraseEdit {
+        case .preserve: hasStoredPassphrase
+        case .replace: true
+        case .remove: false
+        }
+        return Self(
+            reuseImportedMaterial: existingStorageMode == .imported
+                && importIntoApp
+                && proposedFilePath == existingFilePath
+                && !explicitFileSelection,
+            requiresExplicitExternalFile: existingStorageMode == .imported
+                && !importIntoApp
+                && !explicitFileSelection,
+            passphraseEdit: passphraseEdit,
+            resultingHasPassphrase: resultingHasPassphrase
+        )
+    }
+
+    func passphraseMutation(for keyID: UUID) -> KeychainSecretMutation? {
+        let account = KeychainService.passphraseAccount(for: keyID)
+        return switch passphraseEdit {
+        case .preserve: nil
+        case let .replace(value): .replace(account: account, value: value)
+        case .remove: .remove(account: account)
+        }
+    }
+
+    func applyPassphrase(to keyID: UUID) throws {
+        if let mutation = passphraseMutation(for: keyID) {
+            try mutation.apply()
+        }
+    }
+}
+
+private enum SSHKeyEditorError: LocalizedError {
+    case importedMaterialUnavailable
+    case externalFileRequired
+    case pastedMaterialRequiresImport
+
+    var errorDescription: String? {
+        switch self {
+        case .importedMaterialUnavailable:
+            "无法读取已导入的私钥。请重新选择密钥文件后再保存。"
+        case .externalFileRequired:
+            "改为外部文件存储时，请先选择可读取的私钥文件。"
+        case .pastedMaterialRequiresImport:
+            "粘贴的私钥必须导入应用 Keychain；请启用“导入到应用 Keychain”。"
+        }
+    }
+}
+
+private struct ResolvedSSHKeyMaterial {
+    let path: String
+    let displayPath: String
+    let contents: String
+    let bookmark: Data?
+    let temporaryURL: URL?
+
+    func removeTemporaryFile() {
+        guard let temporaryURL else { return }
+        try? FileManager.default.removeItem(at: temporaryURL)
+    }
+}
+
+private enum SSHKeyEditorFocusField: Hashable { case name, file, passphrase }
+
 struct SSHKeyEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -470,7 +865,12 @@ struct SSHKeyEditorView: View {
     @State private var errorMessage: String?
     @State private var importIntoApp = false
     @State private var passphrase = ""
+    @State private var hasStoredPassphrase = false
+    @State private var removeStoredPassphrase = false
     @State private var revealedPublicKey = ""
+    @State private var explicitlySelectedFilePath: String?
+    @State private var draftID: UUID
+    @FocusState private var focusedField: SSHKeyEditorFocusField?
 
     init(key: SSHKeyRecord?) {
         self.key = key
@@ -478,20 +878,62 @@ struct SSHKeyEditorView: View {
         _filePath = State(initialValue: key?.filePath ?? "")
         _notes = State(initialValue: key?.notes ?? "")
         _importIntoApp = State(initialValue: key?.storageMode == .imported)
+        _draftID = State(initialValue: key?.id ?? UUID())
+        let storedPassphrase = Self.storedPassphraseExists(for: key)
+        _hasStoredPassphrase = State(initialValue: storedPassphrase)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        MacEditorSheetScaffold(
+            title: key == nil ? "导入 SSH 密钥" : "编辑 SSH 密钥",
+            accessibilityID: "mac.editor.ssh-key",
+            saveTitle: isInspecting ? "正在验证" : "验证并保存",
+            errorMessage: errorMessage,
+            saveDisabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || filePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || isInspecting,
+            maxContentWidth: 640,
+            scrollsContent: false,
+            onCancel: {
+                guard !isInspecting else { return }
+                dismiss()
+            },
+            onSave: inspectAndSave,
+            onValidationError: focusFirstInvalidField
+        ) {
             Form {
                 Section("密钥") {
                     TextField("名称", text: $name)
+                        .focused($focusedField, equals: .name)
                     HStack {
                         TextField("文件路径或粘贴私钥文本", text: $filePath, axis: .vertical)
                             .lineLimit(2...6)
+                            .focused($focusedField, equals: .file)
+                            .accessibilityIdentifier("mac.editor.ssh-key.file")
+                            .onChange(of: filePath) { _, value in
+                                if let explicitlySelectedFilePath,
+                                   explicitlySelectedFilePath != value {
+                                    self.explicitlySelectedFilePath = nil
+                                }
+                            }
                         Button("选择…", action: chooseFile)
                     }
                     Toggle("导入到应用 Keychain（不依赖外部文件）", isOn: $importIntoApp)
-                    SecureField("私钥口令（可选）", text: $passphrase)
+                    SecureField(
+                        hasStoredPassphrase ? "新口令（留空则保留已保存口令）" : "私钥口令（可选）",
+                        text: $passphrase
+                    )
+                    .focused($focusedField, equals: .passphrase)
+                    .onChange(of: passphrase) { _, value in
+                        if !value.isEmpty { removeStoredPassphrase = false }
+                    }
+                    if hasStoredPassphrase {
+                        Toggle("移除已保存的私钥口令", isOn: $removeStoredPassphrase)
+                            .disabled(!passphrase.isEmpty)
+                        Text(removeStoredPassphrase ? "保存后将从本机 Keychain 删除口令。" : "留空会保留本机 Keychain 中的现有口令。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("备注", text: $notes, axis: .vertical)
                         .lineLimit(2...4)
                 }
@@ -511,39 +953,23 @@ struct SSHKeyEditorView: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .disabled(isInspecting)
-
-            Divider()
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button {
-                    inspectAndSave()
-                } label: {
-                    if isInspecting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("验证并保存")
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(name.isEmpty || filePath.isEmpty || isInspecting)
-            }
-            .padding(AppleDesign.Spacing.md)
         }
-        .frame(width: 560, height: 520)
-        .alert(
-            "无法导入密钥",
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button("好") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+        .interactiveDismissDisabled(isInspecting)
+    }
+
+    private func focusFirstInvalidField() {
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .name
+        } else if filePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || (key?.storageMode == .imported
+                        && !importIntoApp
+                        && explicitlySelectedFilePath != filePath) {
+            focusedField = .file
+        } else {
+            focusedField = .file
         }
     }
 
@@ -556,6 +982,7 @@ struct SSHKeyEditorView: View {
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             filePath = url.path
+            explicitlySelectedFilePath = url.path
             if name.isEmpty {
                 name = url.lastPathComponent
             }
@@ -566,52 +993,76 @@ struct SSHKeyEditorView: View {
         isInspecting = true
         Task {
             do {
-                let material = try resolvedKeyMaterial()
-                let inspection = try await SSHKeyInspector.inspect(filePath: material.path)
-                let publicKey = (try? await SSHKeyInspector.publicKey(filePath: material.path)) ?? ""
-                let record = key ?? SSHKeyRecord(
-                    name: name,
-                    filePath: material.displayPath,
-                    algorithm: inspection.algorithm,
-                    fingerprint: inspection.fingerprint
+                let previousStorageMode = key?.storageMode
+                let storedPassphraseExists = Self.storedPassphraseExists(for: key)
+                let credentialPlan = SSHKeyEditorCredentialPlan.make(
+                    existingStorageMode: key?.storageMode,
+                    existingFilePath: key?.filePath,
+                    proposedFilePath: filePath,
+                    importIntoApp: importIntoApp,
+                    newPassphrase: passphrase,
+                    removeStoredPassphrase: removeStoredPassphrase,
+                    hasStoredPassphrase: storedPassphraseExists,
+                    explicitFileSelection: explicitlySelectedFilePath == filePath
                 )
-                if key == nil {
-                    modelContext.insert(record)
+                let material = try resolvedKeyMaterial(using: credentialPlan)
+                defer { material.removeTemporaryFile() }
+                let recordID = draftID
+                var credentialMutations: [KeychainSecretMutation] = []
+                let importedAccount = KeychainService.importedKeyAccount(for: recordID)
+                if importIntoApp, !credentialPlan.reuseImportedMaterial {
+                    credentialMutations.append(.replace(account: importedAccount, value: material.contents))
+                } else if previousStorageMode == .imported, !importIntoApp {
+                    credentialMutations.append(.remove(account: importedAccount))
                 }
-                record.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                record.filePath = material.displayPath
-                record.algorithm = inspection.algorithm
-                record.fingerprint = inspection.fingerprint
-                record.notes = notes
-                record.storageMode = importIntoApp ? .imported : .file
-                record.hasPassphrase = !passphrase.isEmpty
-                record.publicKeyText = publicKey
-                if let bookmark = material.bookmark {
-                    record.bookmarkData = bookmark
+                if let mutation = credentialPlan.passphraseMutation(for: recordID) {
+                    credentialMutations.append(mutation)
                 }
-                if importIntoApp {
-                    try KeychainService.saveSecret(
-                        material.contents,
-                        account: KeychainService.importedKeyAccount(for: record.id)
+                try await KeychainMutationTransaction.commitAsync(
+                    credentialMutations,
+                    coordinationKeys: ConnectionConfigurationCoordination.sshKey(recordID)
+                ) {
+                    // Hold the key-record and concrete Keychain accounts from
+                    // before the first suspension through the model commit. A
+                    // second editor therefore fails fast instead of allowing
+                    // an older inspection to overwrite its newer result.
+                    let inspection = try await SSHKeyInspector.inspect(filePath: material.path)
+                    let publicKey = (try? await SSHKeyInspector.publicKey(filePath: material.path))
+                        ?? key?.publicKeyText
+                        ?? ""
+                    let record = key ?? SSHKeyRecord(
+                        id: recordID,
+                        name: name,
+                        filePath: material.displayPath,
+                        algorithm: inspection.algorithm,
+                        fingerprint: inspection.fingerprint
                     )
-                }
-                if !passphrase.isEmpty {
-                    try KeychainService.saveSecret(
-                        passphrase,
-                        account: KeychainService.passphraseAccount(for: record.id)
+                    if key == nil {
+                        modelContext.insert(record)
+                    }
+                    record.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    record.filePath = material.displayPath
+                    record.algorithm = inspection.algorithm
+                    record.fingerprint = inspection.fingerprint
+                    record.notes = notes
+                    record.storageMode = importIntoApp ? .imported : .file
+                    record.hasPassphrase = credentialPlan.resultingHasPassphrase
+                    record.publicKeyText = publicKey
+                    if let bookmark = material.bookmark {
+                        record.bookmarkData = bookmark
+                    }
+                    let linkedIdentityIDs = Set(
+                        identities.filter { $0.sshKeyID == record.id }.map(\.id)
                     )
+                    for server in servers where server.identityID.map(linkedIdentityIDs.contains) == true {
+                        server.privateKeyPath = record.filePath
+                    }
+                    try modelContext.save()
                 }
-
-                let linkedIdentityIDs = Set(
-                    identities.filter { $0.sshKeyID == record.id }.map(\.id)
-                )
-                for server in servers where server.identityID.map(linkedIdentityIDs.contains) == true {
-                    server.privateKeyPath = record.filePath
-                }
-                try modelContext.save()
                 isInspecting = false
                 dismiss()
             } catch {
+                modelContext.rollback()
                 isInspecting = false
                 errorMessage = error.localizedDescription
             }
@@ -627,7 +1078,22 @@ struct SSHKeyEditorView: View {
             return
         }
         do {
-            let value = try await SSHKeyInspector.publicKey(filePath: filePath)
+            let inspectionPath: String
+            var temporaryURL: URL?
+            if let key, key.storageMode == .imported {
+                guard let contents = try KeychainService.secret(
+                    account: KeychainService.importedKeyAccount(for: key.id)
+                ) else {
+                    throw SSHKeyEditorError.importedMaterialUnavailable
+                }
+                let file = try temporaryKeyFile(contents)
+                temporaryURL = file
+                inspectionPath = file.path
+            } else {
+                inspectionPath = filePath
+            }
+            defer { if let temporaryURL { try? FileManager.default.removeItem(at: temporaryURL) } }
+            let value = try await SSHKeyInspector.publicKey(filePath: inspectionPath)
             revealedPublicKey = value
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(value, forType: .string)
@@ -636,23 +1102,78 @@ struct SSHKeyEditorView: View {
         }
     }
 
-    private func resolvedKeyMaterial() throws -> (path: String, displayPath: String, contents: String, bookmark: Data?) {
+    private func resolvedKeyMaterial(using credentialPlan: SSHKeyEditorCredentialPlan) throws -> ResolvedSSHKeyMaterial {
+        if credentialPlan.reuseImportedMaterial {
+            guard let key,
+                  let contents = try KeychainService.secret(
+                    account: KeychainService.importedKeyAccount(for: key.id)
+                  ),
+                  !contents.isEmpty else {
+                throw SSHKeyEditorError.importedMaterialUnavailable
+            }
+            let file = try temporaryKeyFile(contents)
+            return ResolvedSSHKeyMaterial(
+                path: file.path,
+                displayPath: key.filePath,
+                contents: contents,
+                bookmark: key.bookmarkData,
+                temporaryURL: file
+            )
+        }
+        if credentialPlan.requiresExplicitExternalFile {
+            throw SSHKeyEditorError.externalFileRequired
+        }
         if filePath.contains("BEGIN") && filePath.contains("PRIVATE KEY") {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ServerDash/import", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = directory.appendingPathComponent(UUID().uuidString)
-            try Data(filePath.utf8).write(to: file, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-            return (file.path, "imported", filePath, nil)
+            guard importIntoApp else { throw SSHKeyEditorError.pastedMaterialRequiresImport }
+            let file = try temporaryKeyFile(filePath)
+            return ResolvedSSHKeyMaterial(
+                path: file.path,
+                displayPath: "imported",
+                contents: filePath,
+                bookmark: nil,
+                temporaryURL: file
+            )
         }
         let url = URL(fileURLWithPath: NSString(string: filePath).expandingTildeInPath)
-        let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let contents = try String(contentsOf: url, encoding: .utf8)
         let bookmark = try? url.bookmarkData(
             options: .withSecurityScope,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
-        return (url.path, url.path, contents, bookmark)
+        return ResolvedSSHKeyMaterial(
+            path: url.path,
+            displayPath: url.path,
+            contents: contents,
+            bookmark: bookmark,
+            temporaryURL: nil
+        )
+    }
+
+    private func temporaryKeyFile(_ contents: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ServerDash/import", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let file = directory.appendingPathComponent(UUID().uuidString)
+        try Data(contents.utf8).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        return file
+    }
+
+    private static func storedPassphraseExists(for key: SSHKeyRecord?) -> Bool {
+        guard let key else { return false }
+        if key.hasPassphrase { return true }
+        do {
+            return try KeychainService.secret(
+                account: KeychainService.passphraseAccount(for: key.id)
+            ) != nil
+        } catch {
+            return false
+        }
     }
 }
 
@@ -810,6 +1331,8 @@ private struct SnippetRow: View {
     }
 }
 
+private enum SnippetEditorFocusField: Hashable { case title, command }
+
 struct SnippetEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
@@ -822,6 +1345,7 @@ struct SnippetEditorView: View {
     @State private var notes: String
     @State private var isFavorite: Bool
     @State private var errorMessage: String?
+    @FocusState private var focusedField: SnippetEditorFocusField?
 
     init(snippet: CommandSnippetRecord?) {
         self.snippet = snippet
@@ -833,43 +1357,48 @@ struct SnippetEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        MacEditorSheetScaffold(
+            title: snippet == nil ? "新建代码片段" : "编辑代码片段",
+            accessibilityID: "mac.editor.snippet",
+            errorMessage: errorMessage,
+            saveDisabled: !isValid,
+            maxContentWidth: 640,
+            scrollsContent: false,
+            onCancel: { dismiss() },
+            onSave: save,
+            onValidationError: focusFirstInvalidField
+        ) {
             Form {
                 Section("代码片段") {
                     TextField("名称", text: $title)
+                        .focused($focusedField, equals: .title)
                     TextField("分类", text: $category)
                     TextField("命令", text: $command, axis: .vertical)
                         .font(.body.monospaced())
                         .lineLimit(4...10)
+                        .focused($focusedField, equals: .command)
+                        .accessibilityIdentifier("mac.editor.snippet.command")
                     TextField("说明", text: $notes, axis: .vertical)
                         .lineLimit(2...5)
                     Toggle("收藏", isOn: $isFavorite)
                 }
             }
             .formStyle(.grouped)
-            Divider()
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("保存") { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(title.isEmpty || command.isEmpty)
-            }
-            .padding(AppleDesign.Spacing.md)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 560, height: 440)
-        .alert(
-            "无法保存代码片段",
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button("好") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+    }
+
+    private var isValid: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func focusFirstInvalidField() {
+        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .title
+        } else {
+            focusedField = .command
         }
     }
 

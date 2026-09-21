@@ -522,7 +522,10 @@ struct DirectorySyncView:View {
                 TableColumn("大小"){item in Text(DesktopFileOperations.displaySize((item.wrappedValue.local ?? item.wrappedValue.remote)?.size ?? 0)).monospacedDigit()}.width(90)
             }.frame(minHeight:200)
             HStack{Text(store.message).font(.caption).foregroundStyle(.secondary);Spacer();if store.busy{Button("取消"){store.cancel()}}else{Button("执行所选同步"){if deletions.isEmpty{store.synchronize()}else{confirmingDeletions=true}}.buttonStyle(.borderedProminent).disabled(store.plan.isEmpty)}}
-        }.padding(20).frame(width:900,height:690).background(Color.appGround)
+        }
+        .padding(20)
+        .frame(minWidth: 640, idealWidth: 900, minHeight: 440, idealHeight: 690)
+        .background(Color.appGround)
         .onAppear{destination=remotePath;store.register(access)}
         .alert("目录同步失败",isPresented:Binding(get:{store.error != nil},set:{if !$0{store.error=nil}})){Button("好"){store.error=nil}}message:{Text(store.error ?? "")}
         .confirmationDialog("移除此目录配对？",isPresented:Binding(get:{removeID != nil},set:{if !$0{removeID=nil}})){

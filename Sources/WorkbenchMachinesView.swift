@@ -65,7 +65,7 @@ struct MachineManagementView: View {
     @State private var editingRDP: RDPConnectionRecord?
     @State private var editingVNC: VNCConnectionRecord?
     @State private var editingSerial: SerialConnectionRecord?
-    @State private var availableWidth: CGFloat = 0
+    @State private var availableSize: CGSize = .zero
     @State private var projectionCache = MachineBrowserProjectionCache()
 
     let servers: [ServerRecord]
@@ -136,28 +136,33 @@ struct MachineManagementView: View {
         tagColors: [String: Color]
     ) -> some View {
         GeometryReader { geometry in
-            let layout = MachineBrowserLayout(contentWidth: geometry.size.width, prefersGroups: showsGroups)
+            let metrics = MacWorkspaceMetrics(size: geometry.size)
+            let layout = MachineBrowserLayout(
+                contentWidth: geometry.size.width,
+                prefersGroups: showsGroups && !metrics.isCompact
+            )
             HStack(spacing: 0) {
                 if layout.showsGroupPanel {
                     groupPanel(projection: projection).frame(width: 190)
                     Divider()
                 }
                 VStack(spacing: 0) {
-                    filters(compact: !layout.showsGroupPanel, filtered: filtered, projection: projection)
+                    filters(compact: metrics.isCompact || !layout.showsGroupPanel, filtered: filtered, projection: projection)
                     Divider()
                     if filtered.isEmpty { emptyState }
                     else if mode == MachineViewMode.list.rawValue { machineTable(filtered: filtered, compact: layout.usesCompactTable, tagColors: tagColors) }
-                    else { machineGrid(filtered: filtered, tagColors: tagColors) }
+                    else { machineGrid(filtered: filtered, tagColors: tagColors, compact: metrics.isCompact) }
                 }
             }
             .background(Color.appGround)
-            .onChange(of: geometry.size.width, initial: true) { _, width in availableWidth = width }
+            .onChange(of: geometry.size, initial: true) { _, size in availableSize = size }
         }
     }
 
     @ToolbarContentBuilder private var hostToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if MachineBrowserLayout(contentWidth: availableWidth, prefersGroups: showsGroups).usesCompactToolbar {
+            if MacWorkspaceMetrics(size: availableSize).isCompact ||
+                MachineBrowserLayout(contentWidth: availableSize.width, prefersGroups: showsGroups).usesCompactToolbar {
                 Menu {
                     Toggle("隐私模式", isOn: $hideIP)
                     Menu("导入") { importActions }
@@ -193,35 +198,31 @@ struct MachineManagementView: View {
 
     private func filters(compact: Bool, filtered: [WorkbenchMachine], projection: MachineBrowserProjection) -> some View {
         VStack(spacing: 8) {
-            HStack {
-                Button { showsGroups.toggle() } label: { Image(systemName: "sidebar.leading") }
-                    .help(availableWidth < 900 ? "设置宽窗口的分组栏显示偏好" : (showsGroups ? "隐藏分组栏" : "显示分组栏"))
-                    .accessibilityLabel("显示或隐藏分组栏").accessibilityValue(showsGroups ? "显示" : "隐藏")
-                    .accessibilityIdentifier("machines.groups.toggle")
-                AppleSearchField(prompt: "搜索主机、地址、标签或备注", text: $searchText)
-                Picker("协议", selection: $protocolFilter) {
-                    Text("全部协议").tag("all")
-                    ForEach(["SSH", "RDP", "VNC", "SERIAL"], id: \.self) { Text($0).tag($0.lowercased()) }
-                }.frame(width: compact ? 105 : 120).labelsHidden()
-                Menu {
-                    Picker("排序", selection: $sort) { ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) } }
-                    Picker("监控", selection: $monitoring) { ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) } }
-                    Button("管理分组与标签") { organization = true }
-                } label: { Image(systemName: "line.3.horizontal.decrease") }.help("排序与监控筛选")
-                Picker("显示方式", selection: $mode) {
-                    ForEach(MachineViewMode.allCases) { Image(systemName: $0.symbol).tag($0.rawValue).accessibilityLabel($0.title) }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 76)
-            }
-            if compact || !showsGroups {
+            if compact {
                 HStack {
-                    Picker("分组", selection: $group) {
-                        Text("全部分组").tag("")
-                        if !projection.groupNames.contains("默认分组") { Text("默认分组").tag("默认分组") }
-                        ForEach(projection.groupRows) { item in Text(String(repeating: "　", count: item.depth) + item.group.name).tag(item.group.name) }
+                    groupVisibilityButton
+                    AppleSearchField(prompt: "搜索主机、地址、标签或备注", text: $searchText)
+                }
+                HStack {
+                    protocolPicker.frame(width: 112)
+                    organizationFilterMenu(projection: projection)
+                    sortAndMonitoringMenu
+                    Spacer(minLength: 0)
+                    viewModePicker
+                }
+            } else {
+                HStack {
+                    groupVisibilityButton
+                    AppleSearchField(prompt: "搜索主机、地址、标签或备注", text: $searchText)
+                    protocolPicker.frame(width: 120)
+                    sortAndMonitoringMenu
+                    viewModePicker
+                }
+                if !showsGroups {
+                    HStack {
+                        groupPicker(projection: projection)
+                        tagPicker
                     }
-                    .accessibilityIdentifier("machines.groups.filter")
-                    Picker("标签", selection: $tag) { Text("全部标签").tag(""); ForEach(tags) { Text($0.name).tag($0.name) } }
-                        .accessibilityIdentifier("machines.tags.filter")
                 }
             }
             HStack {
@@ -237,6 +238,80 @@ struct MachineManagementView: View {
                 if hasFilters { Button("清除筛选") { searchText = ""; group = ""; tag = ""; protocolFilter = "all"; monitoring = "all" } }
             }.font(.caption).buttonStyle(.borderless)
         }.padding(12)
+    }
+
+    private var groupVisibilityButton: some View {
+        Button { showsGroups.toggle() } label: { Image(systemName: "sidebar.leading") }
+            .help(availableSize.width < 900 ? "设置宽窗口的分组栏显示偏好" : (showsGroups ? "隐藏分组栏" : "显示分组栏"))
+            .accessibilityLabel("显示或隐藏分组栏")
+            .accessibilityValue(showsGroups ? "显示" : "隐藏")
+            .accessibilityIdentifier("machines.groups.toggle")
+    }
+
+    private var protocolPicker: some View {
+        Picker("协议", selection: $protocolFilter) {
+            Text("全部协议").tag("all")
+            ForEach(["SSH", "RDP", "VNC", "SERIAL"], id: \.self) { Text($0).tag($0.lowercased()) }
+        }
+        .labelsHidden()
+    }
+
+    private var sortAndMonitoringMenu: some View {
+        Menu {
+            Picker("排序", selection: $sort) { ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) } }
+            Picker("监控", selection: $monitoring) { ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) } }
+            Button("管理分组与标签") { organization = true }
+        } label: { Image(systemName: "line.3.horizontal.decrease") }
+            .help("排序与监控筛选")
+            .accessibilityLabel("排序与监控筛选")
+    }
+
+    private var viewModePicker: some View {
+        Picker("显示方式", selection: $mode) {
+            ForEach(MachineViewMode.allCases) {
+                Image(systemName: $0.symbol).tag($0.rawValue).accessibilityLabel($0.title)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 76)
+    }
+
+    private func organizationFilterMenu(projection: MachineBrowserProjection) -> some View {
+        Menu {
+            groupPicker(projection: projection)
+            tagPicker
+            if !group.isEmpty || !tag.isEmpty {
+                Divider()
+                Button("清除分组与标签筛选", systemImage: "xmark.circle") { group = ""; tag = "" }
+            }
+        } label: {
+            Label(
+                group.isEmpty && tag.isEmpty ? "分组与标签" : "分组与标签（\([!group.isEmpty, !tag.isEmpty].filter { $0 }.count)）",
+                systemImage: "folder.badge.gearshape"
+            )
+            .lineLimit(1)
+        }
+        .accessibilityIdentifier("machines.organization.filters")
+    }
+
+    private func groupPicker(projection: MachineBrowserProjection) -> some View {
+        Picker("分组", selection: $group) {
+            Text("全部分组").tag("")
+            if !projection.groupNames.contains("默认分组") { Text("默认分组").tag("默认分组") }
+            ForEach(projection.groupRows) { item in
+                Text(String(repeating: "　", count: item.depth) + item.group.name).tag(item.group.name)
+            }
+        }
+        .accessibilityIdentifier("machines.groups.filter")
+    }
+
+    private var tagPicker: some View {
+        Picker("标签", selection: $tag) {
+            Text("全部标签").tag("")
+            ForEach(tags) { Text($0.name).tag($0.name) }
+        }
+        .accessibilityIdentifier("machines.tags.filter")
     }
 
     private func groupPanel(projection: MachineBrowserProjection) -> some View {
@@ -274,42 +349,82 @@ struct MachineManagementView: View {
                 .frame(maxWidth: .infinity).padding(12)
         }
     }
-    private func machineGrid(filtered: [WorkbenchMachine], tagColors: [String: Color]) -> some View {
+    private func machineGrid(filtered: [WorkbenchMachine], tagColors: [String: Color], compact: Bool) -> some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 230 : 250), spacing: 12)], spacing: 12) {
                 ForEach(filtered) { item in
-                    VStack(alignment: .leading, spacing: 9) {
+                    VStack(alignment: .leading, spacing: 0) {
                         HStack {
                             Image(systemName: item.symbol).font(.title3).foregroundStyle(.secondary)
                             protocolBadge(item.kind)
                             Spacer()
                             machineStatus(item)
-                            Toggle("选择 \(item.name)", isOn: selectionBinding(item)).labelsHidden().toggleStyle(.checkbox)
+                            Toggle("选择 \(item.name)", isOn: selectionBinding(item))
+                                .labelsHidden()
+                                .toggleStyle(.checkbox)
                         }
+                        .padding(12)
+
+                        Divider().padding(.horizontal, 12)
+
                         Button { show(item) } label: {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(item.name).font(.headline).lineLimit(1).help(item.name)
-                                Text(hideIP ? "连接地址已隐藏" : item.address).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                Text(hideIP ? "连接地址已隐藏" : item.address)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                                     .help(hideIP ? "连接地址已隐藏" : item.address)
                                 machineSystem(item)
-                                if !item.notes.isEmpty { Text(item.notes).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.notes) }
+                                if !item.notes.isEmpty {
+                                    Text(item.notes).font(.caption).foregroundStyle(.secondary).lineLimit(2).help(item.notes)
+                                }
                                 HStack {
                                     Text(item.group).lineLimit(1).help(item.group)
                                     Spacer()
-                                    if item.kind == "VNC", let date = item.lastOpened { Text(date, style: .relative).help("最后启动时间") }
-                                }.font(.caption).foregroundStyle(.secondary)
-                                if !item.tags.isEmpty { tagSummary(item.tags, colors: tagColors).font(.caption).lineLimit(1).help(item.tags.joined(separator: "、")) }
-                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                        Divider()
-                        Button { connect(item) } label: { Label(item.kind == "VNC" ? "打开屏幕共享" : "快速连接", systemImage: "bolt.horizontal").frame(maxWidth: .infinity) }
-                    }.applePanel(radius: AppleDesign.Radius.card)
-                        .overlay { RoundedRectangle(cornerRadius: AppleDesign.Radius.card).stroke(selection.contains(item.id) ? Color.appAccent : .clear, lineWidth: 2) }
-                        .contextMenu { itemMenu(item) }
-                        .id(item.uuid)
+                                    if item.kind == "VNC", let date = item.lastOpened {
+                                        Text(date, style: .relative).help("最后启动时间")
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                if !item.tags.isEmpty {
+                                    tagSummary(item.tags, colors: tagColors)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                        .help(item.tags.joined(separator: "、"))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: compact ? 84 : 100, alignment: .topLeading)
+                            .padding(12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Divider().padding(.horizontal, 12)
+
+                        Button { connect(item) } label: {
+                            Label(item.kind == "VNC" ? "打开屏幕共享" : "快速连接", systemImage: "bolt.horizontal")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                    }
+                    .background(selection.contains(item.id) ? Color.appAccent.opacity(0.06) : .clear)
+                    .applePanel(padding: 0, radius: AppleDesign.Radius.card)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: AppleDesign.Radius.card)
+                            .stroke(selection.contains(item.id) ? Color.appAccent : .clear, lineWidth: 2)
+                            .allowsHitTesting(false)
+                    }
+                    .contextMenu { itemMenu(item) }
+                    .id(item.uuid)
                 }
-            }.scrollTargetLayout().padding(12)
-        }.scrollPosition(id: $scrollAnchor, anchor: .top)
+            }
+            .scrollTargetLayout()
+            .padding(12)
+        }
+        .scrollPosition(id: $scrollAnchor, anchor: .top)
     }
 
     private func machineTable(filtered: [WorkbenchMachine], compact: Bool, tagColors: [String: Color]) -> some View {

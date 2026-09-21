@@ -26,6 +26,82 @@ private final class WorkbenchFixtureContainerRetention {
         return container
     }
 
+    func testMacQAPageArgumentsCoverNativeWorkbenchRoutes() {
+        let expected: [(String, MacUIFixturePage, SidebarDestination?)] = [
+            ("dashboard", .dashboard, .dashboard),
+            ("machines", .machines, .machines),
+            ("terminal", .terminal, .terminal),
+            ("recordings", .recordings, .recordings),
+            ("identities", .identities, .identities),
+            ("ssh-keys", .sshKeys, .sshKeys),
+            ("snippets", .snippets, .snippets),
+            ("trusted-hosts", .trustedHosts, .trustedHosts),
+            ("connections", .connections, .connections),
+            ("monitor", .monitor, nil),
+            ("sftp", .sftp, nil),
+            ("rdp", .rdp, nil),
+            ("settings", .settings, nil),
+            ("ai", .ai, nil),
+            ("editor", .editor, nil),
+            ("import-export", .importExport, nil),
+            ("connection-editor", .connectionEditor, nil),
+            ("batch-execution", .batchExecution, nil),
+            ("recording-config", .recordingConfiguration, nil),
+            ("empty", .empty, nil),
+            ("error", .error, nil),
+        ]
+        for (argument, page, section) in expected {
+            XCTAssertEqual(MacUIFixturePage(argument: argument), page)
+            XCTAssertEqual(page.section, section)
+        }
+        XCTAssertEqual(MacUIFixturePage(argument: nil), .machines)
+        XCTAssertEqual(MacUIFixturePage(argument: "unsupported"), .machines)
+    }
+
+    func testMacQARouteImportUsesOnlySyntheticConfig() throws {
+        let fixtureRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("serverdash-route-fixture-\(UUID().uuidString)", isDirectory: true)
+        let fixtureURL = fixtureRoot.appendingPathComponent("config")
+        defer { try? FileManager.default.removeItem(at: fixtureRoot) }
+
+        try MacUIFixture.writeSyntheticSSHConfig(to: fixtureURL)
+        let source = MacUIFixture.routeImportSource
+
+        XCTAssertEqual(source.defaultURL.standardizedFileURL, MacUIFixture.sshConfigURL.standardizedFileURL)
+        XCTAssertFalse(source.allowsFileSelection)
+        XCTAssertNotEqual(
+            source.defaultURL.standardizedFileURL,
+            SSHConfigImportSource.userConfiguration.defaultURL.standardizedFileURL
+        )
+        let contents = try String(contentsOf: fixtureURL, encoding: .utf8)
+        XCTAssertTrue(contents.contains("Host qa-target"))
+        XCTAssertTrue(contents.contains("ProxyJump qa-bastion"))
+        XCTAssertFalse(contents.contains(FileManager.default.homeDirectoryForCurrentUser.path))
+    }
+
+    func testMacQASessionDiscoveryNeverEnumeratesTheUserHome() throws {
+        let provider = MacUIFixture.sessionImportDiscoveryProvider
+        let fixtureURL = MacUIFixture.sshConfigURL.standardizedFileURL
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+
+        for source in SessionTransferSource.allCases {
+            let urls = provider.urls(for: source).map(\.standardizedFileURL)
+            if source == .automatic || source == .openSSH {
+                XCTAssertEqual(urls, [fixtureURL])
+            } else {
+                XCTAssertTrue(urls.isEmpty)
+            }
+            XCTAssertTrue(urls.allSatisfy { !$0.path.hasPrefix(homeURL.path + "/") })
+            XCTAssertTrue(urls.allSatisfy { $0.path.hasPrefix(MacUIFixture.root.standardizedFileURL.path + "/") })
+        }
+    }
+
+    func testSessionImportPreviewUsesCompactLayoutAtMinimumWindowSheetWidth() {
+        XCTAssertFalse(SessionImportPreviewLayout.usesWideLayout(width: 759))
+        XCTAssertTrue(SessionImportPreviewLayout.usesWideLayout(width: 760))
+        XCTAssertTrue(SessionImportPreviewLayout.usesWideLayout(width: 960))
+    }
+
     func testWorkbenchLayoutsLightDarkAndNarrowFixtures() async throws {
         let standard = UserDefaults.standard
         let savedInterval = standard.object(forKey: "refreshInterval")
@@ -89,6 +165,44 @@ private final class WorkbenchFixtureContainerRetention {
                     .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
                 size: NSSize(width: 900, height: 620), name: "dashboard-refresh-900-\(theme)", dark: dark)
             artifacts.append(dashboard)
+
+            for destination in [
+                SidebarDestination.identities,
+                .sshKeys,
+                .snippets,
+                .trustedHosts,
+                .connections,
+                .terminal,
+                .recordings,
+            ] {
+                app.route = .section(destination)
+                artifacts.append(try await render(
+                    ContentView().modelContainer(container).environmentObject(app).environmentObject(layout)
+                        .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
+                    size: NSSize(width: 1440, height: 900),
+                    name: "\(destination.rawValue)-1440-\(theme)", dark: dark))
+            }
+
+            let detailServer = try XCTUnwrap(servers.first)
+            app.select(detailServer)
+            for (mode, name) in [(DetailMode.monitor, "monitor"), (.sftp, "sftp")] {
+                app.detailMode = mode
+                app.route = .server(id: detailServer.id, origin: .machines, mode: mode)
+                artifacts.append(try await render(
+                    ContentView().modelContainer(container).environmentObject(app).environmentObject(layout)
+                        .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
+                    size: NSSize(width: 1440, height: 900),
+                    name: "server-\(name)-1440-\(theme)", dark: dark))
+            }
+
+            let rdp = try XCTUnwrap(container.mainContext.fetch(FetchDescriptor<RDPConnectionRecord>()).first)
+            app.select(nil)
+            app.route = .rdp(rdp.id)
+            artifacts.append(try await render(
+                ContentView().modelContainer(container).environmentObject(app).environmentObject(layout)
+                    .defaultAppStorage(defaults).environment(\.colorScheme, scheme).preferredColorScheme(scheme),
+                size: NSSize(width: 1440, height: 900), name: "rdp-1440-\(theme)", dark: dark))
+
             app.route = .section(.machines)
             artifacts.append(try await render(
                 SettingsView().modelContainer(container).environmentObject(app).environmentObject(layout)

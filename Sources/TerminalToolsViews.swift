@@ -57,28 +57,29 @@ struct TerminalToolsBar: View {
                         .frame(minHeight: 44)
                 }.padding(.horizontal, 8) }
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                #if os(macOS)
-                if let onBatch { Button(action: onBatch) { Label("批执行", systemImage: "play.rectangle.on.rectangle") } }
-                if let onTunnels { Button(action: onTunnels) { Label("隧道", systemImage: "point.3.connected.trianglepath.dotted") } }
-                if let onReconnect { Button(action: onReconnect) { Label("重连", systemImage: "arrow.clockwise") } }
-                #endif
-                Button { tools.composerVisible.toggle() } label: { Label("命令", systemImage: "text.cursor") }
-                Button { tools.showingHistory = true } label: { Label("历史", systemImage: "clock.arrow.circlepath") }
-                Button { tools.showingRules = true } label: { Label("高亮", systemImage: "highlighter") }
-                Menu {
-                    Button("启用自动命令历史…") { showingShellIntegration = true }
-                } label: { Image(systemName: "ellipsis.circle") }
-                .accessibilityLabel("Shell 集成")
-                Spacer(minLength: 0)
-                #if os(macOS)
-                if let recordingController { RecordingToolbarButton(controller: recordingController) }
-                #endif
-                Button { tools.searchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
-                    .accessibilityLabel("终端搜索 Ctrl+F")
-            }.font(.caption).padding(.horizontal, 8).frame(minHeight: 36)
+            #if os(macOS)
+            ViewThatFits(in: .horizontal) {
+                wideCommandBar.fixedSize(horizontal: true, vertical: false)
+                compactCommandBar
             }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            #else
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    Button { tools.composerVisible.toggle() } label: { Label("命令", systemImage: "text.cursor") }
+                    Button { tools.showingHistory = true } label: { Label("历史", systemImage: "clock.arrow.circlepath") }
+                    Button { tools.showingRules = true } label: { Label("高亮", systemImage: "highlighter") }
+                    Menu {
+                        Button("启用自动命令历史…") { showingShellIntegration = true }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Shell 集成")
+                    Spacer(minLength: 0)
+                    Button { tools.searchVisible.toggle() } label: { Image(systemName: "magnifyingglass").frame(width: 44, height: 44) }
+                        .accessibilityLabel("终端搜索 Ctrl+F")
+                }.font(.caption).padding(.horizontal, 8).frame(minHeight: 36)
+            }
+            #endif
         }
         .buttonStyle(.borderless).background(.bar)
         .onChange(of: highlights.rules) { _, _ in tools.redraw() }
@@ -149,6 +150,79 @@ struct TerminalToolsBar: View {
     private func prepareIntegration(_ command: String) {
         tools.command = command; tools.composerVisible = true; showingShellIntegration = false
     }
+
+    #if os(macOS)
+    private var wideCommandBar: some View {
+        HStack(spacing: 12) {
+            if let onBatch {
+                Button(action: onBatch) { Label("批执行", systemImage: "play.rectangle.on.rectangle") }
+            }
+            if let onTunnels {
+                Button(action: onTunnels) { Label("隧道", systemImage: "point.3.connected.trianglepath.dotted") }
+            }
+            Button { tools.showingRules = true } label: { Label("高亮", systemImage: "highlighter") }
+            if let onReconnect {
+                Button(action: onReconnect) { Label("重连", systemImage: "arrow.clockwise") }
+            }
+            Button { tools.showingHistory = true } label: { Label("历史", systemImage: "clock.arrow.circlepath") }
+            Button { tools.composerVisible.toggle() } label: { Label("命令", systemImage: "text.cursor") }
+            Menu {
+                Button("启用自动命令历史…") { showingShellIntegration = true }
+            } label: {
+                Label("更多", systemImage: "ellipsis.circle")
+            }
+            .accessibilityLabel("更多终端工具")
+            Divider().frame(height: 20)
+            if let recordingController { RecordingToolbarButton(controller: recordingController) }
+            Button { tools.searchVisible.toggle() } label: {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+            .accessibilityLabel("终端搜索 Ctrl+F")
+        }
+        .font(.caption)
+    }
+
+    private var compactCommandBar: some View {
+        HStack(spacing: 4) {
+            if let onBatch {
+                compactButton("批执行", systemImage: "play.rectangle.on.rectangle", action: onBatch)
+            }
+            if let onTunnels {
+                compactButton("隧道", systemImage: "point.3.connected.trianglepath.dotted", action: onTunnels)
+            }
+            if let onReconnect {
+                compactButton("重连", systemImage: "arrow.clockwise", action: onReconnect)
+            }
+            compactButton("命令", systemImage: "text.cursor") { tools.composerVisible.toggle() }
+            Menu {
+                Button("命令历史", systemImage: "clock.arrow.circlepath") { tools.showingHistory = true }
+                Button("高亮规则", systemImage: "highlighter") { tools.showingRules = true }
+                Divider()
+                Button("启用自动命令历史…") { showingShellIntegration = true }
+            } label: {
+                Image(systemName: "ellipsis.circle").frame(width: 36, height: 36)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("更多终端工具")
+            Spacer(minLength: 4)
+            if let recordingController {
+                RecordingToolbarButton(controller: recordingController)
+                    .labelStyle(.iconOnly)
+            }
+            compactButton("终端搜索 Ctrl+F", systemImage: "magnifyingglass") { tools.searchVisible.toggle() }
+        }
+        .font(.caption)
+    }
+
+    private func compactButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage).frame(width: 36, height: 36).contentShape(Rectangle())
+        }
+        .help(title)
+        .accessibilityLabel(title)
+    }
+    #endif
 }
 
 private struct TerminalHighlightEditor: View {
@@ -209,7 +283,7 @@ private struct TerminalHighlightEditor: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
         #if os(macOS)
-        .frame(width: 600, height: 640)
+        .frame(minWidth: 500, idealWidth: 600, minHeight: 440, idealHeight: 640)
         #endif
     }
     private var showsCustom: Bool {

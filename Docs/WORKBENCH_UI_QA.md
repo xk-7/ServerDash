@@ -50,7 +50,11 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 
 本次复验使用 `codex/mac-native-polish` 分支。macOS Debug 应用完成编译并运行全量测试，394 项全部通过、零失败；日志为 `/tmp/serverdash-mac-polish-final-tests.log`。`ServerDashMobile` 通用 iOS Simulator 目标兼容构建通过，日志为 `/tmp/serverdash-mac-polish-final-mobile-build.log`。本轮没有修改 SwiftData V5、同步包、凭据格式或移动端能力白名单。
 
-新增 Debug 隔离入口必须同时使用 `--mac-ui-fixture` 参数和 `.macqa` 后缀的独立 Bundle ID。`Scripts/prepare-mac-ui-fixture.sh` 从 Debug 产物生成独立签名副本。该入口使用内存 SwiftData、合成主机、文档网段地址、关闭的文件服务和不附加进程的 SSH 控制器；草稿、录制、AI 数据、可信主机及 UserDefaults 均指向隔离目录或独立域。真实应用数据库、设置、凭据、主机和网络连接没有参与窗口检查。
+Debug 隔离入口使用独立的 `ServerDashMacQA` 应用 target 和 `ServerDashMacQA` Scheme，Bundle ID 固定为 `com.serverdash.app.macqa`。夹具能力由该 target 的 `SERVERDASH_MAC_QA` 编译条件启用；生产 `ServerDash` 应用即使收到相同启动参数也无法进入夹具。`Scripts/prepare-mac-ui-fixture.sh` 直接构建专用 QA 应用，不再复制或改签生产产物。该入口使用内存 SwiftData、合成主机、文档网段地址、关闭的文件服务和不附加进程的 SSH 控制器；草稿、录制、AI 数据、可信主机及 UserDefaults 均指向隔离目录或独立域。真实应用数据库、设置、凭据、主机和网络连接没有参与窗口检查。
+
+`ServerDashMacQAUITests` 使用真实应用窗口验证仪表盘、机器页和终端路由，并固定覆盖 900×620 最小窗口。可用 `xcodebuild -project ServerDash.xcodeproj -scheme ServerDashMacQA -destination 'platform=macOS' test` 运行；Scheme 与生产构建一样在构建前校验 RDP 依赖。
+
+本轮 `.macqa` 路由还覆盖设置、AI、远程编辑器、导入／导出、SSH/RDP 等连接编辑器以及空白和错误状态；代表性启动用例覆盖 900×620 与 1440×900、浅色与深色参数。`ServerDashMacQA` 和 UI 测试的 `build-for-testing` 已通过，构建产物的 Bundle ID 已核对为 `com.serverdash.app.macqa`。本机执行 XCTest UI runtime 时，测试 Runner 在启用 automation mode 阶段等待 60 秒后超时；该宿主未授予所需的 XCTest/TCC 自动化能力，因此本轮没有把 XCUI runtime 标记为通过，也没有修改系统隐私权限。结果包位于 `/tmp/serverdash-macqa-derived/Logs/Test/`，待具备自动化权限的验收机复跑。
 
 通过真实运行的应用窗口检查了 900×620 浅色、1440×900 深色及 1920×1080 浅色布局。900 宽度下分组栏自动收起，分组与标签作为筛选菜单显示，工具栏收进单一溢出菜单且显示／隐藏分组按钮仍可达；1440 宽度下分组层级、计数、完整工具栏和三列紧凑卡片同时可见。长中文主机名、在线、连接中、失败、离线、待检测及未知延迟状态均由真实 SwiftUI/AppKit 窗口显示。1920×1080 场景挂载 16 个持久 SSH 面板和可调右侧检查器；辅助功能树读取到 16 个连接状态、15 个分隔线，以及综合、CPU、GPU、内存、磁盘、网络、文件、AI、片段九类检查器入口。这里确认了控件标签可被辅助功能 API 读取，但没有运行 VoiceOver 实际朗读，因此 VoiceOver 仍保留为人工验收项。
 
@@ -96,6 +100,33 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 - [ ] 真实 SSH 多因素认证、VNC 系统屏幕共享、RDP Windows 互操作及长时间会话退出。
 - [ ] 真实 WebDAV 强 ETag、双设备同步、冲突、断网恢复与恢复密钥交换。
 - [ ] 实体 iPhone/iPad 的兼容性、前后台行为和辅助功能。
+
+## 2026-09-21 macOS 原生界面与 Apple-only 主线验收
+
+本轮使用 `codex/mac-native-ui-polish` 分支，继续保持系统字体、语义颜色和原生非玻璃视觉。产品版本仍为 1.0.4（Build 9）；SwiftData V5、同步包、凭据格式、连接协议和移动端界面均未改变。
+
+### 自动化与构建
+
+- 严格并发构建通过，第一方 `Sources`、`Tests`、`MacUITests` 和 `Native` 编译告警为 0。依赖告警实例为 SwiftTerm 87、ZIPFoundation 4、NIOSSH 0、Citadel 0；FreeRDP/WinPR 继续由 RDP bootstrap 单独记录。构建日志为 `.build/concurrency-gate/build.log`。
+- macOS 全量测试执行 **473 项，全部通过、零失败**，用时 117.077 秒。日志为 `/tmp/serverdash-native-ui-final-tests.log`，结果包为 `.build/concurrency-gate/Logs/Test/Test-ServerDash-2026.09.21_18-46-56-+0800.xcresult`。
+- Apple-only tracked-tree 门禁夹具 17/17 通过，开发工作区与发布诊断夹具 24/24 通过。检查覆盖 Windows 分支来源、大小写变体、Windows 产品目录、Windows 客户端工程格式、Windows 文档、脚本和发布工作流、未知根目录及非 Apple 平台声明；Apple 侧 RDP、FreeRDP/WinPR、远端 Windows 识别、证书夹具和相关文档继续允许。
+- 通用 macOS Release 构建通过，应用包含 `x86_64` 与 `arm64`；日志为 `/tmp/serverdash-native-ui-final-release.log`。iOS Simulator 兼容构建通过并包含 `x86_64` 与 `arm64`，无签名 Device 构建通过并包含 `arm64`；日志分别为 `/tmp/serverdash-native-ui-final-mobile-sim.log` 和 `/tmp/serverdash-native-ui-final-mobile-device.log`。
+- `ServerDashMacQA` 与 UI 测试完成 `build-for-testing`，Bundle ID 为 `com.serverdash.app.macqa`。隔离入口使用内存数据库、模拟状态、独立凭据域、临时 SSH 配置和禁用网络的服务配置，不访问用户数据库、凭据或真实主机。
+
+### 界面、行为与性能
+
+- QA 路由覆盖仪表盘、主机网格／列表、终端 1／4／16 面板、录制与资源页面、监控、SFTP、RDP、设置、AI、远程编辑、导入导出、连接编辑器、批执行、空状态和错误弹窗；快捷键用例覆盖 `⌘R`、`⌘⇧R`、`⌘N`、`⌘F`、`⌘W`、Escape 和 `⌘⌥I`。
+- 真实隔离应用窗口已检查 900×620 的仪表盘、SSH 编辑器、导入预览、批执行和录制配置，以及 1920×1080 的 16 面板终端。最终 900×620 导入预览使用单栏候选列表与底部摘要，长来源名称不再逐字换行；批执行和录制配置的内容、原生取消／确认操作及键盘焦点均位于可用区内。缓存布局夹具只用于补充尺寸和语义检查，不代替这些真实窗口检查。
+- 1,000 台主机、48 个分组和 6 组查询的同步主线程基准由 1,525.353 ms 降至 36.751 ms，100 次缓存更新耗时 0.0701 ms，语义结果一致。
+- 10,000 项隔离 SFTP 列表的加载、隐藏文件切换、搜索及清除搜索总计 71.163 ms，并验证筛选后不可见选择会被移除。
+- 1,300,000 个 UTF-16 单元、50,000 行的编辑器基准中，100 次尾部行号查询由 2.636 s 降至 0.0000363 s；30 次尾部编辑的行索引维护由 2.436 s 降至 0.0000972 s。
+- 回归覆盖 Keychain 凭据保留与回滚、异步 lease 冲突、SSH 密钥正文与口令、路线 revision 变化、未来连接配置刷新，以及主题、布局、检查器和切页不重启既有会话控制器。
+
+### 保留验收项
+
+- 当前宿主的 XCTest UI runtime 仍在启用 automation mode 时受 TCC 超时阻断，因此只标记 UI 测试 `build-for-testing` 通过，不标记完整 XCUI 矩阵通过，也没有修改系统隐私权限。
+- 实际 VoiceOver 朗读、完整键盘遍历、实体串口、实体 iPhone/iPad 及真实 SSH、VNC、RDP、WebDAV 服务互通尚未执行。
+- GitHub `main` 规则集需在分支推送后配置并回读确认：必需检查固定为 `Apple main scope / Validate Apple-only tree`，同时要求 PR、禁止强推和删除，并且不允许管理员绕过。
 
 ## 2026-09-13 v1.0.3 并发与退出可靠性验收
 

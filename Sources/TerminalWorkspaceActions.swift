@@ -34,41 +34,59 @@ struct TerminalBatchExecutionSheet: View {
                                 endpoint: "\($0.config.username)@\($0.config.host):\($0.config.port)")
         }
     }
+    private var previewRequest: TerminalBatchRequest {
+        TerminalBatchRequest(
+            command: command,
+            targets: targets.filter { selected.contains($0.id) }
+        )
+    }
     var body: some View {
-        NavigationStack {
+        MacEditorSheetScaffold(
+            title: "批量执行命令",
+            accessibilityID: "mac.batch-execution",
+            saveTitle: pending == nil ? "预览执行…" : "确认执行",
+            saveDisabled: pending?.isValid == false || (pending == nil && !previewRequest.isValid),
+            maxContentWidth: 620,
+            onCancel: { dismiss() },
+            onSave: {
+                if let pending {
+                    execute(pending)
+                } else if previewRequest.isValid {
+                    pending = previewRequest
+                }
+            }
+        ) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("选择已连接的 SSH 面板").font(.headline)
                 if let pending {
                     Text("确认向以下 \(pending.targets.count) 个面板发送命令：").font(.callout)
                     targetList(pending.targets, editable: false)
+                        .accessibilityIdentifier("mac.batch-execution.targets.preview")
                     ScrollView { Text(pending.command).font(.body.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                         .padding(12).frame(height: 160).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                     Text("命令会提交到各终端当前程序。请确认目标均处于 Shell 提示符。断开的目标会跳过。")
                         .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Button("返回编辑") { self.pending = nil }
-                        Spacer()
-                        Button("确认执行") { execute(pending) }.buttonStyle(.borderedProminent)
-                    }
                 } else {
                     targetList(targets, editable: true)
+                        .accessibilityIdentifier("mac.batch-execution.targets")
                     TextEditor(text: $command).font(.body.monospaced()).frame(height: 130)
                         .overlay { RoundedRectangle(cornerRadius: 6).stroke(.quaternary) }
+                        .accessibilityIdentifier("mac.batch-execution.command")
                     if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
-                    HStack {
-                        Text("已选 \(selected.intersection(Set(targets.map(\.id))).count) 个面板").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("预览执行…") {
-                            let request = TerminalBatchRequest(command: command, targets: targets.filter { selected.contains($0.id) })
-                            if request.isValid { pending = request }
-                        }.buttonStyle(.borderedProminent)
-                            .disabled(!TerminalBatchRequest(command: command, targets: targets.filter { selected.contains($0.id) }).isValid)
-                    }
+                    Text("已选 \(selected.intersection(Set(targets.map(\.id))).count) 个面板")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-            }.padding(20)
-                .navigationTitle("批量执行命令")
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
-        }.frame(width: 620, height: 590)
+            }
+        }
+        .toolbar {
+            if pending != nil {
+                ToolbarItem(placement: .automatic) {
+                    Button("返回编辑") { pending = nil }
+                }
+            }
+        }
+        .frame(minWidth: 500, idealWidth: 620, minHeight: 420, idealHeight: 560)
     }
     private func targetList(_ entries: [TerminalBatchTarget], editable: Bool) -> some View {
         ScrollView {
@@ -117,8 +135,36 @@ struct TerminalTunnelManagerView: View {
     @State private var pendingRule: PortForwardRule?
     @State private var busy = false
     private var rules: [PortForwardRuleRecord] { records.filter { $0.serverID == server.id } }
+    private var draftRule: PortForwardRule {
+        PortForwardRule(
+            name: name.isEmpty ? "\(direction.title) :\(listenPort)" : name,
+            serverID: server.id,
+            direction: direction,
+            bindAddress: bindAddress,
+            listenPort: listenPort,
+            targetHost: targetHost,
+            targetPort: targetPort
+        )
+    }
+    private var draftIsInvalid: Bool {
+        !(1...65_535).contains(listenPort) ||
+        ((direction == .local || direction == .remote) &&
+         (targetHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(1...65_535).contains(targetPort)))
+    }
     var body: some View {
-        NavigationStack {
+        MacEditorSheetScaffold(
+            title: "SSH 隧道管理",
+            accessibilityID: "mac.editor.tunnel",
+            cancelTitle: "完成",
+            cancelRole: nil,
+            saveTitle: "创建并启动",
+            errorMessage: operationError,
+            saveDisabled: busy || draftIsInvalid,
+            maxContentWidth: 650,
+            scrollsContent: false,
+            onCancel: { dismiss() },
+            onSave: { requestStart(draftRule) }
+        ) {
             Form {
                 Section("创建隧道 · \(server.displayName)") {
                     Picker("类型", selection: $direction) {
@@ -130,14 +176,7 @@ struct TerminalTunnelManagerView: View {
                         HStack { TextField("目标主机", text: $targetHost); TextField("目标端口", value: $targetPort, format: .number.grouping(.never)).frame(width: 120) }
                     }
                     Text("默认监听 127.0.0.1。隧道由应用持有，关闭此窗口后继续运行。").font(.caption).foregroundStyle(.secondary)
-                    Button("创建并启动") {
-                        let rule = PortForwardRule(name: name.isEmpty ? "\(direction.title) :\(listenPort)" : name,
-                            serverID: server.id, direction: direction, bindAddress: bindAddress,
-                            listenPort: listenPort, targetHost: targetHost, targetPort: targetPort)
-                        requestStart(rule)
-                    }.disabled(busy).buttonStyle(.borderedProminent)
                 }
-                if let operationError { Section { Label(operationError, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
                 Section("已保存的隧道") {
                     if rules.isEmpty { Text("尚无隧道").foregroundStyle(.secondary) }
                     ForEach(rules) { record in
@@ -155,9 +194,12 @@ struct TerminalTunnelManagerView: View {
                         }
                     }
                 }
-            }.formStyle(.grouped).navigationTitle("SSH 隧道管理")
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-        }.frame(width: 650, height: 580)
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 520, idealWidth: 650, minHeight: 440, idealHeight: 580)
             .task {
                 while !Task.isCancelled {
                     await appState.refreshPortForwardSnapshots()

@@ -124,6 +124,24 @@ struct ContentView: View {
         return servers.first { $0.id == serverID }
     }
 
+    /// Values that can change the configuration of a future connection.
+    /// Existing terminal/RDP session owners are intentionally not touched.
+    private var identityConnectionSignature: [String] {
+        identities.map {
+            [$0.id.uuidString, $0.username, $0.authenticationRawValue,
+             $0.sshKeyID?.uuidString ?? "", String($0.updatedAt.timeIntervalSinceReferenceDate)]
+                .joined(separator: "|")
+        }
+    }
+
+    private var keyConnectionSignature: [String] {
+        sshKeys.map {
+            [$0.id.uuidString, $0.filePath, $0.storageModeRawValue,
+             String($0.hasPassphrase), $0.fingerprint]
+                .joined(separator: "|")
+        }
+    }
+
     private var detailModeBinding: Binding<DetailMode> {
         Binding(
             get: { route.detailMode ?? .monitor },
@@ -245,10 +263,10 @@ struct ContentView: View {
             .onChange(of: servers.count) {
                 appState.bootstrap(servers: servers, context: modelContext)
             }
-            .onChange(of: identities.count) {
+            .onChange(of: identityConnectionSignature) {
                 synchronizeIdentityConnections()
             }
-            .onChange(of: sshKeys.count) {
+            .onChange(of: keyConnectionSignature) {
                 synchronizeIdentityConnections()
             }
             .onChange(of: connectionRoutes.map(\.revision)) {

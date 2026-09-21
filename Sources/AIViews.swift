@@ -90,10 +90,17 @@ struct AIChatView: View {
         .onChange(of: pane.authorizedGeneration) { _, _ in pendingCommand = nil }
         .onChange(of: conversationID) { _, _ in pendingCommand = nil; showingConsent = false }
         .sheet(isPresented: $showingSettings) {
-            VStack(spacing: 0) {
-                HStack { Text("AI 设置").font(.headline); Spacer(); Button("完成") { showingSettings = false } }.padding()
+            NavigationStack {
                 AISettingsView(settings: settings)
-            }.frame(width: 680, height: 720)
+                    .navigationTitle("AI 设置")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showingSettings = false }
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
+            }
+            .frame(minWidth: 520, idealWidth: 680, minHeight: 440, idealHeight: 720)
         }
         .sheet(isPresented: $showingModels) {
             AIModelPicker(profile: activeProfile, settings: settings, key: { try settings.key(for: activeProfile) }) { model in

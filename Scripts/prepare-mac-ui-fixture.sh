@@ -1,12 +1,23 @@
 #!/bin/bash
 set -euo pipefail
-# Copy a Debug build, keeping the real app and its defaults domain untouched.
-source_app="${1:?Usage: bash Scripts/prepare-mac-ui-fixture.sh /path/to/Debug/ServerDash.app}"
-target_dir="$(mktemp -d /tmp/serverdash-mac-ui.XXXXXX)"
-target_app="$target_dir/ServerDash Mac QA.app"
-ditto "$source_app" "$target_app"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.serverdash.app.macqa' "$target_app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleName ServerDash Mac QA' "$target_app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName ServerDash Mac QA' "$target_app/Contents/Info.plist"
-codesign --force --deep --sign - "$target_app"
-printf '%s\n' "$target_app"
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DERIVED_DATA="${1:-${ROOT_DIR}/.build/mac-ui-qa}"
+
+# The fixture path is compiled into ServerDashMacQA. Re-signing or renaming the
+# production app cannot enable it, which keeps production Debug builds safe too.
+xcodebuild \
+    -project "${ROOT_DIR}/ServerDash.xcodeproj" \
+    -scheme ServerDashMacQA \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "${DERIVED_DATA}" \
+    build
+
+QA_APP="${DERIVED_DATA}/Build/Products/Debug/ServerDashMacQA.app"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${QA_APP}/Contents/Info.plist")"
+if [[ "${BUNDLE_ID}" != "com.serverdash.app.macqa" ]]; then
+    echo "Unexpected Mac QA bundle identifier: ${BUNDLE_ID}" >&2
+    exit 1
+fi
+printf '%s\n' "${QA_APP}"
