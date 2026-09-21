@@ -217,7 +217,18 @@ struct RDPConnectionConfiguration: Equatable, Sendable {
     }
 
     /// Workgroup NTLMv2 uses the machine NetBIOS name as the domain. RDS self-signed certificates expose that as CN.
+    /// Keep this aligned with `SDRDPSuggestedNLADomain` so iOS can compile without the FreeRDP bridge.
     static func nlaDomain(username: String, domain: String, certificateCommonName: String?) -> String {
-        SDRDPSuggestedNLADomain(username, domain, certificateCommonName)
+        if let slash = username.firstIndex(of: "\\") {
+            return String(username[..<slash])
+        }
+        if !domain.isEmpty { return domain }
+        if username.contains("@") { return "" }
+        let cn = certificateCommonName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !cn.isEmpty, cn.utf16.count <= 63 else { return "" }
+        if cn.unicodeScalars.contains(where: { rejectedNLADomainCharacters.contains($0) }) { return "" }
+        return cn
     }
+
+    private static let rejectedNLADomainCharacters = CharacterSet(charactersIn: ".@\\/ ")
 }
