@@ -532,9 +532,9 @@ final class TrustedHostStoreTests: XCTestCase {
     func testHopScanProviderIsUsedForUnknownHostAndMatchesHostKeyAlias() async throws {
         let config = makeConfig(host: "10.0.0.5", port: 2222)
         let key = Data("hop-key".utf8).base64EncodedString()
-        var scanned: (String, Int)?
+        let scanned = LockedHostPortRecorder()
         let decision = try await store.inspect(config, forceScan: false) { host, port, _ in
-            scanned = (host, port)
+            scanned.record(host: host, port: port)
             let alias = OpenSSHHostKeyNaming.alias(host: host, port: port)
             let line = "\(alias) ssh-ed25519 \(key)"
             return SSHHostKeyProbe(
@@ -549,8 +549,8 @@ final class TrustedHostStoreTests: XCTestCase {
         guard case .unknown(let probe) = decision else {
             return XCTFail("Unknown hop must use the injected scan provider")
         }
-        XCTAssertEqual(scanned?.0, "10.0.0.5")
-        XCTAssertEqual(scanned?.1, 2222)
+        XCTAssertEqual(scanned.value?.0, "10.0.0.5")
+        XCTAssertEqual(scanned.value?.1, 2222)
         XCTAssertEqual(probe.host, "10.0.0.5")
         XCTAssertEqual(probe.port, 2222)
         XCTAssertEqual(OpenSSHHostKeyNaming.alias(host: probe.host, port: probe.port), "[10.0.0.5]:2222")
@@ -2071,6 +2071,23 @@ final class ConnectionProcessControllerTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return await condition()
+    }
+}
+
+private final class LockedHostPortRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: (String, Int)?
+
+    var value: (String, Int)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func record(host: String, port: Int) {
+        lock.lock()
+        storage = (host, port)
+        lock.unlock()
     }
 }
 
