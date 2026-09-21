@@ -6,3 +6,6 @@ xcuserdata/
 *.xcuserstate
 .build/
 dist/
+Windows/**/bin/
+Windows/**/obj/
+*.user

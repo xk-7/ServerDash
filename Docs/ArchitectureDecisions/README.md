@@ -13,6 +13,7 @@ has passed.
 | [ADR-0004: Remote platform and Docker provider scope](ADR-0004-remote-platform-and-docker-provider-scope.md) | Accepted | capability work after the foundation stages |
 | [ADR-0005: Native iOS/iPadOS app and dual SSH engines](ADR-0005-native-ios-and-dual-ssh-engine.md) | Accepted | mobile target, connection abstraction, lifecycle, security |
 | [ADR-0006: Isolated macOS RDP](ADR-0006-macos-rdp-isolation.md) | Accepted for development; release gates open | RDP engine, V4 model, workspace and security |
+| [ADR-0007: Native Windows WinUI client](ADR-0007-windows-winui-client.md) | Accepted for the Windows alignment track | `windows/align-macos`, `Windows/` |
 | [ServerDash 1.0 scope and non-goals](../PRODUCT_SCOPE_1.0.md) | Frozen | S01-S06 and later product planning |
 
 ## Decision identifiers covered by S00
@@ -23,6 +24,7 @@ has passed.
 - `D-06`: ADR-0004
 - `D-07`: ADR-0004
 - `D-12`: ADR-0005
+- `D-13`: ADR-0007 (Windows client; does not change Apple 1.0 decisions)
 - Location collection default and consent: `PRODUCT_SCOPE_1.0.md`
 - Core/experimental boundary and absence of paid tiers: `PRODUCT_SCOPE_1.0.md`
 
