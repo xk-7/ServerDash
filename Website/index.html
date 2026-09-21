@@ -1,0 +1,517 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-title-zh="ServerDash — 清晰掌控每一台服务器"
+  data-title-en="ServerDash — Every server, clearly in view"
+  data-description-zh="ServerDash 是面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、SSH 终端和 SFTP 客户端。"
+  data-description-en="ServerDash is a native macOS, iPhone, and iPad monitoring, SSH terminal, and SFTP client for Linux VPS hosts."
+>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (() => {
+        try {
+          const savedTheme = localStorage.getItem("serverdash-theme");
+          const savedLanguage = localStorage.getItem("serverdash-language");
+          const theme = savedTheme === "light" || savedTheme === "dark"
+            ? savedTheme
+            : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+          if (savedLanguage === "en" || savedLanguage === "zh-CN") {
+            document.documentElement.lang = savedLanguage;
+          }
+        } catch {
+          const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        }
+      })();
+    </script>
+    <meta name="theme-color" content="#f7f9fc">
+    <meta
+      name="description"
+      content="ServerDash 是面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、SSH 终端和 SFTP 客户端。"
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="ServerDash — 清晰掌控每一台服务器">
+    <meta
+      property="og:description"
+      content="监控、SSH 终端与 SFTP，集中在一个原生工作台中。无需部署服务端 Agent。"
+    >
+    <meta property="og:image" content="assets/serverdash-mark.svg">
+    <meta name="twitter:card" content="summary">
+    <link rel="canonical" href="https://xk-7.github.io/ServerDash/">
+    <link rel="icon" href="assets/serverdash-mark.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://api.github.com">
+    <link rel="stylesheet" href="styles.css?v=20260921d">
+    <title>ServerDash — 清晰掌控每一台服务器</title>
+    <script src="site.js?v=20260921d" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">
+      <span class="lang-zh">跳到主要内容</span>
+      <span class="lang-en" lang="en">Skip to main content</span>
+    </a>
+
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="主导航" data-aria-zh="主导航" data-aria-en="Primary navigation">
+        <a
+          class="brand"
+          href="#top"
+          aria-label="ServerDash 首页"
+          data-aria-zh="ServerDash 首页"
+          data-aria-en="ServerDash home"
+        >
+          <img src="assets/serverdash-mark.svg" width="34" height="34" alt="">
+          <span>ServerDash</span>
+        </a>
+        <div class="nav-links">
+          <a href="#top" aria-current="page">
+            <span class="lang-zh">首页</span><span class="lang-en" lang="en">Home</span>
+          </a>
+          <a href="docs/">
+            <span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span>
+          </a>
+          <a href="releases.html">
+            <span class="lang-zh">更新日志</span><span class="lang-en" lang="en">Releases</span>
+          </a>
+          <a href="#download">
+            <span class="lang-zh">下载</span><span class="lang-en" lang="en">Download</span>
+          </a>
+        </div>
+        <div class="nav-actions">
+          <a class="mobile-nav-link" href="docs/">
+            <span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span>
+          </a>
+          <a class="mobile-nav-link" href="releases.html">
+            <span class="lang-zh">更新</span><span class="lang-en" lang="en">Releases</span>
+          </a>
+          <button type="button" class="theme-switch" data-theme-toggle aria-label="切换主题">☀</button>
+          <div class="language-switch" role="group" aria-label="语言" data-aria-zh="语言" data-aria-en="Language">
+            <button type="button" data-set-lang="zh-CN" aria-pressed="true">中</button>
+            <button type="button" data-set-lang="en" aria-pressed="false">EN</button>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero section-shell" id="top">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span class="lang-zh">原生 Apple 平台服务器工作台</span>
+            <span class="lang-en" lang="en">Native server workspace for Apple platforms</span>
+          </div>
+          <h1>
+            <span class="lang-zh">清晰掌控<br>每一台服务器</span>
+            <span class="lang-en" lang="en">Every server,<br>clearly in view</span>
+          </h1>
+          <p class="hero-lede">
+            <span class="lang-zh">把 Linux 资源监控、多会话 SSH 终端与 SFTP 文件管理放进一个安静、快速的原生工作台。无需部署服务端 Agent。macOS 另有开发中的 Windows 远程桌面。</span>
+            <span class="lang-en" lang="en">Linux monitoring, multi-session SSH, and SFTP in one quiet, fast native workspace. No server-side agent required. Windows RDP on macOS is in development.</span>
+          </p>
+          <div class="hero-actions">
+            <a
+              class="button button-primary"
+              id="hero-download"
+              href="https://github.com/xk-7/ServerDash/releases/download/v1.0.4/ServerDash-1.0.4-macOS.dmg"
+            >
+              <span class="button-icon" aria-hidden="true">↓</span>
+              <span class="lang-zh">下载 macOS 版</span>
+              <span class="lang-en" lang="en">Download for macOS</span>
+            </a>
+            <a class="button button-secondary" href="#capabilities">
+              <span class="lang-zh">浏览核心能力</span>
+              <span class="lang-en" lang="en">Explore features</span>
+            </a>
+          </div>
+          <p class="hero-meta">
+            <span class="lang-zh">macOS 14+ · Apple Silicon 与 Intel · 当前稳定版 </span>
+            <span class="lang-en" lang="en">macOS 14+ · Apple Silicon & Intel · Stable </span>
+            <strong data-release-version>v1.0.4</strong>
+          </p>
+        </div>
+
+        <div class="product-stage" aria-label="ServerDash 监控工作台预览" data-aria-zh="ServerDash 监控工作台预览" data-aria-en="ServerDash monitoring workspace preview">
+          <div class="app-window">
+            <div class="window-bar">
+              <div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+              <div class="window-title">
+                <span class="window-logo">S</span>
+                <span>ServerDash</span>
+              </div>
+              <span class="sync-state"><i></i><span class="lang-zh">数据已更新</span><span class="lang-en" lang="en">Up to date</span></span>
+            </div>
+            <div class="workspace">
+              <aside class="mock-sidebar" aria-hidden="true">
+                <div class="mock-nav-item active"><b>⌁</b><span class="lang-zh">仪表盘</span><span class="lang-en" lang="en">Dashboard</span></div>
+                <div class="mock-nav-item"><b>▣</b><span class="lang-zh">机器</span><span class="lang-en" lang="en">Machines</span></div>
+                <div class="mock-nav-item"><b>&gt;_</b><span class="lang-zh">会话</span><span class="lang-en" lang="en">Sessions</span></div>
+                <div class="mock-nav-item"><b>⇅</b><span>SFTP</span></div>
+                <div class="sidebar-spacer"></div>
+                <div class="mock-nav-item"><b>⚙</b><span class="lang-zh">设置</span><span class="lang-en" lang="en">Settings</span></div>
+              </aside>
+              <div class="mock-content">
+                <div class="mock-heading">
+                  <div>
+                    <small class="lang-zh">全部服务器</small><small class="lang-en" lang="en">All servers</small>
+                    <strong class="lang-zh">运行概览</strong><strong class="lang-en" lang="en">Fleet overview</strong>
+                  </div>
+                  <span class="mock-filter"><span class="lang-zh">过去 1 小时</span><span class="lang-en" lang="en">Last hour</span></span>
+                </div>
+                <div class="metric-row">
+                  <article class="mini-metric">
+                    <span class="metric-label"><span class="lang-zh">在线</span><span class="lang-en" lang="en">Online</span></span>
+                    <strong>12 <small>/ 14</small></strong>
+                    <span class="tiny-trend positive">+2.4%</span>
+                  </article>
+                  <article class="mini-metric">
+                    <span class="metric-label">CPU</span>
+                    <strong>28<small>%</small></strong>
+                    <span class="spark-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                  </article>
+                  <article class="mini-metric">
+                    <span class="metric-label"><span class="lang-zh">内存</span><span class="lang-en" lang="en">Memory</span></span>
+                    <strong>61<small>%</small></strong>
+                    <span class="meter" aria-hidden="true"><i style="width:61%"></i></span>
+                  </article>
+                </div>
+                <div class="fleet-panel">
+                  <div class="fleet-toolbar">
+                    <strong class="lang-zh">机器状态</strong><strong class="lang-en" lang="en">Machine status</strong>
+                    <span class="search-pill"><span aria-hidden="true">⌕</span><span class="lang-zh">搜索服务器</span><span class="lang-en" lang="en">Search servers</span></span>
+                  </div>
+                  <div class="server-row">
+                    <span class="server-icon blue">W</span>
+                    <span class="server-name"><strong>Web Production</strong><small>ubuntu-prod-01</small></span>
+                    <span class="row-status online"><i></i><span class="lang-zh">在线</span><span class="lang-en" lang="en">Online</span></span>
+                    <span class="row-stat"><small>CPU</small><b>18%</b></span>
+                    <span class="row-stat"><small>RAM</small><b>42%</b></span>
+                  </div>
+                  <div class="server-row">
+                    <span class="server-icon apricot">D</span>
+                    <span class="server-name"><strong>Database Cluster</strong><small>debian-db-02</small></span>
+                    <span class="row-status online"><i></i><span class="lang-zh">在线</span><span class="lang-en" lang="en">Online</span></span>
+                    <span class="row-stat"><small>CPU</small><b>36%</b></span>
+                    <span class="row-stat"><small>RAM</small><b>71%</b></span>
+                  </div>
+                  <div class="server-row">
+                    <span class="server-icon gray">B</span>
+                    <span class="server-name"><strong>Backup Node</strong><small>rocky-backup-01</small></span>
+                    <span class="row-status attention"><i></i><span class="lang-zh">需关注</span><span class="lang-en" lang="en">Attention</span></span>
+                    <span class="row-stat"><small>CPU</small><b>9%</b></span>
+                    <span class="row-stat"><small>RAM</small><b>33%</b></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="floating-card floating-terminal" aria-hidden="true">
+            <div class="float-title"><span class="live-pip"></span> web-prod-01</div>
+            <code><i>$</i> uptime<br><span>up 42 days, load 0.28</span></code>
+          </div>
+          <div class="floating-card floating-health" aria-hidden="true">
+            <span class="health-ring">99</span>
+            <div><strong>Healthy</strong><small class="lang-zh">12 台运行正常</small><small class="lang-en" lang="en">12 systems normal</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="trust-strip section-shell" aria-label="产品概要" data-aria-zh="产品概要" data-aria-en="Product summary">
+        <div><strong>3</strong><span class="lang-zh">个平台原生体验</span><span class="lang-en" lang="en">native platforms</span></div>
+        <div><strong>16</strong><span class="lang-zh">个终端面板 / 标签</span><span class="lang-en" lang="en">terminal panes per tab</span></div>
+        <div><strong>0</strong><span class="lang-zh">个服务端 Agent</span><span class="lang-en" lang="en">server-side agents</span></div>
+        <div><strong>1</strong><span class="lang-zh">个统一工作台</span><span class="lang-en" lang="en">unified workspace</span></div>
+      </section>
+
+      <section class="section-shell content-section" id="capabilities">
+        <div class="section-heading">
+          <div>
+            <span class="section-kicker"><span class="lang-zh">核心能力</span><span class="lang-en" lang="en">Core capabilities</span></span>
+            <h2><span class="lang-zh">扫一眼状态，立即开始工作</span><span class="lang-en" lang="en">Scan status. Start working.</span></h2>
+          </div>
+          <p>
+            <span class="lang-zh">减少工具切换，把服务器从“发现问题”到“解决问题”的路径压缩在同一个上下文中。</span>
+            <span class="lang-en" lang="en">Reduce tool switching and keep the path from detection to resolution in one context.</span>
+          </p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card feature-monitor">
+            <div class="feature-icon" aria-hidden="true">⌁</div>
+            <span class="feature-number">01</span>
+            <h3><span class="lang-zh">Linux 资源监控</span><span class="lang-en" lang="en">Linux monitoring</span></h3>
+            <p>
+              <span class="lang-zh">CPU、内存、磁盘、网络、进程、Docker 与 NVIDIA GPU，按服务器能力自动呈现。</span>
+              <span class="lang-en" lang="en">CPU, memory, disk, network, processes, Docker, and NVIDIA GPU—shown when each host supports them.</span>
+            </p>
+            <div class="card-visual monitor-visual" aria-hidden="true">
+              <div class="chart-labels"><span>100%</span><span>50%</span><span>0%</span></div>
+              <svg viewBox="0 0 360 112" preserveAspectRatio="none">
+                <path class="chart-area" d="M0,92 C34,84 48,38 78,49 C114,62 128,22 164,42 C204,64 216,35 248,48 C282,63 310,22 360,34 L360,112 L0,112 Z"></path>
+                <path class="chart-line" d="M0,92 C34,84 48,38 78,49 C114,62 128,22 164,42 C204,64 216,35 248,48 C282,63 310,22 360,34"></path>
+              </svg>
+              <div class="chart-legend"><span><i></i>CPU 28%</span><span><i></i>RAM 61%</span></div>
+            </div>
+          </article>
+
+          <article class="feature-card feature-terminal">
+            <div class="feature-icon" aria-hidden="true">&gt;_</div>
+            <span class="feature-number">02</span>
+            <h3><span class="lang-zh">多会话 SSH 终端</span><span class="lang-en" lang="en">Multi-session SSH</span></h3>
+            <p>
+              <span class="lang-zh">标签、自由分屏、4×4 网格、滚屏搜索、命令历史与代码片段，为高频操作而生。</span>
+              <span class="lang-en" lang="en">Tabs, free-form splits, 4×4 grids, scrollback search, history, and snippets for high-frequency work.</span>
+            </p>
+            <div class="card-visual terminal-visual" aria-hidden="true">
+              <div class="terminal-tabs"><span class="active">web-prod</span><span>database</span><span>+</span></div>
+              <code>
+                <span><i>serverdash@web</i> ~ % htop</span>
+                <span>CPU&nbsp; [||||||||&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;] 28.4%</span>
+                <span>Mem&nbsp; [||||||||||||&nbsp;&nbsp;] 61.2%</span>
+                <span class="terminal-ok">● 14 processes · load 0.28</span>
+              </code>
+            </div>
+          </article>
+
+          <article class="feature-card feature-sftp">
+            <div class="feature-icon" aria-hidden="true">⇅</div>
+            <span class="feature-number">03</span>
+            <h3><span class="lang-zh">完整基础 SFTP</span><span class="lang-en" lang="en">Practical SFTP</span></h3>
+            <p>
+              <span class="lang-zh">浏览、上传、下载、移动与递归删除，包含冲突策略、进度、取消和失败重试。</span>
+              <span class="lang-en" lang="en">Browse, upload, download, move, and recursively delete with conflict handling, progress, cancel, and retry.</span>
+            </p>
+            <div class="card-visual files-visual" aria-hidden="true">
+              <div><span class="file-kind folder"></span><b>www</b><small>4 items</small></div>
+              <div><span class="file-kind file"></span><b>nginx.conf</b><small>3.8 KB</small></div>
+              <div><span class="file-kind file blue"></span><b>deploy.sh</b><small>1.2 KB</small></div>
+              <div class="transfer-row"><span>backup.tar.gz</span><span class="transfer-track"><i></i></span><strong>72%</strong></div>
+            </div>
+          </article>
+
+          <article class="feature-card feature-rdp">
+            <div class="feature-icon" aria-hidden="true">▣</div>
+            <span class="feature-number">04</span>
+            <span class="dev-pill"><span class="lang-zh">开发中</span><span class="lang-en" lang="en">In development</span></span>
+            <h3><span class="lang-zh">RDP 远程桌面</span><span class="lang-en" lang="en">RDP remote desktop</span></h3>
+            <p>
+              <span class="lang-zh">macOS 内嵌 NLA/CredSSP 与证书指纹确认，仅供受控测试。真实 Windows 登录、音频、多屏尚未完成验收；iPhone/iPad 不提供。<a href="docs/platforms-limitations.html#rdp">查看限制</a></span>
+              <span class="lang-en" lang="en">Embedded NLA/CredSSP and certificate confirmation on macOS for controlled tests. Real Windows logon, audio, and multi-display are not validated. Not on iPhone or iPad. <a href="docs/platforms-limitations.html#rdp">See limits</a></span>
+            </p>
+            <div class="card-visual rdp-visual" aria-hidden="true">
+              <div class="rdp-bar"><span></span><span></span><span></span><b>WIN-WORKGROUP</b></div>
+              <div class="rdp-screen">
+                <div class="rdp-desktop">
+                  <strong>NLA · TLS 1.2+</strong>
+                  <code>SHA-256 · 7A:3C:91:…:E4</code>
+                  <small><span class="lang-zh">证书指纹待确认</span><span class="lang-en" lang="en">Certificate pending</span></small>
+                  <div class="rdp-actions"><span class="lang-zh">拒绝</span><span class="lang-en" lang="en">Reject</span><span class="rdp-ok"><span class="lang-zh">确认并连接</span><span class="lang-en" lang="en">Confirm</span></span></div>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-shell workflow-section">
+        <div class="workflow-copy">
+          <span class="section-kicker"><span class="lang-zh">为真实运维流程设计</span><span class="lang-en" lang="en">Built for real operations</span></span>
+          <h2><span class="lang-zh">信息密度高，注意力负担低</span><span class="lang-en" lang="en">High information density, low cognitive load</span></h2>
+          <p>
+            <span class="lang-zh">ServerDash 保留最后成功数据、明确标记 Data Gap，并用文本与颜色共同表达状态。过期数据不会伪装成实时数据。</span>
+            <span class="lang-en" lang="en">ServerDash preserves the last good sample, marks Data Gaps explicitly, and communicates state with both text and color. Stale data never pretends to be live.</span>
+          </p>
+          <ul class="check-list">
+            <li><span aria-hidden="true">✓</span><span class="lang-zh">1–60 秒刷新或手动模式</span><span class="lang-en" lang="en">1–60 second refresh or manual mode</span></li>
+            <li><span aria-hidden="true">✓</span><span class="lang-zh">24 小时、7 天、30 天与自定义历史</span><span class="lang-en" lang="en">24-hour, 7-day, 30-day, and custom history</span></li>
+            <li><span aria-hidden="true">✓</span><span class="lang-zh">能力探测与自动退避</span><span class="lang-en" lang="en">Capability detection and backoff</span></li>
+          </ul>
+        </div>
+        <div class="history-panel">
+          <div class="history-head">
+            <div><small>web-prod-01</small><strong>CPU Usage</strong></div>
+            <div class="range-switch"><span>1H</span><span class="active">24H</span><span>7D</span><span>30D</span></div>
+          </div>
+          <div class="history-chart" aria-hidden="true">
+            <div class="gap"><span>Data Gap · 42m</span></div>
+            <svg viewBox="0 0 660 210" preserveAspectRatio="none">
+              <path d="M0 174 C38 154 52 160 82 116 S134 74 171 111 S226 148 265 96 S316 67 354 87"></path>
+              <path d="M412 126 C445 111 460 72 501 84 S554 134 586 95 S627 48 660 61"></path>
+            </svg>
+            <div class="axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>Now</span></div>
+          </div>
+          <div class="history-summary">
+            <span><small>AVG</small><strong>28.4%</strong></span>
+            <span><small>MAX</small><strong>76.2%</strong></span>
+            <span><small>SAMPLES</small><strong>1,382</strong></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-shell content-section" id="security">
+        <div class="section-heading security-heading">
+          <div>
+            <span class="section-kicker"><span class="lang-zh">安全边界清晰</span><span class="lang-en" lang="en">Explicit security boundaries</span></span>
+            <h2><span class="lang-zh">连接由你发起，信任由你确认</span><span class="lang-en" lang="en">You initiate connections. You confirm trust.</span></h2>
+          </div>
+          <p>
+            <span class="lang-zh">没有“接受所有主机”的捷径。未知或变化的主机密钥都会暂停连接，等待明确确认。</span>
+            <span class="lang-en" lang="en">There is no “accept all hosts” shortcut. Unknown or changed host keys pause the connection for explicit confirmation.</span>
+          </p>
+        </div>
+        <div class="security-grid">
+          <article>
+            <div class="security-icon">⌁</div>
+            <h3><span class="lang-zh">无需服务端 Agent</span><span class="lang-en" lang="en">No server-side agent</span></h3>
+            <p><span class="lang-zh">通过 SSH 按需采集，不安装常驻守护进程或配套服务。</span><span class="lang-en" lang="en">Collect on demand over SSH without installing a resident daemon or companion service.</span></p>
+          </article>
+          <article>
+            <div class="security-icon">◇</div>
+            <h3><span class="lang-zh">严格主机身份确认</span><span class="lang-en" lang="en">Strict host verification</span></h3>
+            <p><span class="lang-zh">首次指纹确认、密钥变化对比和应用专属 trusted hosts 管理。</span><span class="lang-en" lang="en">First-use fingerprint confirmation, changed-key comparison, and app-specific trusted hosts.</span></p>
+          </article>
+          <article>
+            <div class="security-icon">⌘</div>
+            <h3><span class="lang-zh">凭据进入 Keychain</span><span class="lang-en" lang="en">Credentials in Keychain</span></h3>
+            <p><span class="lang-zh">密码、私钥正文和口令不会写入 SwiftData，也不会出现在命令行。</span><span class="lang-en" lang="en">Passwords, private-key bodies, and passphrases stay out of SwiftData and command lines.</span></p>
+          </article>
+          <article>
+            <div class="security-icon">◉</div>
+            <h3><span class="lang-zh">隐私模式与脱敏诊断</span><span class="lang-en" lang="en">Privacy mode and redaction</span></h3>
+            <p><span class="lang-zh">隐藏 IP，并提供可预览、可复制的脱敏 SSH 诊断。</span><span class="lang-en" lang="en">Hide IP addresses and preview redacted SSH diagnostics before copying.</span></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-shell platforms-section" id="platforms">
+        <div class="section-heading">
+          <div>
+            <span class="section-kicker"><span class="lang-zh">原生多端</span><span class="lang-en" lang="en">Native across devices</span></span>
+            <h2><span class="lang-zh">桌面深度，移动端专注</span><span class="lang-en" lang="en">Desktop depth. Mobile focus.</span></h2>
+          </div>
+          <p>
+            <span class="lang-zh">不是缩放后的同一个界面。Mac、iPhone 和 iPad 都采用适合各自操作方式的原生布局。</span>
+            <span class="lang-en" lang="en">Not one interface scaled three ways. Mac, iPhone, and iPad each use native layouts shaped for their interactions.</span>
+          </p>
+        </div>
+        <div class="platform-grid">
+          <article class="platform-card mac-card">
+            <div class="device mac-device" aria-hidden="true"><div><span></span><span></span><span></span></div></div>
+            <div class="platform-copy">
+              <span class="platform-label">macOS 14+</span>
+              <h3><span class="lang-zh">完整工作台</span><span class="lang-en" lang="en">Full workspace</span></h3>
+              <p><span class="lang-zh">监控、终端、SFTP、SSH Config、跳板机、代理、端口转发、录制与可选 AI 助手，以及开发中的 RDP 远程桌面。</span><span class="lang-en" lang="en">Monitoring, terminal, SFTP, SSH Config, jump hosts, proxies, forwarding, recording, optional AI, and RDP in development.</span></p>
+            </div>
+          </article>
+          <article class="platform-card mobile-card">
+            <div class="device phone-device" aria-hidden="true"><div><span></span><span></span><span></span></div></div>
+            <div class="platform-copy">
+              <span class="platform-label">iOS / iPadOS 18+</span>
+              <h3><span class="lang-zh">前台移动管理</span><span class="lang-en" lang="en">Focused mobile access</span></h3>
+              <p><span class="lang-zh">前台监控、SSH 终端与移动 SFTP。进入后台后连接会中断，回到前台后按需重连。</span><span class="lang-en" lang="en">Foreground monitoring, SSH terminal, and mobile SFTP. Connections pause in the background and reconnect on demand.</span></p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="download-section" id="download">
+        <div class="section-shell download-shell">
+          <div class="download-intro">
+            <span class="section-kicker"><span class="lang-zh">获取 ServerDash</span><span class="lang-en" lang="en">Get ServerDash</span></span>
+            <h2><span class="lang-zh">从一台服务器开始</span><span class="lang-en" lang="en">Start with one server</span></h2>
+            <p>
+              <span class="lang-zh">当前稳定版 <strong data-release-version>v1.0.4</strong>。下载前请阅读相应分发说明。</span>
+              <span class="lang-en" lang="en">Current stable release: <strong data-release-version>v1.0.4</strong>. Review the distribution notes before downloading.</span>
+            </p>
+            <span class="release-status" id="release-status" aria-live="polite">
+              <i></i><span class="lang-zh">已提供 v1.0.4 验证下载地址</span><span class="lang-en" lang="en">Verified v1.0.4 download links available</span>
+            </span>
+          </div>
+          <div class="download-grid">
+            <article class="download-card primary-download">
+              <div class="download-card-head">
+                <span class="os-mark">⌘</span>
+                <span class="recommended"><span class="lang-zh">推荐</span><span class="lang-en" lang="en">Recommended</span></span>
+              </div>
+              <h3>ServerDash for macOS</h3>
+              <p><span class="lang-zh">通用 DMG · Apple Silicon 与 Intel</span><span class="lang-en" lang="en">Universal DMG · Apple Silicon and Intel</span></p>
+              <a
+                class="button button-primary button-full"
+                id="download-macos"
+                href="https://github.com/xk-7/ServerDash/releases/download/v1.0.4/ServerDash-1.0.4-macOS.dmg"
+              >
+                <span class="lang-zh">下载 DMG</span><span class="lang-en" lang="en">Download DMG</span>
+                <span aria-hidden="true">↓</span>
+              </a>
+              <small class="download-note">
+                <span class="lang-zh">Ad-hoc 签名，未经 Apple 公证。首次打开时需在“隐私与安全性”中确认。</span>
+                <span class="lang-en" lang="en">Ad-hoc signed and not notarized. First launch requires confirmation in Privacy & Security.</span>
+              </small>
+            </article>
+            <article class="download-card">
+              <div class="download-card-head"><span class="os-mark">iP</span></div>
+              <h3>iPhone Simulator</h3>
+              <p><span class="lang-zh">用于 Xcode 26 · 不是实体设备安装包</span><span class="lang-en" lang="en">For Xcode 26 · Not for physical devices</span></p>
+              <a
+                class="button button-secondary button-full"
+                id="download-iphone"
+                href="https://github.com/xk-7/ServerDash/releases/download/v1.0.4/ServerDash-1.0.4-iPhone-Simulator.zip"
+              >
+                <span class="lang-zh">下载 ZIP</span><span class="lang-en" lang="en">Download ZIP</span>
+                <span aria-hidden="true">↓</span>
+              </a>
+            </article>
+            <article class="download-card">
+              <div class="download-card-head"><span class="os-mark">iPad</span></div>
+              <h3>iPad Simulator</h3>
+              <p><span class="lang-zh">用于 Xcode 26 · iPad 自适应界面</span><span class="lang-en" lang="en">For Xcode 26 · Adaptive iPad interface</span></p>
+              <a
+                class="button button-secondary button-full"
+                id="download-ipad"
+                href="https://github.com/xk-7/ServerDash/releases/download/v1.0.4/ServerDash-1.0.4-iPad-Simulator.zip"
+              >
+                <span class="lang-zh">下载 ZIP</span><span class="lang-en" lang="en">Download ZIP</span>
+                <span aria-hidden="true">↓</span>
+              </a>
+            </article>
+          </div>
+          <div class="release-links">
+            <a id="download-checksums" href="https://github.com/xk-7/ServerDash/releases/download/v1.0.4/ServerDash-1.0.4-SHA256SUMS.txt">
+              <span class="lang-zh">SHA-256 校验文件</span><span class="lang-en" lang="en">SHA-256 checksums</span><span aria-hidden="true">↗</span>
+            </a>
+            <a id="release-page" href="https://github.com/xk-7/ServerDash/releases/tag/v1.0.4">
+              <span class="lang-zh">查看发布说明</span><span class="lang-en" lang="en">View release notes</span><span aria-hidden="true">↗</span>
+            </a>
+            <a href="docs/getting-started.html#mobile">
+              <span class="lang-zh">模拟器安装指南</span><span class="lang-en" lang="en">Simulator install guide</span><span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="#top">
+            <img src="assets/serverdash-mark.svg" width="30" height="30" alt="">
+            <span>ServerDash</span>
+          </a>
+          <p><span class="lang-zh">原生 Apple 平台服务器工作台。</span><span class="lang-en" lang="en">A native server workspace for Apple platforms.</span></p>
+        </div>
+        <div class="footer-links">
+          <a href="docs/"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a>
+          <a href="releases.html"><span class="lang-zh">更新日志</span><span class="lang-en" lang="en">Releases</span></a>
+          <a href="https://github.com/xk-7/ServerDash">GitHub</a>
+          <a href="https://github.com/xk-7/ServerDash/issues"><span class="lang-zh">问题反馈</span><span class="lang-en" lang="en">Issues</span></a>
+          <a href="https://github.com/xk-7/ServerDash/releases"><span class="lang-zh">全部版本</span><span class="lang-en" lang="en">Releases</span></a>
+        </div>
+        <p class="copyright">© <span id="copyright-year">2026</span> ServerDash. Open source on GitHub.</p>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN" data-title-zh="安装与快速开始 — ServerDash 文档" data-title-en="Install & Quick Start — ServerDash Docs" data-description-zh="下载并安装 ServerDash，在 macOS 或 Simulator 中添加第一台 Linux SSH 主机。" data-description-en="Download and install ServerDash, then add your first Linux SSH host on macOS or Simulator.">
+<head>
+  <meta charset="utf-8"><script>(()=>{try{const t=localStorage.getItem("serverdash-theme");const l=localStorage.getItem("serverdash-language");const theme=t==="light"||t==="dark"?t:(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.dataset.theme=theme;document.documentElement.style.colorScheme=theme;if(l==="en"||l==="zh-CN")document.documentElement.lang=l;}catch{const d=matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.dataset.theme=d?"dark":"light";document.documentElement.style.colorScheme=d?"dark":"light";}})();</script><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#f7f9fc">
+  <meta name="description" content="下载并安装 ServerDash，在 macOS 或 Simulator 中添加第一台 Linux SSH 主机。">
+  <meta property="og:type" content="article"><meta property="og:title" content="安装与快速开始 — ServerDash 文档"><meta property="og:description" content="下载、校验、Gatekeeper、Simulator 与第一台 SSH 主机。">
+  <link rel="canonical" href="https://xk-7.github.io/ServerDash/docs/getting-started.html"><link rel="icon" href="../assets/serverdash-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css"><title>安装与快速开始 — ServerDash 文档</title><script src="../site.js" defer></script>
+</head>
+<body class="docs-body">
+  <a class="skip-link" href="#article"><span class="lang-zh">跳到文档内容</span><span class="lang-en" lang="en">Skip to documentation</span></a>
+  <header class="site-header"><nav class="nav-shell" aria-label="主导航" data-aria-zh="主导航" data-aria-en="Primary navigation">
+    <a class="brand" href="../" aria-label="ServerDash 首页" data-aria-zh="ServerDash 首页" data-aria-en="ServerDash home"><img src="../assets/serverdash-mark.svg" width="34" height="34" alt=""><span>ServerDash</span></a>
+    <div class="nav-links"><a href="../"><span class="lang-zh">首页</span><span class="lang-en" lang="en">Home</span></a><a href="./" aria-current="page"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a><a href="../releases.html"><span class="lang-zh">更新日志</span><span class="lang-en" lang="en">Releases</span></a><a href="../#download"><span class="lang-zh">下载</span><span class="lang-en" lang="en">Download</span></a></div>
+    <div class="nav-actions"><a class="mobile-nav-link" href="./" aria-current="page"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a><a class="mobile-nav-link" href="../releases.html"><span class="lang-zh">更新</span><span class="lang-en" lang="en">Releases</span></a><button type="button" class="theme-switch" data-theme-toggle aria-label="切换主题">☀</button><div class="language-switch" role="group" aria-label="语言" data-aria-zh="语言" data-aria-en="Language"><button type="button" data-set-lang="zh-CN" aria-pressed="true">中</button><button type="button" data-set-lang="en" aria-pressed="false">EN</button></div></div>
+  </nav></header>
+  <main>
+    <div class="docs-layout section-shell">
+      <aside class="docs-sidebar"><label class="docs-search"><span aria-hidden="true">⌕</span><input type="search" data-doc-search data-placeholder-zh="搜索文档…" data-placeholder-en="Search docs…" placeholder="搜索文档…" aria-label="搜索文档" data-aria-zh="搜索文档" data-aria-en="Search documentation"></label><span class="docs-sidebar-title"><span class="lang-zh">文档目录</span><span class="lang-en" lang="en">Documentation</span></span><nav>
+        <a href="./"><span class="lang-zh">概览</span><span class="lang-en" lang="en">Overview</span></a><a href="getting-started.html" aria-current="page"><span class="lang-zh">安装与快速开始</span><span class="lang-en" lang="en">Install & quick start</span></a><a href="machines-connections.html"><span class="lang-zh">机器与连接</span><span class="lang-en" lang="en">Machines & connections</span></a><a href="monitoring.html"><span class="lang-zh">资源监控</span><span class="lang-en" lang="en">Monitoring</span></a><a href="terminal.html"><span class="lang-zh">终端工作区</span><span class="lang-en" lang="en">Terminal workspace</span></a><a href="files-sftp.html"><span class="lang-zh">文件与 SFTP</span><span class="lang-en" lang="en">Files & SFTP</span></a><a href="macos-advanced.html"><span class="lang-zh">macOS 高级功能</span><span class="lang-en" lang="en">macOS advanced</span></a><a href="security-privacy.html"><span class="lang-zh">安全与隐私</span><span class="lang-en" lang="en">Security & privacy</span></a><a href="platforms-limitations.html"><span class="lang-zh">平台与限制</span><span class="lang-en" lang="en">Platforms & limits</span></a>
+      </nav></aside>
+      <div class="docs-main">
+        <section class="docs-hero"><div class="docs-breadcrumbs"><a href="../">ServerDash</a><i>/</i><a href="./"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a><i>/</i><span class="lang-zh">快速开始</span><span class="lang-en" lang="en">Quick start</span></div>
+          <div class="docs-hero-grid"><div><span class="section-kicker">01 · START</span><h1><span class="lang-zh">安装与快速开始</span><span class="lang-en" lang="en">Install & quick start</span></h1><p><span class="lang-zh">从正确的发布附件开始，核对校验值并连接第一台 Linux VPS。</span><span class="lang-en" lang="en">Choose the right release artifact, verify it, and connect your first Linux VPS.</span></p></div><span class="docs-version"><i></i>v1.0.4 · Build 9</span></div>
+        </section>
+        <details class="mobile-doc-nav"><summary><span class="lang-zh">本页与文档目录</span><span class="lang-en" lang="en">On this page & docs</span></summary><nav><a href="#macos"><span>macOS</span></a><a href="#mobile"><span>iPhone / iPad</span></a><a href="#first-server"><span class="lang-zh">第一台服务器</span><span class="lang-en" lang="en">First server</span></a><a href="machines-connections.html"><span class="lang-zh">下一模块</span><span class="lang-en" lang="en">Next module</span></a></nav></details>
+        <article class="docs-panel" id="article">
+          <p class="doc-lede"><span class="lang-zh">ServerDash 需要 macOS 14 或更高版本；移动端 Target 需要 iOS/iPadOS 18 或更高版本。公开 Release 可直接提供 macOS DMG，移动 ZIP 仅用于 Xcode Simulator。</span><span class="lang-en" lang="en">ServerDash requires macOS 14 or later. The mobile target requires iOS/iPadOS 18 or later. Public releases provide a macOS DMG, while mobile ZIP files are for Xcode Simulator only.</span></p>
+          <h2 id="macos"><span class="lang-zh">安装 macOS 版</span><span class="lang-en" lang="en">Install on macOS</span></h2>
+          <div class="platform-chips"><span class="platform-chip primary">macOS 14+</span><span class="platform-chip">Apple Silicon</span><span class="platform-chip">Intel</span></div>
+          <ol class="doc-steps">
+            <li><span class="lang-zh">从官网或 GitHub Release 下载 <code>ServerDash-1.0.4-macOS.dmg</code>。</span><span class="lang-en" lang="en">Download <code>ServerDash-1.0.4-macOS.dmg</code> from the website or GitHub Release.</span></li>
+            <li><span class="lang-zh">同时下载 SHA-256 文件，在终端运行校验命令并比对结果。</span><span class="lang-en" lang="en">Download the SHA-256 file and compare it with the result of the verification command.</span></li>
+            <li><span class="lang-zh">打开 DMG，将 ServerDash 拖入“应用程序”。</span><span class="lang-en" lang="en">Open the DMG and drag ServerDash into Applications.</span></li>
+            <li><span class="lang-zh">首次运行时按住 Control 点击 App 并选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。</span><span class="lang-en" lang="en">On first launch, Control-click the app and choose Open, or allow it in System Settings → Privacy & Security.</span></li>
+          </ol>
+          <div class="doc-code"><code>shasum -a 256 ServerDash-1.0.4-macOS.dmg</code></div>
+          <div class="doc-callout warning"><span class="callout-mark">!</span><div><strong><span class="lang-zh">为什么需要手动确认？</span><span class="lang-en" lang="en">Why is manual confirmation required?</span></strong><p><span class="lang-zh">当前 DMG 使用 ad-hoc 签名且未经 Apple 公证。它不是 Developer ID、Mac App Store 或已公证分发。</span><span class="lang-en" lang="en">The current DMG is ad-hoc signed and not notarized. It is not a Developer ID, Mac App Store, or notarized distribution.</span></p></div></div>
+
+          <h2 id="mobile"><span class="lang-zh">iPhone 与 iPad</span><span class="lang-en" lang="en">iPhone and iPad</span></h2>
+          <h3><span class="lang-zh">使用公开 Simulator ZIP</span><span class="lang-en" lang="en">Use the public Simulator ZIP</span></h3>
+          <ol class="doc-steps">
+            <li><span class="lang-zh">在安装 Xcode 26 的 Mac 上下载 iPhone 或 iPad Simulator ZIP。</span><span class="lang-en" lang="en">On a Mac with Xcode 26, download the iPhone or iPad Simulator ZIP.</span></li>
+            <li><span class="lang-zh">解压并启动对应的 iOS 18+ Simulator。</span><span class="lang-en" lang="en">Extract it and start a matching iOS 18+ Simulator.</span></li>
+            <li><span class="lang-zh">将解压出的 <code>ServerDashMobile.app</code> 拖入模拟器，或用 <code>simctl install</code> 安装。</span><span class="lang-en" lang="en">Drag <code>ServerDashMobile.app</code> into Simulator, or install it with <code>simctl install</code>.</span></li>
+          </ol>
+          <div class="doc-callout danger"><span class="callout-mark">×</span><div><strong><span class="lang-zh">不能安装到实体设备</span><span class="lang-en" lang="en">Not for physical devices</span></strong><p><span class="lang-zh">公开 ZIP 声明的是 iPhoneSimulator 平台。仓库不提供 IPA、TestFlight 或 App Store 包；实体设备需在 Xcode 中选择开发团队后自行运行。</span><span class="lang-en" lang="en">Public ZIP files target iPhoneSimulator. No IPA, TestFlight, or App Store package is provided. Physical devices require building from Xcode with your own development team.</span></p></div></div>
+
+          <h2 id="first-server"><span class="lang-zh">添加第一台服务器</span><span class="lang-en" lang="en">Add your first server</span></h2>
+          <ol class="doc-steps">
+            <li><span class="lang-zh">打开“机器”并选择添加 SSH 服务器。</span><span class="lang-en" lang="en">Open Machines and choose to add an SSH server.</span></li>
+            <li><span class="lang-zh">填写名称、主机地址、端口（默认 22）和用户名。</span><span class="lang-en" lang="en">Enter a name, host address, port (22 by default), and username.</span></li>
+            <li><span class="lang-zh">选择密码或私钥身份。移动端仅支持密码及导入的 OpenSSH Ed25519/RSA 私钥。</span><span class="lang-en" lang="en">Choose password or private-key authentication. Mobile supports passwords and imported OpenSSH Ed25519/RSA keys only.</span></li>
+            <li><span class="lang-zh">保存或测试连接。首次连接会暂停并显示主机指纹，请在确认来源后保存信任。</span><span class="lang-en" lang="en">Save or test. The first connection pauses to show the host fingerprint; save trust only after verifying it.</span></li>
+            <li><span class="lang-zh">从机器详情打开监控，或新建终端/SFTP 标签。</span><span class="lang-en" lang="en">Open monitoring from machine details, or create a terminal/SFTP tab.</span></li>
+          </ol>
+          <div class="doc-callout"><span class="callout-mark">i</span><div><strong><span class="lang-zh">配置可以离线保存</span><span class="lang-en" lang="en">Profiles can be saved offline</span></strong><p><span class="lang-zh">SSH 测试结果与是否保存机器相互独立。监控能力不可用也不必然阻止终端或基础 SFTP。</span><span class="lang-en" lang="en">Saving a machine is independent from the SSH test result. Unsupported monitoring does not necessarily block terminal or basic SFTP.</span></p></div></div>
+        </article>
+        <nav class="doc-page-nav"><a href="./"><small><span class="lang-zh">上一篇</span><span class="lang-en" lang="en">Previous</span></small><strong><span class="lang-zh">← 文档概览</span><span class="lang-en" lang="en">← Docs overview</span></strong></a><a href="machines-connections.html"><small><span class="lang-zh">下一篇</span><span class="lang-en" lang="en">Next</span></small><strong><span class="lang-zh">机器与连接 →</span><span class="lang-en" lang="en">Machines & connections →</span></strong></a></nav>
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="section-shell footer-grid"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/serverdash-mark.svg" width="30" height="30" alt=""><span>ServerDash</span></a></div><div class="footer-links"><a href="./"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a><a href="../releases.html"><span class="lang-zh">更新日志</span><span class="lang-en" lang="en">Releases</span></a><a href="https://github.com/xk-7/ServerDash">GitHub</a><a href="../#download"><span class="lang-zh">下载</span><span class="lang-en" lang="en">Download</span></a></div><p class="copyright">© <span id="copyright-year">2026</span> ServerDash.</p></div></footer>
+</body></html>

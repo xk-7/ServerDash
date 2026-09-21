@@ -1,0 +1,157 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-title-zh="ServerDash 文档 — 功能与使用指南"
+  data-title-en="ServerDash Docs — Features and Guides"
+  data-description-zh="ServerDash 1.0.4 双语使用文档：安装、连接、监控、终端、SFTP、安全、平台差异与限制。"
+  data-description-en="Bilingual ServerDash 1.0.4 documentation for installation, connections, monitoring, terminal, SFTP, security, platforms, and limitations."
+>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (() => {
+        try {
+          const savedTheme = localStorage.getItem("serverdash-theme");
+          const savedLanguage = localStorage.getItem("serverdash-language");
+          const theme = savedTheme === "light" || savedTheme === "dark"
+            ? savedTheme
+            : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+          if (savedLanguage === "en" || savedLanguage === "zh-CN") {
+            document.documentElement.lang = savedLanguage;
+          }
+        } catch {
+          const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        }
+      })();
+    </script>
+    <meta name="theme-color" content="#f7f9fc">
+    <meta name="description" content="ServerDash 1.0.4 双语使用文档：安装、连接、监控、终端、SFTP、安全、平台差异与限制。">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="ServerDash 文档 — 功能与使用指南">
+    <meta property="og:description" content="从安装第一台服务器到高级 macOS 运维工作流。">
+    <link rel="canonical" href="https://xk-7.github.io/ServerDash/docs/">
+    <link rel="icon" href="../assets/serverdash-mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="../styles.css?v=20260921d">
+    <link rel="stylesheet" href="docs.css?v=20260921d">
+    <title>ServerDash 文档 — 功能与使用指南</title>
+    <script src="../site.js?v=20260921d" defer></script>
+  </head>
+  <body class="docs-body">
+    <a class="skip-link" href="#docs-main"><span class="lang-zh">跳到文档内容</span><span class="lang-en" lang="en">Skip to documentation</span></a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="主导航" data-aria-zh="主导航" data-aria-en="Primary navigation">
+        <a class="brand" href="../" aria-label="ServerDash 首页" data-aria-zh="ServerDash 首页" data-aria-en="ServerDash home">
+          <img src="../assets/serverdash-mark.svg" width="34" height="34" alt=""><span>ServerDash</span>
+        </a>
+        <div class="nav-links">
+          <a href="../"><span class="lang-zh">首页</span><span class="lang-en" lang="en">Home</span></a>
+          <a href="./" aria-current="page"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a>
+          <a href="../releases.html"><span class="lang-zh">更新日志</span><span class="lang-en" lang="en">Releases</span></a>
+          <a href="../#download"><span class="lang-zh">下载</span><span class="lang-en" lang="en">Download</span></a>
+        </div>
+        <div class="nav-actions">
+          <a class="mobile-nav-link" href="./" aria-current="page"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a>
+          <a class="mobile-nav-link" href="../releases.html"><span class="lang-zh">更新</span><span class="lang-en" lang="en">Releases</span></a>
+          <button type="button" class="theme-switch" data-theme-toggle aria-label="切换主题">☀</button>
+          <div class="language-switch" role="group" aria-label="语言" data-aria-zh="语言" data-aria-en="Language">
+            <button type="button" data-set-lang="zh-CN" aria-pressed="true">中</button>
+            <button type="button" data-set-lang="en" aria-pressed="false">EN</button>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <main id="docs-main">
+      <div class="docs-layout section-shell">
+        <aside class="docs-sidebar">
+          <label class="docs-search"><span aria-hidden="true">⌕</span><input type="search" data-doc-search data-placeholder-zh="搜索文档…" data-placeholder-en="Search docs…" placeholder="搜索文档…" aria-label="搜索文档" data-aria-zh="搜索文档" data-aria-en="Search documentation"></label>
+          <span class="docs-sidebar-title"><span class="lang-zh">文档目录</span><span class="lang-en" lang="en">Documentation</span></span>
+          <nav aria-label="文档目录" data-aria-zh="文档目录" data-aria-en="Documentation">
+            <a href="./" aria-current="page"><span class="lang-zh">概览</span><span class="lang-en" lang="en">Overview</span></a>
+            <a href="getting-started.html"><span class="lang-zh">安装与快速开始</span><span class="lang-en" lang="en">Install & quick start</span></a>
+            <a href="machines-connections.html"><span class="lang-zh">机器与连接</span><span class="lang-en" lang="en">Machines & connections</span></a>
+            <a href="monitoring.html"><span class="lang-zh">资源监控</span><span class="lang-en" lang="en">Monitoring</span></a>
+            <a href="terminal.html"><span class="lang-zh">终端工作区</span><span class="lang-en" lang="en">Terminal workspace</span></a>
+            <a href="files-sftp.html"><span class="lang-zh">文件与 SFTP</span><span class="lang-en" lang="en">Files & SFTP</span></a>
+            <a href="macos-advanced.html"><span class="lang-zh">macOS 高级功能</span><span class="lang-en" lang="en">macOS advanced</span></a>
+            <a href="security-privacy.html"><span class="lang-zh">安全与隐私</span><span class="lang-en" lang="en">Security & privacy</span></a>
+            <a href="platforms-limitations.html"><span class="lang-zh">平台与限制</span><span class="lang-en" lang="en">Platforms & limits</span></a>
+          </nav>
+        </aside>
+
+        <div class="docs-main">
+          <section class="docs-hero">
+            <div class="docs-breadcrumbs"><a href="../">ServerDash</a><i>/</i><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></div>
+            <div class="docs-hero-grid">
+              <div>
+                <span class="section-kicker"><span class="lang-zh">产品文档</span><span class="lang-en" lang="en">Product documentation</span></span>
+                <h1><span class="lang-zh">从连接第一台服务器开始</span><span class="lang-en" lang="en">Start with your first server</span></h1>
+                <p><span class="lang-zh">覆盖 ServerDash 1.0.4 的安装、主机管理、监控、终端、文件、安全与平台边界。每项状态都用文字说明，不以颜色替代结论。</span><span class="lang-en" lang="en">Installation, machines, monitoring, terminal, files, security, and platform boundaries for ServerDash 1.0.4. Every status is stated in text, never color alone.</span></p>
+              </div>
+              <span class="docs-version"><i></i><span class="lang-zh">稳定基线</span><span class="lang-en" lang="en">Stable baseline</span> · v1.0.4</span>
+            </div>
+          </section>
+          <details class="mobile-doc-nav">
+            <summary><span class="lang-zh">浏览文档目录</span><span class="lang-en" lang="en">Browse documentation</span></summary>
+            <nav>
+              <a href="./" aria-current="page"><span class="lang-zh">概览</span><span class="lang-en" lang="en">Overview</span></a>
+              <a href="getting-started.html"><span class="lang-zh">安装与快速开始</span><span class="lang-en" lang="en">Install & quick start</span></a>
+              <a href="machines-connections.html"><span class="lang-zh">机器与连接</span><span class="lang-en" lang="en">Machines & connections</span></a>
+              <a href="monitoring.html"><span class="lang-zh">资源监控</span><span class="lang-en" lang="en">Monitoring</span></a>
+              <a href="terminal.html"><span class="lang-zh">终端工作区</span><span class="lang-en" lang="en">Terminal workspace</span></a>
+              <a href="files-sftp.html"><span class="lang-zh">文件与 SFTP</span><span class="lang-en" lang="en">Files & SFTP</span></a>
+              <a href="macos-advanced.html"><span class="lang-zh">macOS 高级功能</span><span class="lang-en" lang="en">macOS advanced</span></a>
+              <a href="security-privacy.html"><span class="lang-zh">安全与隐私</span><span class="lang-en" lang="en">Security & privacy</span></a>
+              <a href="platforms-limitations.html"><span class="lang-zh">平台与限制</span><span class="lang-en" lang="en">Platforms & limits</span></a>
+            </nav>
+          </details>
+
+          <article class="docs-panel">
+            <div class="docs-quick-start">
+              <div>
+                <h2><span class="lang-zh">第一次使用？约 5 分钟完成基础连接</span><span class="lang-en" lang="en">New here? Make a basic connection in about five minutes</span></h2>
+                <p><span class="lang-zh">下载安装、添加 SSH 主机、确认指纹，然后进入监控、终端或 SFTP。</span><span class="lang-en" lang="en">Install, add an SSH host, verify its fingerprint, then open monitoring, terminal, or SFTP.</span></p>
+              </div>
+              <a class="button" href="getting-started.html"><span class="lang-zh">快速开始</span><span class="lang-en" lang="en">Quick start</span><span aria-hidden="true">→</span></a>
+            </div>
+
+            <div class="doc-callout warning">
+              <span class="callout-mark">!</span>
+              <div><strong><span class="lang-zh">当前分发状态</span><span class="lang-en" lang="en">Current distribution status</span></strong><p><span class="lang-zh">macOS DMG 为 ad-hoc 签名且未经 Apple 公证；公开的 iPhone/iPad ZIP 仅供 Xcode Simulator，不能安装到实体设备。</span><span class="lang-en" lang="en">The macOS DMG is ad-hoc signed and not notarized. Public iPhone/iPad ZIP files are for Xcode Simulator only and cannot be installed on physical devices.</span></p></div>
+            </div>
+
+            <h2 id="modules"><span class="lang-zh">按功能模块浏览</span><span class="lang-en" lang="en">Browse by module</span></h2>
+            <div class="docs-card-grid">
+              <a class="docs-card" href="getting-started.html"><span class="docs-card-number">01 · START</span><h2><span class="lang-zh">安装与快速开始</span><span class="lang-en" lang="en">Install & quick start</span></h2><p><span class="lang-zh">下载、校验、Gatekeeper、Simulator 和第一台 SSH 主机。</span><span class="lang-en" lang="en">Downloads, checksums, Gatekeeper, Simulator, and your first SSH host.</span></p><span class="docs-card-link"><span class="lang-zh">打开指南</span><span class="lang-en" lang="en">Open guide</span> →</span></a>
+              <a class="docs-card" href="machines-connections.html"><span class="docs-card-number">02 · CONNECT</span><h2><span class="lang-zh">机器与连接</span><span class="lang-en" lang="en">Machines & connections</span></h2><p><span class="lang-zh">分组、身份、密钥、主机信任、SSH Config 与会话迁移。</span><span class="lang-en" lang="en">Groups, identities, keys, host trust, SSH Config, and session migration.</span></p><span class="docs-card-link"><span class="lang-zh">查看连接文档</span><span class="lang-en" lang="en">Read connection docs</span> →</span></a>
+              <a class="docs-card" href="monitoring.html"><span class="docs-card-number">03 · OBSERVE</span><h2><span class="lang-zh">资源监控</span><span class="lang-en" lang="en">Monitoring</span></h2><p><span class="lang-zh">Linux 指标、能力探测、刷新调度、历史数据与 Data Gap。</span><span class="lang-en" lang="en">Linux metrics, capability probing, refresh scheduling, history, and Data Gaps.</span></p><span class="docs-card-link"><span class="lang-zh">查看监控文档</span><span class="lang-en" lang="en">Read monitoring docs</span> →</span></a>
+              <a class="docs-card" href="terminal.html"><span class="docs-card-number">04 · OPERATE</span><h2><span class="lang-zh">终端工作区</span><span class="lang-en" lang="en">Terminal workspace</span></h2><p><span class="lang-zh">多标签、16 面板、4×4 网格、搜索、高亮、历史与批量命令。</span><span class="lang-en" lang="en">Tabs, 16 panes, 4×4 grids, search, highlighting, history, and batch commands.</span></p><span class="docs-card-link"><span class="lang-zh">查看终端文档</span><span class="lang-en" lang="en">Read terminal docs</span> →</span></a>
+              <a class="docs-card" href="files-sftp.html"><span class="docs-card-number">05 · TRANSFER</span><h2><span class="lang-zh">文件与 SFTP</span><span class="lang-en" lang="en">Files & SFTP</span></h2><p><span class="lang-zh">基础传输、冲突策略、远程编辑、本地副本和目录同步。</span><span class="lang-en" lang="en">Transfers, conflict policies, remote editing, local copies, and directory sync.</span></p><span class="docs-card-link"><span class="lang-zh">查看文件文档</span><span class="lang-en" lang="en">Read file docs</span> →</span></a>
+              <a class="docs-card" href="macos-advanced.html"><span class="docs-card-number">06 · ADVANCED</span><h2><span class="lang-zh">macOS 高级功能</span><span class="lang-en" lang="en">macOS advanced</span></h2><p><span class="lang-zh">跳板、代理、转发、串口、VNC、WebDAV、录制和可选 AI。</span><span class="lang-en" lang="en">Jump hosts, proxies, forwarding, serial, VNC, WebDAV, recording, and optional AI.</span></p><span class="docs-card-link"><span class="lang-zh">查看高级功能</span><span class="lang-en" lang="en">Explore advanced features</span> →</span></a>
+              <a class="docs-card" href="security-privacy.html"><span class="docs-card-number">07 · PROTECT</span><h2><span class="lang-zh">安全与隐私</span><span class="lang-en" lang="en">Security & privacy</span></h2><p><span class="lang-zh">Keychain、SwiftData、主机指纹、隐私模式、诊断和数据边界。</span><span class="lang-en" lang="en">Keychain, SwiftData, fingerprints, privacy mode, diagnostics, and data boundaries.</span></p><span class="docs-card-link"><span class="lang-zh">查看安全文档</span><span class="lang-en" lang="en">Read security docs</span> →</span></a>
+              <a class="docs-card" href="platforms-limitations.html"><span class="docs-card-number">08 · SCOPE</span><h2><span class="lang-zh">平台与限制</span><span class="lang-en" lang="en">Platforms & limits</span></h2><p><span class="lang-zh">三端功能矩阵、后台行为、验证状态及开发中的 RDP。</span><span class="lang-en" lang="en">Platform matrix, background behavior, validation status, and RDP in development.</span></p><span class="docs-card-link"><span class="lang-zh">核对功能边界</span><span class="lang-en" lang="en">Review product boundaries</span> →</span></a>
+            </div>
+
+            <h2 id="support"><span class="lang-zh">支持范围</span><span class="lang-en" lang="en">Support scope</span></h2>
+            <div class="doc-grid">
+              <div class="doc-card"><h3><span class="lang-zh">首要支持</span><span class="lang-en" lang="en">Primary targets</span></h3><p>Ubuntu LTS · Debian Stable</p></div>
+              <div class="doc-card"><h3><span class="lang-zh">按能力兼容</span><span class="lang-en" lang="en">Capability-gated</span></h3><p>AlmaLinux · Rocky Linux</p></div>
+            </div>
+            <p class="docs-source-note"><span class="lang-zh">文档稳定基线：ServerDash 1.0.4（Build 9）。未发布的 CHANGELOG 内容不计入当前功能。</span><span class="lang-en" lang="en">Documentation baseline: ServerDash 1.0.4 (Build 9). Unreleased CHANGELOG entries are not treated as current features.</span></p>
+          </article>
+          <nav class="doc-page-nav" aria-label="文档分页" data-aria-zh="文档分页" data-aria-en="Documentation pagination">
+            <a href="../"><small><span class="lang-zh">返回</span><span class="lang-en" lang="en">Back</span></small><strong><span class="lang-zh">官网首页</span><span class="lang-en" lang="en">Website home</span></strong></a>
+            <a href="getting-started.html"><small><span class="lang-zh">下一篇</span><span class="lang-en" lang="en">Next</span></small><strong><span class="lang-zh">安装与快速开始 →</span><span class="lang-en" lang="en">Install & quick start →</span></strong></a>
+          </nav>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer"><div class="section-shell footer-grid"><div class="footer-brand"><a class="brand" href="../"><img src="../assets/serverdash-mark.svg" width="30" height="30" alt=""><span>ServerDash</span></a><p><span class="lang-zh">原生 Apple 平台服务器工作台。</span><span class="lang-en" lang="en">A native server workspace for Apple platforms.</span></p></div><div class="footer-links"><a href="./"><span class="lang-zh">文档</span><span class="lang-en" lang="en">Docs</span></a><a href="../releases.html"><span class="lang-zh">更新日志</span><span class="lang-en" lang="en">Releases</span></a><a href="https://github.com/xk-7/ServerDash">GitHub</a><a href="../#download"><span class="lang-zh">下载</span><span class="lang-en" lang="en">Download</span></a></div><p class="copyright">© <span id="copyright-year">2026</span> ServerDash.</p></div></footer>
+  </body>
+</html>
