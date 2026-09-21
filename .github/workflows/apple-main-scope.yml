@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate Apple-only tree
+    name: Apple main scope / Validate Apple-only tree
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
