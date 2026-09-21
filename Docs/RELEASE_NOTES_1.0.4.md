@@ -44,6 +44,8 @@ macOS 继续使用 ad-hoc 签名且不进行 Apple 公证。iPhone 与 iPad 附�
 ## 验证状态
 
 - 发布前提交 `4d4d9fc` 的 GitHub Actions `macOS` 工作流通过严格并发、第一方零告警、macOS 测试、RDP 原生探针，以及通用 macOS Release 与 iOS Simulator/Device 兼容构建。
-- 本版本附件由干净 `main` 上的 `Scripts/build-release-artifacts.sh 1.0.4` 生成。三端元数据均为 1.0.4（Build 9）。完整清单见 [macOS 工作台验收记录](WORKBENCH_UI_QA.md) 与 [构建可靠性验收记录](MAC_BUILD_RELIABILITY_QA.md)。
+- `Scripts/build-release-artifacts.sh 1.0.4` 在干净 `main` 上完成。三端元数据均为 1.0.4（Build 9）；macOS 与模拟器应用包含 arm64、x86_64，设备兼容构建为 arm64。
+- macOS 应用通过 `codesign --verify --deep --strict`（ad-hoc）；DMG 通过 `hdiutil verify`；四项下载文件通过 `ServerDash-1.0.4-SHA256SUMS.txt` 回读校验。
+- 发布构建日志为 `/tmp/serverdash-v104-release-build.log`。完整清单见 [macOS 工作台验收记录](WORKBENCH_UI_QA.md) 与 [构建可靠性验收记录](MAC_BUILD_RELIABILITY_QA.md)。
 
 设备或真实服务验收仍需现场完成，不能由自动化夹具替代：实际 VoiceOver 朗读与顺序、实体串口拔插/占用/重连、真实 SSH/VNC/RDP 服务互通、真实 WebDAV 强 ETag 与双设备同步，以及实体 iPhone/iPad 兼容性。

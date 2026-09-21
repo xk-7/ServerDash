@@ -81,11 +81,11 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 
 ### 发布构建与附件
 
-- [ ] `Scripts/build-release-artifacts.sh 1.0.4` 完成 macOS 通用 Release、iPhone Simulator Release、iPad Simulator Release 与无签名 iOS Device Release 兼容构建。最终产物位于 `dist/v1.0.4/`。
-- [ ] macOS、模拟器与设备兼容 App 的 `CFBundleShortVersionString` 均为 1.0.4，`CFBundleVersion` 均为 9。
-- [ ] macOS 与模拟器二进制均包含 arm64、x86_64；无签名 iOS Device 兼容二进制为 arm64。
-- [ ] macOS 构建目录和挂载 DMG 内的 `ServerDash.app` 均通过 `codesign --verify --deep --strict`；签名为 ad-hoc。DMG 通过 `hdiutil verify`。
-- [ ] macOS DMG、两份模拟器 ZIP 与离线发布通知共四项文件均通过 `ServerDash-1.0.4-SHA256SUMS.txt` 回读校验。
+- [x] `Scripts/build-release-artifacts.sh 1.0.4` 完成 macOS 通用 Release、iPhone Simulator Release、iPad Simulator Release 与无签名 iOS Device Release 兼容构建。最终产物位于 `dist/v1.0.4/`。构建日志为 `/tmp/serverdash-v104-release-build.log`。
+- [x] macOS、模拟器与设备兼容 App 的 `CFBundleShortVersionString` 均为 1.0.4，`CFBundleVersion` 均为 9。
+- [x] macOS 与模拟器二进制均包含 arm64、x86_64；无签名 iOS Device 兼容二进制为 arm64。
+- [x] macOS 构建目录和挂载 DMG 内的 `ServerDash.app` 均通过 `codesign --verify --deep --strict`；签名为 ad-hoc。DMG 通过 `hdiutil verify`。
+- [x] macOS DMG、两份模拟器 ZIP 与离线发布通知共四项文件均通过 `ServerDash-1.0.4-SHA256SUMS.txt` 回读校验。
 
 ### 现场验收
 

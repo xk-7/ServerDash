@@ -42,8 +42,8 @@
 ### Verification
 
 - GitHub Actions `macOS` 工作流在发布前提交 `4d4d9fc` 上通过：严格并发、第一方零告警、macOS 测试、RDP 原生探针，以及通用 macOS Release 与 iOS Simulator/Device 兼容构建。
-- 本版本附件由 `Scripts/build-release-artifacts.sh 1.0.4` 在干净 `main` 上生成，详见 `Docs/WORKBENCH_UI_QA.md` 与 `Docs/RELEASE_NOTES_1.0.4.md`。
-- 实际 VoiceOver、实体串口、实体移动设备及真实 SSH/VNC/RDP/WebDAV 服务互通需要现场验收，不标记为通过。RDP 仍为开发中。
+- `Scripts/build-release-artifacts.sh 1.0.4` 完成三端 Release 与无签名 iOS Device 兼容构建；元数据均为 1.0.4（Build 9）。macOS 与模拟器为 arm64/x86_64，设备兼容构建为 arm64。四项附件通过 `ServerDash-1.0.4-SHA256SUMS.txt` 回读校验。
+- 实际 VoiceOver、实体串口、实体移动设备及真实 SSH/VNC/RDP/WebDAV 服务互通需要现场验收，不标记为通过。RDP 仍为开发中。详见 `Docs/WORKBENCH_UI_QA.md` 和 `Docs/RELEASE_NOTES_1.0.4.md`。
 
 ## 1.0.3 - 2026-09-13
 
