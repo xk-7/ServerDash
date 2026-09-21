@@ -11,6 +11,7 @@
 		04307D5E2F9EF3313EC93B49 /* TrustedHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F07DD8B9A1DEB2284D8A85B /* TrustedHosts.swift */; };
 		0514A7F1D10C4AAC28A9C614 /* ConnectionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */; };
 		0539460E0924052B348BBC1E /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 74A8C9C138CB51DC85E3205D /* Carbon.framework */; };
+		0AB1FC4D7A3264559999FC11 /* windows-self-signed.pem in Resources */ = {isa = PBXBuildFile; fileRef = 65817D53C671FAEC8753F42E /* windows-self-signed.pem */; };
 		0B53C768D1C73AFCE328A891 /* SessionTransferAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84C18F14529B79AC72BFE6C /* SessionTransferAdapters.swift */; };
 		0C8C732B5BF9E36736B37F56 /* themes.json in Resources */ = {isa = PBXBuildFile; fileRef = B3FD877C201A30AA5ED80CBC /* themes.json */; };
 		0C95646D8A167F5BD9E02937 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
@@ -78,6 +79,7 @@
 		6F3C12EEA55C1C4300BFE88E /* WorkbenchConnectionEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5774100FDD8A6084BE8B12FE /* WorkbenchConnectionEditors.swift */; };
 		6F88E9F3E181A4BB69546BBE /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE7A846E41C1811B95FF217 /* TerminalView.swift */; };
 		73111A0A7719FBA8E3D61B8B /* WorkbenchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCAE610E52C4F8C40C6B5C1C /* WorkbenchSettingsView.swift */; };
+		73A398F9A875577579B82C05 /* windows-machine-ca-chain.pem in Resources */ = {isa = PBXBuildFile; fileRef = 7F3F0D17227FBA7C1A4BED44 /* windows-machine-ca-chain.pem */; };
 		73F9575B5907267841440793 /* RemoteEditorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99BAB55891E4B7F4F99FC091 /* RemoteEditorPresentation.swift */; };
 		747F16C826F2F2995C8903B0 /* WorkbenchConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE46638BDFC54266CABEEB2 /* WorkbenchConnectionTests.swift */; };
 		7532F226A90C28F34F30A40D /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 986E939883D94F272BACCCAD /* AVFoundation.framework */; };
@@ -264,6 +266,7 @@
 		5E40E4D9B4517CE05FFE15D3 /* MacSettingsPolishTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSettingsPolishTests.swift; sourceTree = "<group>"; };
 		60BA641DDE28754C1E7F14AA /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
 		62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessions.swift; sourceTree = "<group>"; };
+		65817D53C671FAEC8753F42E /* windows-self-signed.pem */ = {isa = PBXFileReference; path = "windows-self-signed.pem"; sourceTree = "<group>"; };
 		659F4C0B2DD0598AE5F53192 /* AIAssistantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAssistantTests.swift; sourceTree = "<group>"; };
 		6799CCA26301904D11052EBA /* SessionTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransfer.swift; sourceTree = "<group>"; };
 		69ADA9AF1D698CBD1A5FF7DC /* ProfessionalConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnectionsView.swift; sourceTree = "<group>"; };
@@ -289,6 +292,7 @@
 		7AAFA5678E5B901A677C53A8 /* SessionTransferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransferTests.swift; sourceTree = "<group>"; };
 		7B84A7CD97572085B52C03BD /* ServerDashMobileTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ServerDashMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7E4088492B04AE62E36AA30E /* TerminalWorkspaceActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceActions.swift; sourceTree = "<group>"; };
+		7F3F0D17227FBA7C1A4BED44 /* windows-machine-ca-chain.pem */ = {isa = PBXFileReference; path = "windows-machine-ca-chain.pem"; sourceTree = "<group>"; };
 		806865341DB0BF81BA8FCD8D /* ConfigurationSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationSyncTests.swift; sourceTree = "<group>"; };
 		81275B3E207BA4B0BC138698 /* RecordingFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFormat.swift; sourceTree = "<group>"; };
 		82B02CC9C16C723EF6361720 /* ConfigurationSyncCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationSyncCatalog.swift; sourceTree = "<group>"; };
@@ -612,6 +616,8 @@
 			isa = PBXGroup;
 			children = (
 				C5A08E9F4FAADDC4B34214E9 /* self-signed.pem */,
+				7F3F0D17227FBA7C1A4BED44 /* windows-machine-ca-chain.pem */,
+				65817D53C671FAEC8753F42E /* windows-self-signed.pem */,
 			);
 			path = RDP;
 			sourceTree = "<group>";
@@ -845,6 +851,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				2B73275DB61BD850F060AEAB /* self-signed.pem in Resources */,
+				73A398F9A875577579B82C05 /* windows-machine-ca-chain.pem in Resources */,
+				0AB1FC4D7A3264559999FC11 /* windows-self-signed.pem in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
