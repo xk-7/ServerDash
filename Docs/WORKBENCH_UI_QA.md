@@ -68,6 +68,35 @@ SwiftData 使用内存容器或测试临时数据库，测试主机均为合成�
 
 本轮没有修改 SwiftData V5、同步包、凭据格式、连接协议或移动端能力白名单。实体 iPhone/iPad、VoiceOver 实际朗读、实体串口、真实 VNC/RDP/SSH 服务及真实 WebDAV 双设备同步未执行，仍列为设备验收项。
 
+## 2026-09-21 v1.0.4 构建自举、审查收口与 RDP 修复验收
+
+本轮在 `main` 发布，版本元数据为 1.0.4（Build 9），Swift 语言模式保持 5.9。macOS 应用和测试目标继续启用 `SWIFT_STRICT_CONCURRENCY=complete`；SwiftData V5、同步包、凭据格式、连接协议及移动端能力白名单未改变。RDP 仍为开发中。
+
+### 最终自动化证据
+
+- GitHub Actions run `35564546008`（提交 `4d4d9fc`）通过 Strict build and tests 与 Main release smoke。
+- 严格并发门禁要求第一方源码与测试编译告警为 0；RDP 原生探针随同一作业执行。
+- 构建自举、缓存损坏/并发/保留策略的隔离测试见 `Docs/MAC_BUILD_RELIABILITY_QA.md`。
+- 本版本新增或收紧的回归覆盖 hop 扫描 fail-closed、工作组 NLA 域名、自签发 RDP 证书链，以及 iOS 兼容目标不依赖 FreeRDP 符号。
+
+### 发布构建与附件
+
+- [ ] `Scripts/build-release-artifacts.sh 1.0.4` 完成 macOS 通用 Release、iPhone Simulator Release、iPad Simulator Release 与无签名 iOS Device Release 兼容构建。最终产物位于 `dist/v1.0.4/`。
+- [ ] macOS、模拟器与设备兼容 App 的 `CFBundleShortVersionString` 均为 1.0.4，`CFBundleVersion` 均为 9。
+- [ ] macOS 与模拟器二进制均包含 arm64、x86_64；无签名 iOS Device 兼容二进制为 arm64。
+- [ ] macOS 构建目录和挂载 DMG 内的 `ServerDash.app` 均通过 `codesign --verify --deep --strict`；签名为 ad-hoc。DMG 通过 `hdiutil verify`。
+- [ ] macOS DMG、两份模拟器 ZIP 与离线发布通知共四项文件均通过 `ServerDash-1.0.4-SHA256SUMS.txt` 回读校验。
+
+### 现场验收
+
+以下项目需要设备或真实服务，保持未通过状态：
+
+- [ ] 实际 VoiceOver 朗读、顺序与完整键盘导航。
+- [ ] 实体串口拔插、端口占用、异常断开、恢复和不同驱动/高波特率。
+- [ ] 真实 SSH 多因素认证、VNC 系统屏幕共享、RDP Windows 互操作及长时间会话退出。
+- [ ] 真实 WebDAV 强 ETag、双设备同步、冲突、断网恢复与恢复密钥交换。
+- [ ] 实体 iPhone/iPad 的兼容性、前后台行为和辅助功能。
+
 ## 2026-09-13 v1.0.3 并发与退出可靠性验收
 
 本轮使用 `codex/mac-concurrency-stability` 分支，版本元数据为 1.0.3（Build 8），Swift 语言模式保持 5.9。macOS 应用和测试目标启用 `SWIFT_STRICT_CONCURRENCY=complete`；SwiftData V5、同步包、凭据格式、连接协议及移动端能力白名单未改变。

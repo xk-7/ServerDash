@@ -206,7 +206,7 @@ The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, `Vendor/swift-nio-s
 
 ## Development Status
 
-Version 1.0.3 keeps Swift 5.9 and enables complete strict-concurrency checking for the macOS app and tests. The final clean gate reports zero first-party compiler warnings, and all 411 macOS tests pass. Universal macOS and Simulator Release builds, the unsigned iOS Device compatibility build, artifacts, signatures, archives, checksums, and isolated UI fixtures have completed verification. See the [1.0.3 release notes](Docs/RELEASE_NOTES_1.0.3.md) and [macOS workbench acceptance record](Docs/WORKBENCH_UI_QA.md).
+Version 1.0.4 keeps Swift 5.9 and complete strict-concurrency checking for the macOS app and tests. It ships the on-demand RDP bootstrap, fail-closed SSH review follow-ups, and Windows RDP certificate/NLA fixes while leaving RDP marked as in development. See the [1.0.4 release notes](Docs/RELEASE_NOTES_1.0.4.md) and [macOS workbench acceptance record](Docs/WORKBENCH_UI_QA.md).
 
 The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 65 tests, including 41 shared session-migration cases for format mapping, malformed-input handling, duplicate detection, skipped-session reporting, ZIP traversal/symlink hardening, secret omission, Keychain authorization, cancellation, and rollback; the remaining tests cover connection contracts, local Citadel password/key/PTY integration, actionable authentication-error mapping, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
 
@@ -216,7 +216,7 @@ See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for r
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
-Latest stable release: [ServerDash 1.0.3](https://github.com/xk-7/ServerDash/releases/tag/v1.0.3) (build 8). The macOS artifact remains ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
+Latest stable release: [ServerDash 1.0.4](https://github.com/xk-7/ServerDash/releases/tag/v1.0.4) (build 9). The macOS artifact remains ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run
 
@@ -296,10 +296,10 @@ branch, and legacy-worktree overrides are listed by the
 Build the macOS, iPhone Simulator, and iPad Simulator GitHub Release artifacts, plus an unsigned iOS Device Release compile check:
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.3
+./Scripts/build-release-artifacts.sh 1.0.4
 ```
 
-Artifacts and SHA-256 checksums are written to `dist/v1.0.3/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files and the [1.0.3 release notes](Docs/RELEASE_NOTES_1.0.3.md) for the completed verification record.
+Artifacts and SHA-256 checksums are written to `dist/v1.0.4/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files and the [1.0.4 release notes](Docs/RELEASE_NOTES_1.0.4.md) for the completed verification record.
 
 ## Project Layout
 

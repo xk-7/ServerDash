@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 1.0.4 - 2026-09-21
+
 ### Added
 
 - 增加 macOS RDP 依赖自举：新工作区通过共享 Scheme 构建时会校验或从锁定源码生成通用 XCFramework，无需预先复制二进制产物。
@@ -13,8 +15,11 @@
 
 ### Changed
 
+- 将 macOS 与移动端版本元数据提升至 1.0.4（Build 9）；Swift 语言模式保持 5.9，macOS 应用及测试继续启用完整严格并发检查。
 - FreeRDP 构建改用内容寻址共享缓存；最终产物目录仅保存 XCFramework、必需头文件和清单，下载、锁、最近使用顺序和活动工作区租约采用独立目录。
 - macOS 开发及发布命令统一使用共享 Scheme；直接使用 `xcodebuild -target` 不再是受支持的入口。
+- Windows RDP 证书检查接受自签发叶证书与自签发链，并在工作组/本地账户未填域时用单标签证书 CN 作为 NLA 域。RDP 仍为开发中能力，不作为已完成的 Windows 互操作验收。
+- NLA 域名推断改为纯 Swift，使 `ServerDashMobile` 在不链接 FreeRDP 桥的情况下保持可编译。
 
 ### Fixed
 
@@ -22,6 +27,23 @@
 - 修复缓存目录存在但内容损坏、架构不完整或工具链已经变化时仍可能被误判为可用的问题。
 - 修复 Scheme 预操作继承其他 Apple 平台部署目标、Bash 3.2 空数组清理以及原生负载嵌入临时构建前缀造成的冷构建失败与不可搬移问题。
 - 缓存与底层构建目录增加所有权校验，避免错误的路径覆盖值清理无关文件；活动工作区租约避免并行构建期间裁掉仍在使用的产物。
+- 修复仪表盘刷新控件丢失，以及录制排空在回调前未等待待写入完成的问题。
+- 修复 hop 扫描测试在分离任务中修改捕获变量触发的第一方严格并发告警。
+- 修复工作组 Windows 主机以 IP 连接时，FreeRDP 证书链被误判为损坏，以及空域 NTLMv2 无法通过 NLA 的问题。
+
+### Security
+
+- 直接 SSH 连接固定 `-F none`；临时私钥改为唯一落盘路径并在启动计划中清理。
+- 跳板第 2 跳及之后的主机密钥扫描仅使用已授权前缀；缺少 `ssh-keyscan` 时 fail-closed。
+- ProxyCommand 拒绝控制字符；Keychain 项使用 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` 且不可 iCloud 同步。
+- LocalCommand 握手使用独立标记；导入路线应用 `SSHConfigRouteImport.endpoint`；哈希改为流式 SHA-256。
+- 隧道停止与等待队列在阻塞头节点时不再卡住后续清理。SwiftData V5、同步包和凭据格式保持不变。
+
+### Verification
+
+- GitHub Actions `macOS` 工作流在发布前提交 `4d4d9fc` 上通过：严格并发、第一方零告警、macOS 测试、RDP 原生探针，以及通用 macOS Release 与 iOS Simulator/Device 兼容构建。
+- 本版本附件由 `Scripts/build-release-artifacts.sh 1.0.4` 在干净 `main` 上生成，详见 `Docs/WORKBENCH_UI_QA.md` 与 `Docs/RELEASE_NOTES_1.0.4.md`。
+- 实际 VoiceOver、实体串口、实体移动设备及真实 SSH/VNC/RDP/WebDAV 服务互通需要现场验收，不标记为通过。RDP 仍为开发中。
 
 ## 1.0.3 - 2026-09-13
 
