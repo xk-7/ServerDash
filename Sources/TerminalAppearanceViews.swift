@@ -151,7 +151,7 @@ struct TerminalSessionAppearanceView: View {
             }
             .padding(AppleDesign.Spacing.md)
         }
-        .frame(width: 900, height: 700)
+        .frame(minWidth: 640, idealWidth: 900, minHeight: 440, idealHeight: 700)
     }
 }
 

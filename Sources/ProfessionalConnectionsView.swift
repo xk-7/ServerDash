@@ -2,9 +2,27 @@ import AppKit
 import SwiftData
 import SwiftUI
 
+struct SSHConfigImportSource: Equatable, Sendable {
+    let defaultURL: URL
+    let allowsFileSelection: Bool
+
+    static var userConfiguration: Self {
+        Self(
+            defaultURL: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".ssh/config"),
+            allowsFileSelection: true
+        )
+    }
+
+    static func isolated(_ url: URL) -> Self {
+        Self(defaultURL: url, allowsFileSelection: false)
+    }
+}
+
 struct ProfessionalConnectionsView: View {
     var initialServerID: UUID? = nil
     var routeOnly = false
+    var importSource: SSHConfigImportSource = .userConfiguration
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
@@ -37,10 +55,6 @@ struct ProfessionalConnectionsView: View {
     @State private var operationError: String?
     @State private var pendingUnsafeRule: PortForwardRuleRecord?
 
-    private var defaultConfigURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".ssh/config")
-    }
     private var visibleRoutes: [ConnectionRouteRecord] {
         routeOnly ? routeRecords.filter { $0.serverID == initialServerID } : routeRecords
     }
@@ -60,8 +74,8 @@ struct ProfessionalConnectionsView: View {
         }
         .task {
             if configURL == nil,
-               FileManager.default.isReadableFile(atPath: defaultConfigURL.path) {
-                configURL = defaultConfigURL
+               FileManager.default.isReadableFile(atPath: importSource.defaultURL.path) {
+                configURL = importSource.defaultURL
             }
             if selectedServerID == nil { selectedServerID = initialServerID ?? servers.first?.id }
             if routeOnly, let proxy = visibleRoutes.first?.route?.proxy {
@@ -119,10 +133,17 @@ struct ProfessionalConnectionsView: View {
                         .textSelection(.enabled)
                     Spacer()
                     Button("选择文件") { chooseConfig() }
+                        .disabled(!importSource.allowsFileSelection)
+                        .accessibilityHint(
+                            importSource.allowsFileSelection
+                                ? "选择要导入的 SSH Config 文件"
+                                : "隔离验收仅使用合成 SSH Config"
+                        )
                 }
                 HStack {
                     TextField("Host 别名", text: $alias)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("mac.editor.route.alias")
                     Picker("绑定服务器", selection: $selectedServerID) {
                         Text("选择服务器").tag(Optional<UUID>.none)
                         ForEach(servers) { server in
@@ -427,6 +448,7 @@ struct ProfessionalConnectionsView: View {
     }
 
     private func chooseConfig() {
+        guard importSource.allowsFileSelection else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false

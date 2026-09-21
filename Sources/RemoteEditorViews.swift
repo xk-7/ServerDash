@@ -422,24 +422,15 @@ struct RemoteEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
     @State private var searchStep = 0
+    @State private var showingSearch = false
     @FocusState private var searchFocused: Bool
     @State private var pendingClose: UUID?
     @State private var pendingReload: UUID?
     @State private var saveAsID: UUID?
     @State private var saveAsPath = ""
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Label("远程文件编辑器", systemImage: "doc.text").font(.headline)
-                Spacer()
-                Button("关闭标签") {
-                    if let doc=store.selected { if doc.isDirty {pendingClose=doc.id} else {store.close(doc.id)} }
-                }.keyboardShortcut("w").disabled(store.selectedID == nil || store.busy)
-                if store.busy { ProgressView().controlSize(.small); Button("取消操作") { store.cancel() } }
-                Button("完成") { Task { if await store.flushDrafts() { dismiss() } } }
-                    .keyboardShortcut(.cancelAction).disabled(store.flushingDrafts)
-            }.padding(14)
-            Divider()
+        NavigationStack {
+            VStack(spacing: 0) {
             ScrollView(.horizontal) {
                 HStack(spacing: 3) {
                     ForEach(store.documents) { doc in
@@ -456,18 +447,32 @@ struct RemoteEditorView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading) { Text(doc.title).font(.headline); Text("\(doc.serverName) · \(doc.path)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer(minLength: 10)
-                    Button { searchFocused = true } label: { Image(systemName:"magnifyingglass") }.keyboardShortcut("f").help("搜索文件")
-                    TextField("搜索", text: $search).textFieldStyle(.roundedBorder).frame(width:140).focused($searchFocused).onSubmit { searchStep += 1 }
-                    Button { searchStep -= 1 } label: { Image(systemName:"chevron.up") }.help("上一个匹配").disabled(search.isEmpty)
-                    Button { searchStep += 1 } label: { Image(systemName:"chevron.down") }.help("下一个匹配").disabled(search.isEmpty)
-                    Picker("编码", selection: Binding(get: { doc.encoding }, set: { store.changeEncoding($0,id:doc.id) })) {
-                        ForEach(RemoteTextEncoding.allCases) { Text($0.rawValue).tag($0) }
-                    }.frame(width:160)
-                    Button { if doc.isDirty { pendingReload = doc.id } else { store.reload(doc.id) } } label: { Image(systemName:"arrow.clockwise") }.help("重新读取远程文件").disabled(!store.canSave(doc.id))
-                    Button { exportLocal(doc) } label: { Image(systemName:"square.and.arrow.down") }.help("下载当前文档与本地更改")
-                    Button("另存为…") { saveAsID=doc.id; saveAsPath=doc.path }.disabled(!store.canSave(doc.id))
-                    Button("保存") { store.save(doc.id) }.buttonStyle(.borderedProminent).keyboardShortcut("s").disabled(!store.canSave(doc.id) || !doc.isDirty)
+                    if store.busy {
+                        ProgressView().controlSize(.small)
+                        Text(store.message).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }.padding(12)
+                if showingSearch {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("在当前文档中搜索", text: $search)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($searchFocused)
+                            .onSubmit { searchStep += 1 }
+                            .accessibilityIdentifier("mac.remote-editor.search.field")
+                        Button { searchStep -= 1 } label: { Image(systemName: "chevron.up") }
+                            .help("上一个匹配")
+                            .disabled(search.isEmpty)
+                        Button { searchStep += 1 } label: { Image(systemName: "chevron.down") }
+                            .help("下一个匹配")
+                            .disabled(search.isEmpty)
+                        Button { closeSearch() } label: { Image(systemName: "xmark") }
+                            .help("关闭搜索")
+                            .accessibilityLabel("关闭搜索")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
                 Divider()
                 NativeRemoteCodeEditor(store: store, documentID: doc.id, text: doc.text, search: search, searchStep: searchStep)
                     .id(doc.id).frame(maxWidth:.infinity,maxHeight:.infinity).clipped()
@@ -484,9 +489,86 @@ struct RemoteEditorView: View {
                         .font(.caption).foregroundStyle(.secondary).padding(8)
                 }
             } else { ContentUnavailableView("未打开文件", systemImage:"doc.text", description:Text("在 SFTP 文件面板中选择“编辑”。")).frame(maxHeight:.infinity) }
+            }
+            .navigationTitle("远程文件编辑器")
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("远程文件编辑器")
+                        .font(.headline)
+                        .accessibilityIdentifier("mac.remote-editor.title")
+                }
+                ToolbarItemGroup(placement: .automatic) {
+                    if store.busy {
+                        Button("取消操作", systemImage: "stop.circle") { store.cancel() }
+                    }
+                    Button {
+                        showSearch()
+                    } label: {
+                        Label("搜索", systemImage: "magnifyingglass")
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .disabled(store.selectedID == nil)
+                    .accessibilityIdentifier("mac.remote-editor.search")
+
+                    if let doc = store.selected {
+                        Menu {
+                            Picker("文本编码", selection: Binding(
+                                get: { doc.encoding },
+                                set: { store.changeEncoding($0, id: doc.id) }
+                            )) {
+                                ForEach(RemoteTextEncoding.allCases) { encoding in
+                                    Text(encoding.rawValue).tag(encoding)
+                                }
+                            }
+                            Divider()
+                            Button("重新载入", systemImage: "arrow.clockwise") {
+                                if doc.isDirty { pendingReload = doc.id } else { store.reload(doc.id) }
+                            }
+                            .disabled(!store.canSave(doc.id))
+                            Button("导出本地副本…", systemImage: "square.and.arrow.down") { exportLocal(doc) }
+                            Button("另存为远程文件…", systemImage: "doc.badge.plus") {
+                                saveAsID = doc.id
+                                saveAsPath = doc.path
+                            }
+                            .disabled(!store.canSave(doc.id))
+                        } label: {
+                            Label("更多文档操作", systemImage: "ellipsis.circle")
+                        }
+                        .accessibilityIdentifier("mac.remote-editor.more")
+
+                        Button {
+                            store.save(doc.id)
+                        } label: {
+                            Label("保存", systemImage: "square.and.arrow.down")
+                        }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(!store.canSave(doc.id) || !doc.isDirty)
+                        .accessibilityIdentifier("mac.remote-editor.save")
+
+                        Button {
+                            closeSelectedDocument()
+                        } label: {
+                            Label("关闭文档", systemImage: "xmark")
+                        }
+                        .keyboardShortcut("w", modifiers: .command)
+                        .disabled(store.busy)
+                    }
+
+                    Button("完成") {
+                        Task { if await store.flushDrafts() { dismiss() } }
+                    }
+                    .disabled(store.flushingDrafts)
+                    .accessibilityIdentifier("mac.remote-editor.done")
+                }
+            }
         }
-        .frame(minWidth: 860, idealWidth:1100, minHeight:600, idealHeight:740)
+        .frame(minWidth: 560, idealWidth: 820, minHeight: 400, idealHeight: 540)
         .background(Color.appGround)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("mac.remote-editor.container")
+        .onExitCommand {
+            if showingSearch { closeSearch() }
+        }
         .alert("文件操作失败",isPresented:Binding(get:{store.error != nil},set:{if !$0 {store.error=nil}})) { Button("好") {store.error=nil} } message:{Text(store.error ?? "")}
         .confirmationDialog("关闭并丢弃这个文件的本地草稿？",isPresented:Binding(get:{pendingClose != nil},set:{if !$0 {pendingClose=nil}})) {
             Button("丢弃并关闭",role:.destructive) {if let id=pendingClose {store.close(id)}; pendingClose=nil}
@@ -510,6 +592,23 @@ struct RemoteEditorView: View {
         // This also prevents an onDisappear write from racing application shutdown.
         .interactiveDismissDisabled(true)
     }
+
+    private func showSearch() {
+        showingSearch = true
+        Task { @MainActor in searchFocused = true }
+    }
+
+    private func closeSearch() {
+        searchFocused = false
+        showingSearch = false
+        search = ""
+    }
+
+    private func closeSelectedDocument() {
+        guard let doc = store.selected else { return }
+        if doc.isDirty { pendingClose = doc.id } else { store.close(doc.id) }
+    }
+
     private func exportLocal(_ doc: RemoteEditorDraft) {
         let panel=NSSavePanel();panel.nameFieldStringValue=doc.title
         guard panel.runModal() == .OK,let url=panel.url else{return}
@@ -564,7 +663,10 @@ struct LocalFileCopiesView:View {
                 Spacer()
                 if store.busy{Button("取消操作"){store.cancel()}}
             }
-        }.padding(20).frame(width:900,height:520).background(Color.appGround)
+        }
+        .padding(20)
+        .frame(minWidth: 520, idealWidth: 820, minHeight: 360, idealHeight: 520)
+        .background(Color.appGround)
         .alert("本地副本操作失败",isPresented:Binding(get:{store.error != nil},set:{if !$0{store.error=nil}})){
             Button("好"){store.error=nil}
         }message:{Text(store.error ?? "")}

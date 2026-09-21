@@ -89,7 +89,7 @@ check_generated_project() {
     GENERATED_CHECK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/serverdash-xcodegen-check.XXXXXX")"
     generated_root="${GENERATED_CHECK_ROOT}"
     cp "${ROOT_DIR}/project.yml" "${generated_root}/project.yml"
-    for item in Sources Native Vendor Resources Tests Mobile; do
+    for item in Sources Native Vendor Resources Tests MacUITests Mobile; do
         ln -s "${ROOT_DIR}/${item}" "${generated_root}/${item}"
     done
 
@@ -225,9 +225,51 @@ if [[ "${CI:-false}" != "true" && "${GITHUB_ACTIONS:-false}" != "true" && "${PRI
         "The primary worktree must remain on main; found ${PRIMARY_BRANCH:-detached HEAD}."
 fi
 
-if [[ "${BRANCH}" == "codex/windows-installer-preview" ]]; then
+LOWER_BRANCH="$(printf '%s' "${BRANCH}" | tr '[:upper:]' '[:lower:]')"
+case "${LOWER_BRANCH}" in
+    windows/*|codex/windows-*)
+        require_override_or_fail SERVERDASH_ALLOW_WINDOWS_BRANCH \
+            "The Windows client branch is not an Apple build workspace."
+        ;;
+esac
+
+WINDOWS_CLIENT_PATHS=""
+while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    lower_path="$(printf '%s' "${path}" | tr '[:upper:]' '[:lower:]')"
+    case "${lower_path}" in
+        windows|windows/*|desktop|desktop/*|docs/windows.md|docs/windowsclient*.md|docs/windows-client*.md|docs/*windows-client*.md|docs/architecturedecisions/*windows-winui-client*.md|.github/workflows/windows*.yml|.github/workflows/windows*.yaml|*.cs|*.csproj|*.fs|*.fsproj|*.vb|*.vbproj|*.sln|*.slnx|*.wapproj|*.xaml|*.vcxproj|*.props|*.targets|*.nuspec|*.ps1|*.cmd|*.bat|*/package.appxmanifest|package.appxmanifest|*.msix|*.msixbundle)
+            WINDOWS_CLIENT_PATHS="${WINDOWS_CLIENT_PATHS}${path}
+"
+            ;;
+    esac
+done <<EOF
+$(git -C "${ROOT_DIR}" ls-files)
+EOF
+WINDOWS_CLIENT_CONTENT_PATHS=""
+while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    lower_path="$(printf '%s' "${path}" | tr '[:upper:]' '[:lower:]')"
+    case "${lower_path}" in
+        docs/branch_policy.md|scripts/check-apple-main-scope.sh|scripts/test-apple-main-scope.sh|scripts/dev-doctor.sh|scripts/test-dev-workflow.sh)
+            continue
+            ;;
+        docs/*.md|docs/*.markdown|docs/*.rst|docs/*.txt|docs/*.adoc|docs/*.asciidoc|scripts/*.sh)
+            ;;
+        *)
+            continue
+            ;;
+    esac
+    if grep -Eiq '(^|[^[:alnum:]_])(winui([[:space:]]*3)?|msix(bundle)?|wpf|windows[[:space:]]+app[[:space:]]+sdk|dotnet|csproj|msbuild|nuget|pwsh|powershell)([^[:alnum:]_]|$)' "${ROOT_DIR}/${path}"; then
+        WINDOWS_CLIENT_CONTENT_PATHS="${WINDOWS_CLIENT_CONTENT_PATHS}${path}
+"
+    fi
+done <<EOF
+$(git -C "${ROOT_DIR}" ls-files)
+EOF
+if [[ -n "${WINDOWS_CLIENT_PATHS}${WINDOWS_CLIENT_CONTENT_PATHS}" ]]; then
     require_override_or_fail SERVERDASH_ALLOW_WINDOWS_BRANCH \
-        "The Windows preview branch is not an Apple build workspace."
+        "This checkout contains an independent Windows client tree and is not an Apple build workspace."
 fi
 
 if [[ -z "${BRANCH}" && "${CI:-false}" != "true" && "${GITHUB_ACTIONS:-false}" != "true" ]]; then

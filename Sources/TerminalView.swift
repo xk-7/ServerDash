@@ -109,6 +109,7 @@ struct TerminalWorkspaceView: View {
 
     var body: some View {
         TerminalWorkspaceContent(registry: appState.terminalRegistry, workspace: appState.terminalRegistry.workspace)
+            .accessibilityIdentifier("terminal.workspace")
     }
 }
 
@@ -459,7 +460,7 @@ private struct TerminalWorkspaceContent: View {
                 onSSH: { appState.openTerminal(for: $0) }, onRDP: { appState.openRDP($0) })
         }
         .inspector(isPresented: Binding(get: { showingInspector && capabilities.canInspect && TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) }, set: { if TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) { showingInspector = $0 } })) {
-            inspectorContent
+            inspectorContent(presentation: .sidebar)
                 .inspectorColumnWidth(min: 300, ideal: inspectorWidth, max: 560)
                 .background { GeometryReader { geometry in
                     Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in
@@ -470,7 +471,8 @@ private struct TerminalWorkspaceContent: View {
                 } }
         }
         .popover(isPresented: Binding(get: { showingInspector && capabilities.canInspect && !TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) }, set: { if !TerminalInspectorLayout.usesSidebar(contentWidth: workspaceWidth) { showingInspector = $0 } })) {
-            inspectorContent.frame(width: min(440, max(300, workspaceWidth - 40)), height: 520)
+            inspectorContent(presentation: .popover)
+                .frame(width: min(440, max(300, workspaceWidth - 40)), height: 520)
         }
         .onReceive(NotificationCenter.default.publisher(for: .terminalShowAI)) { notification in
             guard let id = notification.object as? UUID, let controller = registry.controller(for: id) else { return }
@@ -532,7 +534,7 @@ private struct TerminalWorkspaceContent: View {
         }
     }
 
-    @ViewBuilder private var inspectorContent: some View {
+    @ViewBuilder private func inspectorContent(presentation: TerminalInspectorPresentation) -> some View {
             if let tab = workspace.selectedTab, tab.kind == .rdp, let controller = appState.rdpControllers[tab.activePane] {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("RDP 状态", systemImage: "desktopcomputer").font(.headline)
@@ -548,6 +550,7 @@ private struct TerminalWorkspaceContent: View {
                     selectedTab: $inspectorTab,
                     onInsert: { requestSnippet($0, into: selectedController.id, execute: false) },
                     onRun: { requestSnippet($0, into: selectedController.id, execute: true) },
+                    presentation: presentation,
                     isActivePane: { workspace.selectedTab?.kind == .terminal && workspace.activePane == selectedController.id }
                 )
 
@@ -615,6 +618,13 @@ struct TerminalSnippetRequest {
     }
 }
 
+enum TerminalInspectorPresentation: Equatable {
+    case sidebar
+    case popover
+
+    var isCompact: Bool { self == .popover }
+}
+
 struct TerminalInspectorView: View {
     @EnvironmentObject private var appState: AppState
     let server: ServerRecord
@@ -625,6 +635,7 @@ struct TerminalInspectorView: View {
     @Binding var selectedTab: String
     let onInsert: (CommandSnippetRecord) -> Void
     let onRun: (CommandSnippetRecord) -> Void
+    var presentation: TerminalInspectorPresentation = .sidebar
     var isActivePane: () -> Bool = { true }
     @State private var search = ""
     @State private var copiedSnippetID: UUID?
@@ -640,28 +651,41 @@ struct TerminalInspectorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
-                Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
-                Text(controller.serverName)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Picker("检查器内容", selection: $selectedTab) {
-                    ForEach(TerminalInspectorSection.allCases) { section in
-                        Label(section.title, systemImage: section.icon).tag(section.rawValue)
+            VStack(alignment: .leading, spacing: presentation.isCompact ? AppleDesign.Spacing.xs : AppleDesign.Spacing.sm) {
+                if presentation.isCompact {
+                    HStack(spacing: AppleDesign.Spacing.sm) {
+                        Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 0)
+                        Text(controller.serverName)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                }.pickerStyle(.menu)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    Picker("检查器内容", selection: $selectedTab) {
                         ForEach(TerminalInspectorSection.allCases) { section in
-                            Button { selectedTab = section.rawValue } label: {
-                                Image(systemName: section.icon).frame(width: 28, height: 28)
-                            }.buttonStyle(.borderless).foregroundStyle(selectedTab == section.rawValue ? Color.accentColor : .secondary)
-                                .help(section.title).accessibilityLabel(section.title)
-                                .accessibilityAddTraits(selectedTab == section.rawValue ? .isSelected : [])
+                            Label(section.title, systemImage: section.icon).tag(section.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("检查器内容")
+                } else {
+                    Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
+                    Text(controller.serverName)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(TerminalInspectorSection.allCases) { section in
+                                Button { selectedTab = section.rawValue } label: {
+                                    Image(systemName: section.icon).frame(width: 28, height: 28)
+                                }.buttonStyle(.borderless).foregroundStyle(selectedTab == section.rawValue ? Color.accentColor : .secondary)
+                                    .help(section.title).accessibilityLabel(section.title)
+                                    .accessibilityAddTraits(selectedTab == section.rawValue ? .isSelected : [])
+                            }
                         }
                     }
                 }
             }
-            .padding(AppleDesign.Spacing.md)
+            .padding(presentation.isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md)
             Divider()
             if selectedTab == "ai" {
                 AIAssistantPanel(controller: controller, isActive: isActivePane)
@@ -669,15 +693,16 @@ struct TerminalInspectorView: View {
                 SFTPBrowserView(controller: appState.inspectorFileController(for: server), compact: true)
                     .id(server.id)
             } else { ScrollView {
-                VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                VStack(alignment: .leading, spacing: presentation.isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md) {
                     if selectedTab == "snippets" { snippetContent } else { statusContent }
                 }
-                .padding(AppleDesign.Spacing.md)
+                .padding(presentation.isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             }
         }
         .background(Color.appGround)
+        .controlSize(presentation.isCompact ? .small : .regular)
     }
 
     @ViewBuilder private var statusContent: some View {
@@ -945,6 +970,7 @@ private struct TerminalTab: View {
     @ObservedObject var controller: TerminalSessionController
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
     @AppStorage("hideIPInformation") private var hideIPInformation = false
     let title: String
     let isSelected: Bool
@@ -1029,7 +1055,7 @@ private struct TerminalTab: View {
             }
         }
         .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : AppleDesign.quick, value: isHovering)
+        .animation((reduceMotion || accessibilityOverrides.reduceMotion) ? nil : AppleDesign.quick, value: isHovering)
         .help(tooltip)
     }
 

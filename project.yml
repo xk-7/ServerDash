@@ -90,6 +90,77 @@ targets:
         SWIFT_STRICT_CONCURRENCY: complete
         SWIFT_UPCOMING_FEATURE_INFER_SENDABLE_FROM_CAPTURES: YES
 
+  ServerDashMacQA:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Native
+        excludes:
+          - Tests
+      - path: Vendor/RDP
+        buildPhase: resources
+        excludes:
+          - dependencies.sha256
+      - path: Resources
+        buildPhase: resources
+    dependencies:
+      - package: SwiftTerm
+      - package: ZIPFoundation
+      - framework: .build/rdp/ServerDashRDP.xcframework
+        embed: false
+      - sdk: MetalKit.framework
+      - sdk: Carbon.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreAudio.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: Security.framework
+      - sdk: libc++.tbd
+      - sdk: libz.tbd
+      - sdk: libiconv.tbd
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.macqa
+        PRODUCT_NAME: ServerDashMacQA
+        MARKETING_VERSION: "1.0.4"
+        CURRENT_PROJECT_VERSION: 9
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.9"
+        SWIFT_STRICT_CONCURRENCY: complete
+        SWIFT_UPCOMING_FEATURE_INFER_SENDABLE_FROM_CAPTURES: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) SERVERDASH_MAC_QA"
+        SWIFT_OBJC_BRIDGING_HEADER: Native/SDRDPClient.h
+        HEADER_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/.build/rdp/universal/Headers/freerdp3
+          - $(SRCROOT)/.build/rdp/universal/Headers/winpr3
+          - $(SRCROOT)/.build/rdp/universal/Headers
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ServerDash Mac QA
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        SKIP_INSTALL: YES
+
+  ServerDashMacQAUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: MacUITests
+    dependencies:
+      - target: ServerDashMacQA
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverdash.app.macqa.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+        SWIFT_STRICT_CONCURRENCY: complete
+        SWIFT_UPCOMING_FEATURE_INFER_SENDABLE_FROM_CAPTURES: YES
+
   ServerDashMobile:
     type: application
     platform: iOS
@@ -178,6 +249,24 @@ schemes:
     test:
       targets:
         - ServerDashTests
+  ServerDashMacQA:
+    build:
+      targets:
+        ServerDashMacQA: all
+        ServerDashMacQAUITests: [test]
+      preActions:
+        - name: Prepare verified RDP dependencies
+          settingsTarget: ServerDashMacQA
+          script: |
+            set -euo pipefail
+            /bin/bash "${SRCROOT}/Scripts/ensure-rdp-dependencies.sh"
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: ServerDashMacQAUITests
+          parallelizable: false
   ServerDashMobile:
     build:
       targets:

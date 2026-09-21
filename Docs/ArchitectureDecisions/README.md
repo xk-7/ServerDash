@@ -15,6 +15,10 @@ has passed.
 | [ADR-0006: Isolated macOS RDP](ADR-0006-macos-rdp-isolation.md) | Accepted for development; release gates open | RDP engine, V4 model, workspace and security |
 | [ServerDash 1.0 scope and non-goals](../PRODUCT_SCOPE_1.0.md) | Frozen | S01-S06 and later product planning |
 
+Repository product-line isolation is defined by the bilingual
+[branch policy](../BRANCH_POLICY.md): `main` is Apple-only, while independent
+Windows client work remains on long-lived Windows branches.
+
 ## Decision identifiers covered by S00
 
 - `D-01`: ADR-0001

@@ -83,10 +83,18 @@ struct AIConfiguration: Codable, Equatable, Sendable {
 }
 
 enum AIKeychain {
+    static let serviceName: String = {
+#if SERVERDASH_MAC_QA
+        "com.serverdash.app.macqa.ai.api-key"
+#else
+        "com.serverdash.ai.api-key"
+#endif
+    }()
+
     private static func baseQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.serverdash.ai.api-key",
+            kSecAttrService as String: serviceName,
             kSecAttrAccount as String: "active-provider",
             kSecAttrSynchronizable as String: false
         ]

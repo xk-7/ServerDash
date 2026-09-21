@@ -30,7 +30,13 @@ struct ServerDashApp: App {
         WindowGroup(id: "main") {
             Group {
                 if let container = persistence.container {
-                    ContentView()
+                    Group {
+                        if MacUIFixture.isEnabled {
+                            MacUIFixtureRootView()
+                        } else {
+                            ContentView()
+                        }
+                    }
                         .environmentObject(appState)
                         .environmentObject(monitorLayoutStore)
                         .modelContainer(container)

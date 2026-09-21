@@ -22,129 +22,153 @@ struct DashboardOverviewView: View {
     }
 
     var body: some View {
-        let visibleServers = query.apply(to: servers)
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppleDesign.Spacing.lg) {
-                AppleWorkspaceHeader(
-                    title: "仪表盘",
-                    subtitle: "服务器运行状况，一目了然。",
-                    symbol: "gauge.with.dots.needle.50percent"
-                ) {
-                    HStack(spacing: AppleDesign.Spacing.xs) {
-                        Button {
-                            Task { await appState.refreshAll(servers) }
-                        } label: {
-                            Label("刷新全部", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(servers.isEmpty)
-                        .help("刷新全部服务器")
-                        .accessibilityLabel("刷新全部服务器")
-                        .accessibilityIdentifier("dashboard.refresh.all")
+        GeometryReader { geometry in
+            let metrics = MacWorkspaceMetrics(size: geometry.size)
+            let visibleServers = query.apply(to: servers)
+            ScrollView {
+                VStack(alignment: .leading, spacing: metrics.isCompact ? AppleDesign.Spacing.md : AppleDesign.Spacing.lg) {
+                    AppleWorkspaceHeader(
+                        title: "仪表盘",
+                        subtitle: "服务器运行状况，一目了然。",
+                        symbol: "gauge.with.dots.needle.50percent"
+                    ) { EmptyView() }
 
-                        Menu {
-                            Button("仅重试失败的监控", systemImage: "arrow.clockwise.circle") {
-                                Task { await appState.refreshAll(servers, failedOnly: true) }
+                    if servers.isEmpty {
+                        ContentUnavailableView {
+                            Label("连接你的第一台服务器", systemImage: "server.rack")
+                        } description: {
+                            Text("集中查看资源状态，打开 SSH 终端，或管理远程文件。")
+                        } actions: {
+                            Button("添加服务器", systemImage: "plus", action: onAdd)
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: metrics.isCompact ? 280 : 360)
+                        .applePanel()
+                    } else {
+                        DashboardFleetSummary(
+                            serverCount: servers.count,
+                            state: appState.fleetSummaryState,
+                            compact: metrics.isCompact
+                        )
+
+                        if metrics.isCompact {
+                            DashboardCompactFilters(
+                                servers: servers,
+                                search: $searchText,
+                                group: $selectedGroup,
+                                tag: $selectedTag,
+                                sortRawValue: $sortRawValue,
+                                monitoringRawValue: $monitoringRawValue
+                            )
+                        } else {
+                            ServerBrowserControls(
+                                servers: servers, search: $searchText, group: $selectedGroup,
+                                tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
+                            )
+                        }
+
+                        HStack {
+                            Text("服务器概览")
+                                .font(.headline)
+                                .accessibilityAddTraits(.isHeader)
+                            if query.hasFilters {
+                                Text("\(DisplayFormat.integer(visibleServers.count)) / \(DisplayFormat.integer(servers.count)) 台")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
-                        } label: {
-                            Image(systemName: "chevron.down")
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .disabled(servers.isEmpty)
-                        .help("更多刷新选项")
-                        .accessibilityLabel("更多刷新选项")
-                        .accessibilityIdentifier("dashboard.refresh.options")
-
-                        Button("添加服务器", systemImage: "plus", action: onAdd)
-                            .buttonStyle(.borderedProminent)
-                    }
-                }
-
-                if servers.isEmpty {
-                    ContentUnavailableView {
-                        Label("连接你的第一台服务器", systemImage: "server.rack")
-                    } description: {
-                        Text("集中查看资源状态，打开 SSH 终端，或管理远程文件。")
-                    } actions: {
-                        Button("添加服务器", systemImage: "plus", action: onAdd)
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 360)
-                    .applePanel()
-                } else {
-                    DashboardFleetSummary(serverCount: servers.count, state: appState.fleetSummaryState)
-
-                    ServerBrowserControls(
-                        servers: servers, search: $searchText, group: $selectedGroup,
-                        tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
-                    )
-
-                    HStack {
-                        Text("服务器概览")
-                            .font(.headline)
-                            .accessibilityAddTraits(.isHeader)
-                        if query.hasFilters {
-                            Text("\(DisplayFormat.integer(visibleServers.count)) / \(DisplayFormat.integer(servers.count)) 台")
+                            Spacer()
+                            Label(
+                                appState.refreshInterval > 0
+                                    ? "每 \(DisplayFormat.integer(Int(appState.refreshInterval))) 秒刷新"
+                                    : "手动刷新",
+                                systemImage: appState.refreshInterval > 0 ? "arrow.clockwise" : "pause.circle"
+                            )
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Label(
-                            appState.refreshInterval > 0
-                                ? "每 \(DisplayFormat.integer(Int(appState.refreshInterval))) 秒刷新"
-                                : "手动刷新",
-                            systemImage: appState.refreshInterval > 0 ? "arrow.clockwise" : "pause.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
 
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 280), spacing: AppleDesign.Spacing.md, alignment: .top)],
-                        alignment: .leading,
-                        spacing: AppleDesign.Spacing.md
-                    ) {
-                        ForEach(visibleServers) { server in
-                            VPSSummaryCard(
-                                server: server,
-                                runtime: appState.runtime(for: server),
-                                refreshInterval: appState.refreshInterval,
-                                onVisibilityChange: { visible in
-                                    appState.setMonitorVisible(visible, serverID: server.id)
-                                },
-                                onSelect: { onSelect(server) },
-                                onOpenTerminal: { onOpenTerminal(server) }
-                            )
-                            .id(server.id)
-                        }
-                    }
-                    .scrollTargetLayout()
-                    if visibleServers.isEmpty {
-                        ContentUnavailableView {
-                            Label("没有匹配的服务器", systemImage: "line.3.horizontal.decrease.circle")
-                        } description: {
-                            Text("筛选只影响显示，后台监控仍按原设置运行。")
-                        } actions: {
-                            Button("清除筛选") {
-                                searchText = ""
-                                selectedGroup = ""
-                                selectedTag = ""
-                                monitoringRawValue = ServerMonitorFilter.all.rawValue
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: metrics.gridMinimumWidth), spacing: AppleDesign.Spacing.md, alignment: .top)],
+                            alignment: .leading,
+                            spacing: AppleDesign.Spacing.md
+                        ) {
+                            ForEach(visibleServers) { server in
+                                VPSSummaryCard(
+                                    server: server,
+                                    runtime: appState.runtime(for: server),
+                                    refreshInterval: appState.refreshInterval,
+                                    onVisibilityChange: { visible in
+                                        appState.setMonitorVisible(visible, serverID: server.id)
+                                    },
+                                    onSelect: { onSelect(server) },
+                                    onOpenTerminal: { onOpenTerminal(server) },
+                                    onRetry: { Task { await appState.refresh(server) } }
+                                )
+                                .id(server.id)
                             }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 240)
-                        .applePanel()
+                        .scrollTargetLayout()
+                        if visibleServers.isEmpty {
+                            ContentUnavailableView {
+                                Label("没有匹配的服务器", systemImage: "line.3.horizontal.decrease.circle")
+                            } description: {
+                                Text("筛选只影响显示，后台监控仍按原设置运行。")
+                            } actions: {
+                                Button("清除筛选") {
+                                    searchText = ""
+                                    selectedGroup = ""
+                                    selectedTag = ""
+                                    monitoringRawValue = ServerMonitorFilter.all.rawValue
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 240)
+                            .applePanel()
+                        }
                     }
                 }
+                .padding(metrics.pagePadding)
+                .frame(maxWidth: AppleDesign.Layout.contentWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(AppleDesign.Spacing.lg)
-            .frame(maxWidth: AppleDesign.Layout.contentWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .scrollPosition(id: $scrollAnchor, anchor: .center)
+            .toolbar { dashboardToolbar(compact: metrics.isCompact) }
+            .onChange(of: visibleServers.map(\.id)) { _, ids in
+                if let scrollAnchor, !ids.contains(scrollAnchor) { self.scrollAnchor = ids.first }
+            }
         }
-        .scrollPosition(id: $scrollAnchor, anchor: .center)
-        .onChange(of: visibleServers.map(\.id)) { _, ids in
-            if let scrollAnchor, !ids.contains(scrollAnchor) { self.scrollAnchor = ids.first }
+    }
+
+    @ToolbarContentBuilder
+    private func dashboardToolbar(compact: Bool) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                Task { await appState.refreshAll(servers) }
+            } label: {
+                Label("刷新全部", systemImage: "arrow.clockwise")
+            }
+            .disabled(servers.isEmpty)
+            .help("刷新全部服务器")
+            .accessibilityLabel("刷新全部服务器")
+            .accessibilityIdentifier("dashboard.refresh.all")
+
+            Menu {
+                Button("仅重试失败的监控", systemImage: "arrow.clockwise.circle") {
+                    Task { await appState.refreshAll(servers, failedOnly: true) }
+                }
+                if compact {
+                    Divider()
+                    Button("添加服务器", systemImage: "plus", action: onAdd)
+                }
+            } label: {
+                Label("更多刷新选项", systemImage: "ellipsis.circle")
+            }
+            .disabled(servers.isEmpty && !compact)
+            .help("更多刷新选项")
+            .accessibilityLabel("更多刷新选项")
+            .accessibilityIdentifier("dashboard.refresh.options")
+
+            if !compact {
+                Button("添加服务器", systemImage: "plus", action: onAdd)
+                    .accessibilityIdentifier("dashboard.server.add")
+            }
         }
     }
 }
@@ -152,6 +176,7 @@ struct DashboardOverviewView: View {
 private struct DashboardFleetSummary: View {
     let serverCount: Int
     @ObservedObject var state: FleetMonitoringSummaryState
+    let compact: Bool
 
     private var summary: FleetMonitoringSummary { state.value }
     private var pendingCount: Int { max(0, serverCount - summary.onlineCount - summary.issueCount) }
@@ -165,7 +190,7 @@ private struct DashboardFleetSummary: View {
                     subtitle: summary.onlineCount > 0
                         ? "在线平均 CPU \(DisplayFormat.percent(summary.averageCPU))"
                         : "等待资源采集",
-                    icon: "server.rack", tint: .primary
+                    icon: "server.rack", tint: .primary, compact: compact
                 )
                 Divider().padding(.vertical, AppleDesign.Spacing.lg)
                 DashboardSummaryCard(
@@ -174,7 +199,7 @@ private struct DashboardFleetSummary: View {
                     subtitle: summary.refreshingCount > 0
                         ? "\(DisplayFormat.integer(summary.refreshingCount)) 台正在刷新"
                         : (pendingCount > 0 ? "\(DisplayFormat.integer(pendingCount)) 台等待检测" : "已完成状态检测"),
-                    icon: "checkmark.circle", tint: .appLive
+                    icon: "checkmark.circle", tint: .appLive, compact: compact
                 )
                 Divider().padding(.vertical, AppleDesign.Spacing.lg)
                 DashboardSummaryCard(
@@ -182,7 +207,8 @@ private struct DashboardFleetSummary: View {
                     value: DisplayFormat.integer(summary.issueCount),
                     subtitle: summary.issueCount > 0 ? "连接中断或认证异常" : "暂无已知连接异常",
                     icon: "exclamationmark.circle",
-                    tint: summary.issueCount > 0 ? .appError : .secondary
+                    tint: summary.issueCount > 0 ? .appError : .secondary,
+                    compact: compact
                 )
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -196,6 +222,7 @@ private struct DashboardSummaryCard: View {
     let subtitle: String
     let icon: String
     let tint: Color
+    let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
@@ -204,17 +231,97 @@ private struct DashboardSummaryCard: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(value)
-                .font(.largeTitle.weight(.semibold))
+                .font((compact ? Font.title2 : .largeTitle).weight(.semibold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
             Text(subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(2, reservesSpace: true)
+                .lineLimit(compact ? 1 : 2, reservesSpace: !compact)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppleDesign.Spacing.lg)
+        .padding(compact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.lg)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DashboardCompactFilters: View {
+    let servers: [ServerRecord]
+    @Binding var search: String
+    @Binding var group: String
+    @Binding var tag: String
+    @Binding var sortRawValue: String
+    @Binding var monitoringRawValue: String
+
+    private var groups: [String] {
+        Set(servers.map(\.groupName).filter { !$0.isEmpty }).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+    }
+
+    private var tags: [String] {
+        Set(servers.flatMap(\.tags)).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+    }
+
+    private var activeFilterCount: Int {
+        [!group.isEmpty, !tag.isEmpty, monitoringRawValue != ServerMonitorFilter.all.rawValue,
+         sortRawValue != ServerBrowserSort.name.rawValue].filter { $0 }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
+            AppleSearchField(prompt: "搜索名称、地址、标签或备注（空格组合）", text: $search)
+                .frame(maxWidth: .infinity)
+
+            HStack {
+                Menu {
+                    Picker("分组", selection: $group) {
+                        Text("全部分组").tag("")
+                        ForEach(groups, id: \.self) { Text($0).tag($0) }
+                    }
+                    Picker("标签", selection: $tag) {
+                        Text("全部标签").tag("")
+                        ForEach(tags, id: \.self) { Text($0).tag($0) }
+                    }
+                    Picker("监控范围", selection: $monitoringRawValue) {
+                        ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    Divider()
+                    Picker("排序", selection: $sortRawValue) {
+                        ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    if activeFilterCount > 0 {
+                        Divider()
+                        Button("清除筛选", systemImage: "xmark.circle") {
+                            group = ""
+                            tag = ""
+                            monitoringRawValue = ServerMonitorFilter.all.rawValue
+                            sortRawValue = ServerBrowserSort.name.rawValue
+                        }
+                    }
+                } label: {
+                    Label(
+                        activeFilterCount == 0 ? "筛选与排序" : "筛选与排序（\(activeFilterCount)）",
+                        systemImage: "line.3.horizontal.decrease.circle"
+                    )
+                }
+                .accessibilityIdentifier("dashboard.filters.compact")
+
+                if !search.isEmpty || activeFilterCount > 0 {
+                    Button("重置") {
+                        search = ""
+                        group = ""
+                        tag = ""
+                        monitoringRawValue = ServerMonitorFilter.all.rawValue
+                        sortRawValue = ServerBrowserSort.name.rawValue
+                    }
+                    .buttonStyle(.borderless)
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 }
 
@@ -225,6 +332,7 @@ private struct VPSSummaryCard: View {
     let onVisibilityChange: (Bool) -> Void
     let onSelect: () -> Void
     let onOpenTerminal: () -> Void
+    let onRetry: () -> Void
     @AppStorage("hideIPInformation") private var hideIPInformation = false
 
     private var snapshot: ServerSnapshot { runtime.renderState.snapshot }
@@ -310,6 +418,14 @@ private struct VPSSummaryCard: View {
                     .foregroundStyle(status == .failed || status == .offline ? Color.appError : .secondary)
                     .lineLimit(1)
                     .help(footerText)
+                if runtime.renderState.error != nil {
+                    Button(action: onRetry) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("重试 \(server.displayName) 的监控")
+                    .accessibilityLabel("重试 \(server.displayName) 的监控")
+                }
                 Spacer(minLength: AppleDesign.Spacing.xxs)
                 Button(action: onOpenTerminal) {
                     Label("终端", systemImage: "terminal")
@@ -328,7 +444,7 @@ private struct VPSSummaryCard: View {
     }
 
     private var footerText: String {
-        if let error = runtime.renderState.error { return error }
+        if let summary = MachineStatusPresentation.failureSummary(runtime.renderState.error) { return summary }
         if runtime.renderState.isStale(refreshInterval: refreshInterval) { return "数据已过期 · 保留上次结果" }
         guard runtime.renderState.hasSnapshot else { return server.verificationStatus.title }
         return "\(snapshot.distribution) · \(DisplayFormat.integer(snapshot.coreCount)) 核"
@@ -354,7 +470,6 @@ private struct DashboardResourceMetric: View {
 }
 
 struct ServerDetailView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appState: AppState
 
     let server: ServerRecord
@@ -389,43 +504,38 @@ struct ServerDetailView: View {
         }
         .background(Color.appGround)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .overlay {
-            if let presentedOverlay {
-                AppleDismissibleOverlay(
-                    maxWidth: presentedOverlay == .eventLog ? 760 : 560,
-                    maxHeight: presentedOverlay == .eventLog ? 500 : 420,
+        .sheet(item: $presentedOverlay) { presentedOverlay in
+            switch presentedOverlay {
+            case .eventLog:
+                EventLogView(
+                    store: EventLogStore.shared,
+                    serverID: server.id,
+                    onDismiss: { self.presentedOverlay = nil }
+                )
+                .frame(minWidth: 560, idealWidth: 760, minHeight: 360, idealHeight: 500)
+            case .diagnostics:
+                DiagnosticsPreviewView(
+                    text: runtime.renderState.diagnostics ?? "暂无诊断信息。",
                     onDismiss: { self.presentedOverlay = nil }
                 ) {
-                    switch presentedOverlay {
-                    case .eventLog:
-                        EventLogView(
-                            store: EventLogStore.shared,
-                            serverID: server.id,
-                            onDismiss: { self.presentedOverlay = nil }
-                        )
-                    case .diagnostics:
-                        DiagnosticsPreviewView(
-                            text: runtime.renderState.diagnostics ?? "暂无诊断信息。",
-                            onDismiss: { self.presentedOverlay = nil }
-                        ) {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(
-                                runtime.renderState.diagnostics ?? "",
-                                forType: .string
-                            )
-                        }
-                    }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(
+                        runtime.renderState.diagnostics ?? "",
+                        forType: .string
+                    )
                 }
+                .frame(minWidth: 420, idealWidth: 560, minHeight: 300, idealHeight: 420)
             }
         }
-        .animation(reduceMotion ? nil : AppleDesign.quick, value: presentedOverlay)
     }
 
 }
 
-private enum ServerDetailOverlay: Equatable {
+private enum ServerDetailOverlay: String, Identifiable {
     case eventLog
     case diagnostics
+
+    var id: String { rawValue }
 }
 
 private struct ServerDetailHeader: View {

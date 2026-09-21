@@ -225,25 +225,41 @@ struct GIFExportView: View {
     @State private var previewGeneration = UUID()
     @State private var previewTask: Task<Void, Never>?
     var body: some View {
-        VStack(spacing: 12) {
-            Text("导出 GIF 片段").font(.title2.bold())
+        MacEditorSheetScaffold(
+            title: "导出 GIF 片段",
+            accessibilityID: "mac.recording-config",
+            saveTitle: "选择保存位置并导出…",
+            errorMessage: error,
+            saveDisabled: running,
+            maxContentWidth: 620,
+            scrollsContent: false,
+            onCancel: {
+                if running { task?.cancel() } else { dismiss() }
+            },
+            onSave: startExport
+        ) {
+            VStack(spacing: 12) {
             if let preview { Image(decorative: preview, scale: 1).resizable().scaledToFit().frame(height: 190) }
             Form {
                 HStack {
                     TextField("开始（秒）", value: $options.start, format: .number.grouping(.never))
+                        .accessibilityIdentifier("mac.recording-config.start")
                     TextField("结束（秒）", value: $options.end, format: .number.grouping(.never))
+                        .accessibilityIdentifier("mac.recording-config.end")
                 }
                 Stepper("帧率：\(options.fps) FPS", value: $options.fps, in: 1...30)
                 Stepper("画质：\(options.quality) / 30", value: $options.quality, in: 1...30)
                 TextField("水印（可选）", text: $options.watermark)
+                    .accessibilityIdentifier("mac.recording-config.watermark")
                 let size = options.dimensions(document)
                 Text("\(size.width) × \(size.height) 像素 · 原尺寸 \(Int(options.scale * 100))% · 最多五分钟")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("画质决定像素缩放，水印占用独立底部区域。分享前请检查画面中是否包含敏感信息。")
                     .font(.caption).foregroundStyle(.secondary)
-            }.disabled(running)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .disabled(running)
             if running { ProgressView(value: progress) }
-            if let error { Text(error).foregroundStyle(.orange) }
             if let savedURL {
                 HStack {
                     Button("复制 GIF 文件") { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([savedURL as NSURL]) }
@@ -251,13 +267,11 @@ struct GIFExportView: View {
                     Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([savedURL]) }
                 }
             }
-            HStack {
-                Button(running ? "取消导出" : "关闭") { if running { task?.cancel() } else { dismiss() } }
-                Spacer()
-                Button("选择保存位置并导出…", action: startExport).disabled(running)
-                    .buttonStyle(.borderedProminent)
             }
-        }.padding(24).frame(width: 620).background(.background)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 520, idealWidth: 620, minHeight: 420, idealHeight: 560)
+        .background(.background)
         .interactiveDismissDisabled(running)
         .onAppear { options.end = min(300, document.duration); updatePreview() }
         .onChange(of: options.start) { _, _ in updatePreview() }

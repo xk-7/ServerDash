@@ -2,12 +2,196 @@ import AppKit
 import SwiftData
 import SwiftUI
 
+enum ServerEditorFocusField: Hashable {
+    case name
+    case host
+    case username
+    case port
+    case password
+    case privateKey
+    case passphrase
+    case keepAliveInterval
+    case keepAliveCount
+    case connectTimeout
+    case authenticationTimeout
+    case beforeCommand
+    case afterCommand
+}
+
+struct ServerEditorCredentialPlan: Equatable, Sendable {
+    let mutations: [KeychainSecretMutation]
+
+    static func make(
+        passwordAccount: String,
+        passphraseAccount: String,
+        replacementPassword: String,
+        removeStoredPassword: Bool,
+        replacementPassphrase: String,
+        removeStoredPassphrase: Bool
+    ) -> Self {
+        var mutations: [KeychainSecretMutation] = []
+        if !replacementPassword.isEmpty {
+            mutations.append(.replace(account: passwordAccount, value: replacementPassword))
+        } else if removeStoredPassword {
+            mutations.append(.remove(account: passwordAccount))
+        }
+        if !replacementPassphrase.isEmpty {
+            mutations.append(.replace(account: passphraseAccount, value: replacementPassphrase))
+        } else if removeStoredPassphrase {
+            mutations.append(.remove(account: passphraseAccount))
+        }
+        return Self(mutations: mutations)
+    }
+}
+
+struct ServerEditorRecordVersion: Equatable, Sendable {
+    let id: UUID
+    let name: String
+    let host: String
+    let port: Int
+    let username: String
+    let authentication: AuthenticationMethod
+    let privateKeyPath: String
+    let groupName: String
+    let tagsText: String
+    let notes: String
+    let identityID: UUID?
+    let enableDashboardMonitor: Bool
+    let defaultSFTPPath: String
+
+    init(_ record: ServerRecord) {
+        id = record.id
+        name = record.name
+        host = record.host
+        port = record.port
+        username = record.username
+        authentication = record.authentication
+        privateKeyPath = record.privateKeyPath
+        groupName = record.groupName
+        tagsText = record.tagsText
+        notes = record.notes
+        identityID = record.identityID
+        enableDashboardMonitor = record.enableDashboardMonitor
+        defaultSFTPPath = record.defaultSFTPPath
+    }
+
+    func validate(_ record: ServerRecord?) throws {
+        guard let record, self == ServerEditorRecordVersion(record) else {
+            throw ServerEditorRecordConflictError()
+        }
+    }
+}
+
+struct ServerEditorIdentityVersion: Equatable, Sendable {
+    let id: UUID
+    let username: String
+    let authenticationRawValue: String
+    let sshKeyID: UUID?
+    let updatedAt: Date
+
+    init(_ record: IdentityRecord) {
+        id = record.id
+        username = record.username
+        authenticationRawValue = record.authenticationRawValue
+        sshKeyID = record.sshKeyID
+        updatedAt = record.updatedAt
+    }
+}
+
+struct ServerEditorSSHKeyVersion: Equatable, Sendable {
+    let id: UUID
+    let filePath: String
+    let algorithm: String
+    let fingerprint: String
+    let storageModeRawValue: String
+    let hasPassphrase: Bool
+    let bookmarkData: Data?
+
+    init(_ record: SSHKeyRecord) {
+        id = record.id
+        filePath = record.filePath
+        algorithm = record.algorithm
+        fingerprint = record.fingerprint
+        storageModeRawValue = record.storageModeRawValue
+        hasPassphrase = record.hasPassphrase
+        bookmarkData = record.bookmarkData
+    }
+}
+
+struct ServerEditorRouteVersion: Equatable, Sendable {
+    let id: UUID
+    let revision: UUID
+    let routeJSON: String
+
+    init(_ record: ConnectionRouteRecord) {
+        id = record.id
+        revision = record.revision
+        routeJSON = record.routeJSON
+    }
+}
+
+/// Captures every persisted record used to build the SSH test configuration.
+/// The lease rejects cooperating editors while the test awaits; this value
+/// check also catches deletions and writes from other model contexts.
+struct ServerEditorConnectionDependencyVersion: Equatable, Sendable {
+    let server: ServerEditorRecordVersion?
+    let identityID: UUID?
+    let identity: ServerEditorIdentityVersion?
+    let sshKeyID: UUID?
+    let sshKey: ServerEditorSSHKeyVersion?
+    let routeServerID: UUID?
+    let routes: [ServerEditorRouteVersion]
+
+    init(
+        server: ServerRecord?,
+        identityID: UUID?,
+        identity: IdentityRecord?,
+        sshKeyID: UUID?,
+        sshKey: SSHKeyRecord?,
+        routes: [ConnectionRouteRecord]
+    ) {
+        self.server = server.map(ServerEditorRecordVersion.init)
+        self.identityID = identityID
+        self.identity = identity.map(ServerEditorIdentityVersion.init)
+        self.sshKeyID = sshKeyID
+        self.sshKey = sshKey.map(ServerEditorSSHKeyVersion.init)
+        routeServerID = server?.id
+        self.routes = routes
+            .map(ServerEditorRouteVersion.init)
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+    }
+
+    func validate(
+        server currentServer: ServerRecord?,
+        identity currentIdentity: IdentityRecord?,
+        sshKey currentSSHKey: SSHKeyRecord?,
+        routes currentRoutes: [ConnectionRouteRecord]
+    ) throws {
+        let currentRouteVersions = currentRoutes
+            .map(ServerEditorRouteVersion.init)
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        guard server == currentServer.map(ServerEditorRecordVersion.init),
+              identity == currentIdentity.map(ServerEditorIdentityVersion.init),
+              sshKey == currentSSHKey.map(ServerEditorSSHKeyVersion.init),
+              routes == currentRouteVersions else {
+            throw ServerEditorRecordConflictError()
+        }
+    }
+}
+
+struct ServerEditorRecordConflictError: LocalizedError {
+    var errorDescription: String? {
+        "配置已在另一窗口更新，请重新载入后再试。"
+    }
+}
+
 struct ServerEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \IdentityRecord.name) private var identities: [IdentityRecord]
     @Query(sort: \SSHKeyRecord.name) private var sshKeys: [SSHKeyRecord]
+    @Query private var connectionRoutes: [ConnectionRouteRecord]
 
     let server: ServerRecord?
     var onSave: ((ServerRecord) -> Void)?
@@ -20,6 +204,8 @@ struct ServerEditorView: View {
     @State private var authentication: AuthenticationMethod
     @State private var selectedIdentityID: UUID?
     @State private var password = ""
+    @State private var hasStoredPassword: Bool
+    @State private var removeStoredPassword = false
     @State private var privateKeyPath: String
     @State private var groupName: String
     @State private var tagsText: String
@@ -30,15 +216,19 @@ struct ServerEditorView: View {
     @State private var enableDashboardMonitor = true
     @State private var defaultSFTPPath = "."
     @State private var passphrase = ""
+    @State private var hasStoredPassphrase: Bool
+    @State private var removeStoredPassphrase = false
     @State private var statusNote: String?
     @State private var sshTestFeedback: SSHTestFeedback?
     @State private var advanced = SSHAdvancedSettingsDraft.default
     @State private var showsRoute = false
+    @FocusState private var focusedField: ServerEditorFocusField?
 
     init(server: ServerRecord?, onSave: ((ServerRecord) -> Void)? = nil) {
+        let credentialID = server?.id ?? UUID()
         self.server = server
         self.onSave = onSave
-        _draftID = State(initialValue: server?.id ?? UUID())
+        _draftID = State(initialValue: credentialID)
         _name = State(initialValue: server?.name ?? "")
         _host = State(initialValue: server?.host ?? "")
         _port = State(initialValue: server?.port ?? 22)
@@ -46,6 +236,10 @@ struct ServerEditorView: View {
         _authentication = State(initialValue: server?.authentication ?? .privateKey)
         _selectedIdentityID = State(initialValue: server?.identityID)
         _privateKeyPath = State(initialValue: server?.privateKeyPath ?? "")
+        _hasStoredPassword = State(initialValue: KeychainService.hasPassword(for: credentialID))
+        _hasStoredPassphrase = State(initialValue: KeychainService.hasSecret(
+            account: KeychainService.passphraseAccount(for: credentialID)
+        ))
         _groupName = State(initialValue: server?.groupName ?? "默认分组")
         _tagsText = State(initialValue: server?.tagsText ?? "")
         _notes = State(initialValue: server?.notes ?? "")
@@ -54,34 +248,44 @@ struct ServerEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(server == nil ? "添加服务器" : "编辑服务器")
-                        .font(.title2.bold())
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(20)
+        MacEditorSheetScaffold(
+            title: server == nil ? "添加服务器" : "编辑服务器",
+            accessibilityID: "mac.editor.server",
+            saveTitle: isValidating ? "处理中" : "保存配置",
+            errorMessage: errorMessage,
+            saveDisabled: !isValid || isValidating,
+            maxContentWidth: 720,
+            scrollsContent: false,
+            onCancel: {
+                guard !isValidating else { return }
+                dismiss()
+            },
+            onSave: { begin(.save) },
+            onValidationError: focusFirstInvalidField
+        ) {
+            VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            Divider()
-
-            Form {
-                Section("连接信息") {
+                Form {
+                    Section("连接信息") {
                     TextField("名称", text: $name, prompt: Text("例如：生产服务器"))
+                        .focused($focusedField, equals: .name)
                     TextField("主机地址", text: $host, prompt: Text("IP 地址或域名"))
+                        .focused($focusedField, equals: .host)
+                        .accessibilityIdentifier("mac.editor.server.host")
                     HStack {
                         TextField("用户名", text: $username)
                             .disabled(selectedIdentityID != nil)
+                            .focused($focusedField, equals: .username)
                         TextField("SSH 端口", value: $port, format: .number.grouping(.never))
                             .frame(width: 120)
+                            .focused($focusedField, equals: .port)
                     }
                 }
 
-                Section("认证") {
+                    Section("认证") {
                     Picker("登录身份", selection: $selectedIdentityID) {
                         Text("自定义").tag(UUID?.none)
                         ForEach(identities) { identity in
@@ -105,9 +309,13 @@ struct ServerEditorView: View {
 
                         if authentication.usesPassword {
                             SecureField(
-                                server == nil ? "密码" : "新密码（留空则不修改）",
+                                hasStoredPassword ? "新密码（留空则保留已保存密码）" : "密码",
                                 text: $password
                             )
+                            .focused($focusedField, equals: .password)
+                            .onChange(of: password) { _, value in
+                                if !value.isEmpty { removeStoredPassword = false }
+                            }
                         }
                         if authentication.usesPrivateKey {
                             HStack {
@@ -115,14 +323,36 @@ struct ServerEditorView: View {
                                     "私钥路径（留空使用 SSH 默认配置）",
                                     text: $privateKeyPath
                                 )
+                                .focused($focusedField, equals: .privateKey)
                                 Button("选择…", action: choosePrivateKey)
                             }
-                            SecureField("私钥口令（可选）", text: $passphrase)
+                            SecureField(
+                                hasStoredPassphrase ? "新私钥口令（留空则保留已保存口令）" : "私钥口令（可选）",
+                                text: $passphrase
+                            )
+                            .focused($focusedField, equals: .passphrase)
+                            .onChange(of: passphrase) { _, value in
+                                if !value.isEmpty { removeStoredPassphrase = false }
+                            }
+                        }
+                        if hasStoredPassword {
+                            Toggle("移除已保存密码", isOn: $removeStoredPassword)
+                                .disabled(!password.isEmpty)
+                            Text(removeStoredPassword ? "保存后将从本机 Keychain 删除密码。" : "留空会保留现有密码，即使认证方式改变也不会自动删除。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if hasStoredPassphrase {
+                            Toggle("移除已保存私钥口令", isOn: $removeStoredPassphrase)
+                                .disabled(!passphrase.isEmpty)
+                            Text(removeStoredPassphrase ? "保存后将从本机 Keychain 删除口令。" : "留空会保留现有私钥口令。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                Section("整理") {
+                    Section("整理") {
                     TextField("分组", text: $groupName)
                     TextField("标签（用逗号分隔）", text: $tagsText)
                     TextField("备注", text: $notes, axis: .vertical)
@@ -131,54 +361,29 @@ struct ServerEditorView: View {
                     Toggle("加入仪表盘自动监控", isOn: $enableDashboardMonitor)
                 }
 
-                SSHAdvancedEditorSection(draft: $advanced)
-                Section("连接路线") {
-                    if server != nil {
-                        Button("连接路线、跳板与代理…") { showsRoute = true }
-                    } else {
-                        Text("保存主机后，可配置跳板路线与 SOCKS5 / HTTP 代理。").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-
-                if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
-                            .foregroundStyle(Color.appError)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .disabled(isValidating)
-
-            Divider()
-
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(isValidating)
-                Button("测试 SSH") { begin(.testSSH) }
-                    .disabled(!isValid || isValidating)
-                Button(action: { begin(.save) }) {
-                    if isValidating {
-                        HStack(spacing: 7) {
-                            ProgressView().controlSize(.small)
-                            Text("处理中")
+                    SSHAdvancedEditorSection(draft: $advanced, focusedField: $focusedField)
+                    Section("连接路线") {
+                        if server != nil {
+                            Button("连接路线、跳板与代理…") { showsRoute = true }
+                        } else {
+                            Text("保存主机后，可配置跳板路线与 SOCKS5 / HTTP 代理。").font(.caption).foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text("保存配置")
                     }
                 }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(!isValid || isValidating)
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+                .disabled(isValidating)
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 620, height: 680)
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button("测试 SSH", systemImage: "network") { begin(.testSSH) }
+                    .disabled(!isValid || isValidating)
+            }
+        }
         .background(Color.appGround)
         .sheet(isPresented: $showsRoute) { if let server { SSHConnectionRouteEditor(server: server) } }
         .interactiveDismissDisabled(isValidating)
@@ -233,6 +438,30 @@ struct ServerEditorView: View {
         (1...65_535).contains(port)
     }
 
+    private func focusFirstInvalidField() {
+        if host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .host
+        } else if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            focusedField = .username
+        } else if !(1...65_535).contains(port) {
+            focusedField = .port
+        } else if !(10...300).contains(advanced.keepAliveInterval) {
+            focusedField = .keepAliveInterval
+        } else if !(1...10).contains(advanced.keepAliveCountMax) {
+            focusedField = .keepAliveCount
+        } else if !(5...300).contains(advanced.connectTimeout) {
+            focusedField = .connectTimeout
+        } else if !(10...120).contains(advanced.authenticationTimeout) {
+            focusedField = .authenticationTimeout
+        } else if advanced.beforeConnectCommand.utf8.count > 16_384 || advanced.beforeConnectCommand.contains("\0") {
+            focusedField = .beforeCommand
+        } else if advanced.afterConnectCommand.utf8.count > 16_384 || advanced.afterConnectCommand.contains("\0") {
+            focusedField = .afterCommand
+        } else {
+            focusedField = .host
+        }
+    }
+
     private enum EditorAction {
         case save, testSSH
     }
@@ -252,11 +481,17 @@ struct ServerEditorView: View {
             privateKeyPath = ""
         }
         password = ""
+        passphrase = ""
+        removeStoredPassword = false
+        removeStoredPassphrase = false
     }
 
     private var draftConfig: ServerConnectionConfig {
         let route: ConnectionRoute? = if let server {
-            appState.connectionConfig(for: server).route
+            ConnectionConfigResolver.persistedRoute(
+                for: server.id,
+                routes: connectionRoutes
+            )
         } else {
             .direct
         }
@@ -304,7 +539,7 @@ struct ServerEditorView: View {
         guard isValid else { return }
         if authentication.usesPassword,
            password.isEmpty,
-           !KeychainService.hasPassword(for: draftConfig.credentialID),
+           (removeStoredPassword || !KeychainService.hasPassword(for: draftConfig.credentialID)),
            action != .save {
             presentSSHTestFailure(ValidationError.missingPassword)
             return
@@ -315,8 +550,12 @@ struct ServerEditorView: View {
         pendingAction = action
         if action == .save {
             do {
-                try persistSecrets()
-                try commit(snapshot: nil, status: .unverified)
+                try KeychainMutationTransaction.commit(
+                    credentialMutations,
+                    coordinationKeys: credentialCoordinationKeys
+                ) {
+                    try commit(snapshot: nil, status: .unverified)
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -339,26 +578,86 @@ struct ServerEditorView: View {
     }
 
     private func perform(_ action: EditorAction) async throws {
-        try persistSecrets()
         switch action {
         case .save:
-            try commit(snapshot: nil, status: .unverified)
-        case .testSSH:
-            let config = draftConfig
-            let elapsed = try await appState.performTrustedConnection(
-                config,
-                source: .sshTest
+            try KeychainMutationTransaction.commit(
+                credentialMutations,
+                coordinationKeys: credentialCoordinationKeys
             ) {
-                try await SSHConnectionTester.test(config)
+                try commit(snapshot: nil, status: .unverified)
             }
-            try commit(snapshot: nil, status: .sshReady)
+        case .testSSH:
+            let testedConfig = draftConfig
+            let expectedVersion = connectionDependencyVersion(for: testedConfig)
+            let elapsed = try await KeychainMutationTransaction.commitAsync(
+                credentialMutations,
+                coordinationKeys: ConnectionConfigurationCoordination.serverEditor(
+                    draftID: draftID,
+                    config: testedConfig
+                )
+            ) {
+                let elapsed = try await appState.performTrustedConnection(
+                    testedConfig,
+                    source: .sshTest
+                ) {
+                    try await SSHConnectionTester.test(testedConfig)
+                }
+                try validateConnectionDependencies(expectedVersion)
+                try commit(snapshot: nil, status: .sshReady)
+                return elapsed
+            }
             statusNote = "SSH 测试成功，配置已保存。"
             sshTestFeedback = SSHTestFeedback(
                 succeeded: true,
-                message: "已成功连接 \(draftConfig.username)@\(draftConfig.host):\(draftConfig.port)，延迟 \(DisplayFormat.integer(Int(elapsed * 1_000))) ms。"
+                message: "已成功连接 \(testedConfig.username)@\(testedConfig.host):\(testedConfig.port)，延迟 \(DisplayFormat.integer(Int(elapsed * 1_000))) ms。"
             )
         }
         isValidating = false
+    }
+
+    private func connectionDependencyVersion(
+        for config: ServerConnectionConfig
+    ) -> ServerEditorConnectionDependencyVersion {
+        let identityID = selectedIdentityID
+        let keyID = config.sshKeyID
+        let routes = server.map { server in
+            connectionRoutes.filter { $0.serverID == server.id }
+        } ?? []
+        return ServerEditorConnectionDependencyVersion(
+            server: server,
+            identityID: identityID,
+            identity: identityID.flatMap { id in identities.first { $0.id == id } },
+            sshKeyID: keyID,
+            sshKey: keyID.flatMap { id in sshKeys.first { $0.id == id } },
+            routes: routes
+        )
+    }
+
+    private func validateConnectionDependencies(
+        _ expected: ServerEditorConnectionDependencyVersion
+    ) throws {
+        let allServers = try modelContext.fetch(FetchDescriptor<ServerRecord>())
+        let currentServer = expected.server.flatMap { version in
+            allServers.first { $0.id == version.id }
+        }
+        let allIdentities = try modelContext.fetch(FetchDescriptor<IdentityRecord>())
+        let currentIdentity = expected.identityID.flatMap { id in
+            allIdentities.first { $0.id == id }
+        }
+        let allKeys = try modelContext.fetch(FetchDescriptor<SSHKeyRecord>())
+        let currentKey = expected.sshKeyID.flatMap { id in
+            allKeys.first { $0.id == id }
+        }
+        let allRoutes = try modelContext.fetch(FetchDescriptor<ConnectionRouteRecord>())
+        let currentRoutes = expected.routeServerID.map { serverID in
+            allRoutes.filter { $0.serverID == serverID }
+        } ?? []
+        try expected.validate(
+            server: currentServer,
+            identity: currentIdentity,
+            sshKey: currentKey,
+            routes: currentRoutes
+        )
     }
 
     private func presentSSHTestFailure(_ error: Error) {
@@ -376,24 +675,28 @@ struct ServerEditorView: View {
         return "来源：\(request.source.title)\n\(request.probe.host):\(request.probe.port)\n\(request.probe.algorithm) \(request.probe.fingerprint)"
     }
 
-    private func persistSecrets() throws {
-        if authentication.usesPassword, !password.isEmpty {
-            try KeychainService.savePassword(password, for: draftConfig.credentialID)
-        }
-        if !passphrase.isEmpty {
-            try KeychainService.saveSecret(
-                passphrase,
-                account: KeychainService.passphraseAccount(
-                    for: selectedIdentity?.sshKeyID ?? draftID
-                )
-            )
-        }
+    private var credentialMutations: [KeychainSecretMutation] {
+        guard selectedIdentityID == nil else { return [] }
+        return ServerEditorCredentialPlan.make(
+            passwordAccount: draftID.uuidString,
+            passphraseAccount: KeychainService.passphraseAccount(for: draftID),
+            replacementPassword: password,
+            removeStoredPassword: removeStoredPassword,
+            replacementPassphrase: passphrase,
+            removeStoredPassphrase: removeStoredPassphrase
+        ).mutations
+    }
+
+    private var credentialCoordinationKeys: [String] {
+        ConnectionConfigurationCoordination.serverEditor(
+            draftID: draftID,
+            config: draftConfig
+        )
     }
 
     private func commit(snapshot: ServerSnapshot?, status: ServerVerificationStatus) throws {
         try advanced.validate()
         let record: ServerRecord
-        let isNewRecord = server == nil
         if let server {
             record = server
             record.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -431,14 +734,11 @@ struct ServerEditorView: View {
 
         do {
             try SSHAdvancedSettingsRecord.upsert(serverID: record.id, settings: advanced, in: modelContext)
-            if !authentication.usesPassword {
-                try KeychainService.deletePassword(for: record.id)
-            }
-            if selectedIdentityID != nil, !authentication.usesPassword {
-                try? KeychainService.deletePassword(for: record.id)
-            }
             try MachineOrganization.include(names: [record.groupName], tags: record.tags, context: modelContext)
             try modelContext.save()
+            // Update only cached configuration and monitoring membership after
+            // persistence succeeds. Existing terminal/session controllers keep
+            // their current generation and consume this on the next connection.
             appState.cacheConfig(draftConfig)
             if let snapshot {
                 appState.applyValidatedSnapshot(snapshot, to: record)
@@ -451,9 +751,7 @@ struct ServerEditorView: View {
                 dismiss()
             }
         } catch {
-            if isNewRecord {
-                modelContext.delete(record)
-            }
+            modelContext.rollback()
             throw error
         }
     }

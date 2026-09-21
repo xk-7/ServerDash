@@ -216,6 +216,11 @@ See [Docs/S11_IMPLEMENTATION_STATUS.md](Docs/S11_IMPLEMENTATION_STATUS.md) for r
 
 The internal-test product and architecture constraints are recorded in the [architecture decision index](Docs/ArchitectureDecisions/README.md) and [1.0 scope/non-goals](Docs/PRODUCT_SCOPE_1.0.md).
 
+`main` is the Apple product mainline. The independent Windows client remains
+on long-lived Windows branches and is never merged back into `main`; macOS RDP
+support for remote Windows hosts remains part of the Apple app. See the
+[branch policy](Docs/BRANCH_POLICY.md).
+
 Latest stable release: [ServerDash 1.0.4](https://github.com/xk-7/ServerDash/releases/tag/v1.0.4) (build 9). The macOS artifact remains ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run

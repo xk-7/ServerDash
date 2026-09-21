@@ -18,7 +18,13 @@ enum KeychainError: LocalizedError {
 }
 
 enum KeychainService {
-    static let serviceName = "com.serverdash.credentials"
+    static let serviceName: String = {
+#if SERVERDASH_MAC_QA
+        "com.serverdash.app.macqa.credentials"
+#else
+        "com.serverdash.credentials"
+#endif
+    }()
 
     private static var accessibility: CFString {
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly

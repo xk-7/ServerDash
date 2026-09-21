@@ -201,6 +201,10 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 内部测试产品与架构约束见[架构决策索引](Docs/ArchitectureDecisions/README.md)和[1.0 范围与非目标](Docs/PRODUCT_SCOPE_1.0.md)。
 
+`main` 是 Apple 产品主线。独立 Windows 客户端长期保留在 Windows 专用分支，
+不会反向合入 `main`；macOS 连接远端 Windows 主机的 RDP 能力仍属于 Apple
+应用。详见[分支政策](Docs/BRANCH_POLICY.md)。
+
 最新正式版本为 [ServerDash 1.0.4](https://github.com/xk-7/ServerDash/releases/tag/v1.0.4)（Build 9）。macOS 附件继续使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
 
 ## 运行

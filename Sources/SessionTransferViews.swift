@@ -3,6 +3,14 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+#if os(macOS)
+enum SessionImportPreviewLayout {
+    static func usesWideLayout(width: CGFloat) -> Bool {
+        width >= MacWorkspaceMetrics.compactWidth
+    }
+}
+#endif
+
 struct SessionImportWizard: View {
     private enum Step: Int {
         case source
@@ -19,6 +27,7 @@ struct SessionImportWizard: View {
     let existingServers: [ServerRecord]
     var initialSource: SessionTransferSource = .automatic
     var onComplete: ((SessionImportResult) -> Void)?
+    var discoveryProvider: SessionImportDiscoveryProvider = .production
     @State private var initializedSource = false
 
     @State private var step: Step = .source
@@ -35,43 +44,111 @@ struct SessionImportWizard: View {
     @State private var loadTask: Task<Void, Never>?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch step {
-                case .source: sourceView
-                case .input: inputView
-                case .preview: previewView
-                case .result: resultView
-                }
+        importRoot
+            .interactiveDismissDisabled(isWorking)
+            .fileImporter(
+                isPresented: $showingFileImporter,
+                allowedContentTypes: [.item, .folder],
+                allowsMultipleSelection: true,
+                onCompletion: handleFileSelection
+            )
+#if os(iOS)
+            .alert("导入失败", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("好", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
             }
+#endif
+            .onAppear {
+                guard !initializedSource else { return }
+                initializedSource = true
+                source = initialSource
+                if initialSource != .automatic { step = .input }
+            }
+            .onDisappear {
+                loadTask?.cancel()
+                preview?.candidates.forEach { $0.credential?.clear() }
+            }
+    }
+
+    @ViewBuilder
+    private var importRoot: some View {
+#if os(macOS)
+        MacEditorSheetScaffold(
+            title: navigationTitle,
+            accessibilityID: "mac.import",
+            cancelTitle: importCancelTitle,
+            cancelRole: step == .source ? .cancel : nil,
+            cancelDisabled: isWorking,
+            cancelAccessibilityID: step == .source || step == .result ? "mac.import.cancel" : "mac.import.back",
+            saveTitle: importSaveTitle,
+            showsSaveAction: step == .source || step == .preview,
+            saveAccessibilityID: "mac.import.primary",
+            errorMessage: errorMessage,
+            saveDisabled: importSaveDisabled,
+            maxContentWidth: 840,
+            scrollsContent: false,
+            onCancel: importCancel,
+            onSave: importPrimaryAction
+        ) {
+            importStepContent
+        }
+#else
+        NavigationStack {
+            importStepContent
             .navigationTitle(navigationTitle)
             .toolbar { toolbarContent }
         }
         .sessionWizardFrame()
-        .onAppear {
-            guard !initializedSource else { return }
-            initializedSource = true
-            source = initialSource
-            if initialSource != .automatic { step = .input }
+        .sessionWizardAccessibilityContainer("mac.import.container")
+#endif
+    }
+
+    @ViewBuilder
+    private var importStepContent: some View {
+        switch step {
+        case .source: sourceView
+        case .input: inputView
+        case .preview: previewView
+        case .result: resultView
         }
-        .interactiveDismissDisabled(isWorking)
-        .fileImporter(
-            isPresented: $showingFileImporter,
-            allowedContentTypes: [.item, .folder],
-            allowsMultipleSelection: true,
-            onCompletion: handleFileSelection
-        )
-        .alert("导入失败", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("好", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+    }
+
+    private var importCancelTitle: String {
+        switch step {
+        case .source: "取消"
+        case .input, .preview: "返回"
+        case .result: "完成"
         }
-        .onDisappear {
-            loadTask?.cancel()
-            preview?.candidates.forEach { $0.credential?.clear() }
+    }
+
+    private var importSaveTitle: String {
+        switch step {
+        case .source: "继续"
+        case .preview: "确定（\(selectedImportCount)）"
+        case .input, .result: "完成"
+        }
+    }
+
+    private var importSaveDisabled: Bool {
+        step == .preview && (selectedImportCount == 0 || isWorking)
+    }
+
+    private func importCancel() {
+        if step == .source || step == .result { dismiss() }
+        else { goBack() }
+    }
+
+    private func importPrimaryAction() {
+        switch step {
+        case .source:
+            errorMessage = nil
+            step = .input
+        case .preview: commit()
+        case .input, .result: break
         }
     }
 
@@ -155,23 +232,40 @@ struct SessionImportWizard: View {
     @ViewBuilder
     private var previewView: some View {
         if let preview {
-            if usesWidePreview {
-                HStack(spacing: 0) {
-                    importSummary(preview)
-                        .frame(width: 250)
-                        .padding(20)
-                        .background(Color.appSurface)
-                    Divider()
-                    candidateList(preview)
-                }
-            } else {
-                candidateList(preview)
-                    .safeAreaInset(edge: .bottom) {
-                        compactImportSummary(preview)
-                    }
+#if os(macOS)
+            GeometryReader { proxy in
+                importPreview(
+                    preview,
+                    usesWideLayout: SessionImportPreviewLayout.usesWideLayout(width: proxy.size.width)
+                )
             }
+#else
+            importPreview(preview, usesWideLayout: horizontalSizeClass == .regular)
+#endif
         } else {
             ProgressView()
+        }
+    }
+
+    @ViewBuilder
+    private func importPreview(
+        _ preview: SessionImportPreview,
+        usesWideLayout: Bool
+    ) -> some View {
+        if usesWideLayout {
+            HStack(spacing: 0) {
+                importSummary(preview)
+                    .frame(width: 250)
+                    .padding(20)
+                    .background(Color.appSurface)
+                Divider()
+                candidateList(preview)
+            }
+        } else {
+            candidateList(preview)
+                .safeAreaInset(edge: .bottom) {
+                    compactImportSummary(preview)
+                }
         }
     }
 
@@ -281,7 +375,9 @@ struct SessionImportWizard: View {
                         .font(.callout)
                 }
             }
+#if os(iOS)
             Button("完成") { dismiss() }.buttonStyle(.borderedProminent).controlSize(.large)
+#endif
             Spacer()
         }
         .padding()
@@ -289,33 +385,36 @@ struct SessionImportWizard: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        #if os(macOS)
+        ToolbarItem(placement: .principal) {
+            Text(navigationTitle)
+                .font(.headline)
+                .accessibilityIdentifier("mac.import.title")
+        }
+        #endif
         ToolbarItem(placement: .cancellationAction) {
             if step == .source || step == .result {
                 Button(step == .result ? "完成" : "取消") { dismiss() }
+                    .sessionWizardMacIdentifier("mac.import.cancel")
             } else {
                 Button("返回") { goBack() }.disabled(isWorking)
+                    .sessionWizardMacIdentifier("mac.import.back")
             }
         }
         ToolbarItem(placement: .confirmationAction) {
             switch step {
             case .source:
                 Button("继续") { step = .input }
+                    .sessionWizardMacIdentifier("mac.import.primary")
             case .preview:
                 Button("确定（\(selectedImportCount)）", action: commit)
                     .buttonStyle(.borderedProminent)
                     .disabled(selectedImportCount == 0 || isWorking)
+                    .sessionWizardMacIdentifier("mac.import.primary")
             case .input, .result:
                 EmptyView()
             }
         }
-    }
-
-    private var usesWidePreview: Bool {
-#if os(macOS)
-        true
-#else
-        horizontalSizeClass == .regular
-#endif
     }
 
     private var selectedImportCount: Int {
@@ -343,6 +442,7 @@ struct SessionImportWizard: View {
     }
 
     private func goBack() {
+        errorMessage = nil
         switch step {
         case .input: step = .source
         case .preview:
@@ -370,7 +470,7 @@ struct SessionImportWizard: View {
     }
 
     private func inspectDiscoveredFiles() {
-        let urls = SessionLocalDiscovery.urls(for: source)
+        let urls = discoveryProvider.urls(for: source)
         guard !urls.isEmpty else {
             errorMessage = "没有在已知位置找到配置，请手动选择文件或目录。"
             return
@@ -380,6 +480,7 @@ struct SessionImportWizard: View {
 
     private func inspect(_ input: SessionImportInput) {
         loadTask?.cancel()
+        errorMessage = nil
         isWorking = true
         let keys = existingServers.map(ExistingSessionKey.init(server:))
         let requestedSource = source
@@ -405,6 +506,7 @@ struct SessionImportWizard: View {
 
     private func commit() {
         guard let preview else { return }
+        errorMessage = nil
         isWorking = true
         do {
             let value = try SessionImportCommitter.commit(
@@ -529,90 +631,7 @@ struct SessionExportWizard: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("范围") {
-                    Picker("导出范围", selection: $scope) {
-                        ForEach(SessionExportScope.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    if scope == .group {
-                        Picker("分组", selection: $group) {
-                            ForEach(groups, id: \.self) { Text($0).tag($0) }
-                        }
-                    } else if scope == .selected {
-                        ForEach(servers) { server in
-                            Toggle(isOn: Binding(
-                                get: { selectedIDs.contains(server.id) },
-                                set: { selected in
-                                    if selected { selectedIDs.insert(server.id) }
-                                    else { selectedIDs.remove(server.id) }
-                                }
-                            )) {
-                                VStack(alignment: .leading) {
-                                    Text(server.displayName)
-                                    Text("\(server.username)@\(server.host):\(server.port)")
-                                        .font(.caption.monospaced()).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    LabeledContent("将导出", value: "\(chosenServers.count) 个会话")
-                }
-
-                Section("目标客户端") {
-                    ForEach(SessionTransferTarget.allCases) { item in
-                        Button {
-                            target = item
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.title).foregroundStyle(.primary)
-                                    Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if item.exportAvailability != .available {
-                                    Text("待验证").font(.caption).foregroundStyle(.orange)
-                                } else if target == item {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.appAccent)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(item.exportAvailability != .available)
-                    }
-                }
-
-                Section("安全") {
-                    Label("导出不包含密码、私钥正文、口令、可信主机、历史记录或隧道。", systemImage: "lock.shield")
-                    Text("外部私钥路径可以保留；存放在 Keychain 的密钥需要在目标客户端重新导入。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                if isWorking {
-                    Section { ProgressView("正在生成导出文件…") }
-                }
-            }
-            .navigationTitle("导出会话")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(isWorking ? "停止" : "取消") {
-                        if isWorking {
-                            exportTask?.cancel()
-                        } else {
-                            dismiss()
-                        }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("导出", action: prepareExport)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(chosenServers.isEmpty || isWorking || target.exportAvailability != .available)
-                }
-            }
-        }
-        .sessionWizardFrame()
+        exportRoot
         .interactiveDismissDisabled(isWorking)
         .onAppear {
             if group.isEmpty { group = groups.first ?? "" }
@@ -627,6 +646,7 @@ struct SessionExportWizard: View {
         ) { result in
             switch result {
             case .success:
+                errorMessage = nil
                 var messages = ["已导出 \(chosenServers.count) 个会话。密码和私钥正文未写入文件。"]
                 messages.append(contentsOf: pendingExportWarnings)
                 completionMessage = messages.joined(separator: "\n")
@@ -636,9 +656,11 @@ struct SessionExportWizard: View {
             exportDocument = nil
             pendingExportWarnings = []
         }
+#if os(iOS)
         .alert("导出失败", isPresented: Binding(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
         )) { Button("好", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+#endif
         .alert("导出完成", isPresented: Binding(
             get: { completionMessage != nil }, set: { if !$0 { completionMessage = nil } }
         )) {
@@ -648,8 +670,125 @@ struct SessionExportWizard: View {
         }
     }
 
+    @ViewBuilder
+    private var exportRoot: some View {
+#if os(macOS)
+        MacEditorSheetScaffold(
+            title: "导出会话",
+            accessibilityID: "mac.export",
+            cancelTitle: isWorking ? "停止" : "取消",
+            cancelRole: isWorking ? nil : .cancel,
+            cancelAccessibilityID: "mac.export.cancel",
+            saveTitle: "导出",
+            saveAccessibilityID: "mac.export.primary",
+            errorMessage: errorMessage,
+            saveDisabled: chosenServers.isEmpty || isWorking || target.exportAvailability != .available,
+            maxContentWidth: 820,
+            scrollsContent: false,
+            onCancel: cancelExport,
+            onSave: prepareExport
+        ) {
+            exportForm
+        }
+#else
+        NavigationStack {
+            exportForm
+            .navigationTitle("导出会话")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(isWorking ? "停止" : "取消") {
+                        cancelExport()
+                    }
+                    .sessionWizardMacIdentifier("mac.export.cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("导出", action: prepareExport)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(chosenServers.isEmpty || isWorking || target.exportAvailability != .available)
+                        .sessionWizardMacIdentifier("mac.export.primary")
+                }
+            }
+        }
+        .sessionWizardFrame()
+        .sessionWizardAccessibilityContainer("mac.export.container")
+#endif
+    }
+
+    private var exportForm: some View {
+        Form {
+            Section("范围") {
+                Picker("导出范围", selection: $scope) {
+                    ForEach(SessionExportScope.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if scope == .group {
+                    Picker("分组", selection: $group) {
+                        ForEach(groups, id: \.self) { Text($0).tag($0) }
+                    }
+                } else if scope == .selected {
+                    ForEach(servers) { server in
+                        Toggle(isOn: Binding(
+                            get: { selectedIDs.contains(server.id) },
+                            set: { selected in
+                                if selected { selectedIDs.insert(server.id) }
+                                else { selectedIDs.remove(server.id) }
+                            }
+                        )) {
+                            VStack(alignment: .leading) {
+                                Text(server.displayName)
+                                Text("\(server.username)@\(server.host):\(server.port)")
+                                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                LabeledContent("将导出", value: "\(chosenServers.count) 个会话")
+            }
+
+            Section("目标客户端") {
+                ForEach(SessionTransferTarget.allCases) { item in
+                    Button {
+                        target = item
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.title).foregroundStyle(.primary)
+                                Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if item.exportAvailability != .available {
+                                Text("待验证").font(.caption).foregroundStyle(.orange)
+                            } else if target == item {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.appAccent)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(item.exportAvailability != .available)
+                }
+            }
+
+            Section("安全") {
+                Label("导出不包含密码、私钥正文、口令、可信主机、历史记录或隧道。", systemImage: "lock.shield")
+                Text("外部私钥路径可以保留；存放在 Keychain 的密钥需要在目标客户端重新导入。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if isWorking {
+                Section { ProgressView("正在生成导出文件…") }
+            }
+        }
+    }
+
+    private func cancelExport() {
+        if isWorking { exportTask?.cancel() }
+        else { dismiss() }
+    }
+
     private func prepareExport() {
         exportTask?.cancel()
+        errorMessage = nil
         let records = chosenServers.map(SessionTransferRecord.init(server:))
         let selectedTarget = target
         isWorking = true
@@ -689,9 +828,28 @@ struct SessionExportFileDocument: FileDocument {
 
 private extension View {
     @ViewBuilder
+    func sessionWizardMacIdentifier(_ identifier: String) -> some View {
+#if os(macOS)
+        accessibilityIdentifier(identifier)
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func sessionWizardAccessibilityContainer(_ identifier: String) -> some View {
+#if os(macOS)
+        accessibilityElement(children: .contain)
+            .accessibilityIdentifier(identifier)
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
     func sessionWizardFrame() -> some View {
 #if os(macOS)
-        frame(minWidth: 760, idealWidth: 900, minHeight: 600, idealHeight: 720)
+        frame(minWidth: 620, idealWidth: 820, minHeight: 400, idealHeight: 540)
 #else
         self
 #endif

@@ -3,7 +3,6 @@ import Charts
 import SwiftUI
 
 struct ServerMonitorLayoutView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var layoutStore: MonitorLayoutStore
     @AppStorage("hideIPInformation") private var hideIPInformation = false
@@ -119,26 +118,16 @@ struct ServerMonitorLayoutView: View {
             )
             .environmentObject(appState)
         }
-        .overlay {
-            if let card = presentedDetail {
-                AppleDismissibleOverlay(
-                    maxWidth: 1_000,
-                    maxHeight: 760,
-                    onDismiss: { presentedDetail = nil }
-                ) {
-                    MonitorCardDetailView(
-                        card: card,
-                        server: server,
-                        snapshot: snapshot,
-                        history: history,
-                        onDismiss: {
-                            presentedDetail = nil
-                        }
-                    )
-                }
-            }
+        .sheet(item: $presentedDetail) { card in
+            MonitorCardDetailView(
+                card: card,
+                server: server,
+                snapshot: snapshot,
+                history: history,
+                onDismiss: { presentedDetail = nil }
+            )
+            .frame(minWidth: 640, idealWidth: 1_000, minHeight: 440, idealHeight: 760)
         }
-        .animation(reduceMotion ? nil : AppleDesign.quick, value: presentedDetail)
     }
 
     private var monitorToolbar: some View {
@@ -300,6 +289,7 @@ struct ServerMonitorLayoutView: View {
 
 private struct MonitorCardShell<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
 
     let card: MonitorCardKind
     let onOpen: (() -> Void)?
@@ -376,7 +366,7 @@ private struct MonitorCardShell<Content: View>: View {
             onOpen?()
         }
         .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : AppleDesign.quick, value: isHovering)
+        .animation((reduceMotion || accessibilityOverrides.reduceMotion) ? nil : AppleDesign.quick, value: isHovering)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
         .accessibilityHint(onOpen == nil ? "" : "打开\(card.title)详情")

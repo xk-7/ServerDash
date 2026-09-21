@@ -218,30 +218,20 @@ struct WorkspaceTabStrip: View {
     var onClose: (WorkspaceTab) -> Void
     var onCloseMultiple: (([WorkspaceTab]) -> Void)? = nil
     var recordingPaneIDs: Set<UUID> = []
+    @State private var hoveredTabID: UUID?
 
     var body: some View {
         HStack(spacing: 0) {
-            Button { switchTab(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }
+            Button { switchTab(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .frame(width: WorkspaceTabStripMetrics.navigationButtonWidth, height: 44)
+            }
                 .accessibilityLabel("上一个标签").disabled(workspace.tabs.count < 2)
             ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
+                ScrollView(.horizontal, showsIndicators: WorkspaceTabStripMetrics.showsIndicators) {
                     LazyHStack(spacing: 4) {
                         ForEach(workspace.tabs) { tab in
-                            HStack(spacing: 0) {
-                                if tab.layout.panes.contains(where: recordingPaneIDs.contains) {
-                                    Image(systemName: "record.circle.fill").foregroundStyle(.red)
-                                        .accessibilityLabel("正在录制").padding(.trailing, 4)
-                                }
-                                Button { onSelect(tab) } label: {
-                                    Label(tab.title + (tab.layout.panes.count > 1 ? " · \(tab.layout.panes.count)" : ""), systemImage: tab.kind.icon)
-                                        .lineLimit(1).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                }
-                                .accessibilityAddTraits(workspace.selectedTabID == tab.id ? .isSelected : [])
-                                Button { onClose(tab) } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                                    .accessibilityLabel("关闭 \(tab.title)")
-                            }
-                            .padding(.leading, 12).frame(width: 210)
-                            .background(workspace.selectedTabID == tab.id ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            tabCell(tab)
                             .draggable(tab.id.uuidString)
                             .dropDestination(for: String.self) { items, _ in
                                 guard let text = items.first, let id = UUID(uuidString: text), workspace.tabs.contains(where: { $0.id == id }) else { return false }
@@ -264,10 +254,73 @@ struct WorkspaceTabStrip: View {
                 }
                 .onChange(of: workspace.selectedTabID, initial: true) { _, id in if let id { proxy.scrollTo(id, anchor: .center) } }
             }
-            Button { switchTab(1) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+            Button { switchTab(1) } label: {
+                Image(systemName: "chevron.right")
+                    .frame(width: WorkspaceTabStripMetrics.navigationButtonWidth, height: 44)
+            }
                 .accessibilityLabel("下一个标签").disabled(workspace.tabs.count < 2)
         }
-        .buttonStyle(.plain).frame(height: 50)
+        .buttonStyle(.plain)
+        .frame(height: WorkspaceTabStripMetrics.height)
+    }
+
+    @ViewBuilder
+    private func tabCell(_ tab: WorkspaceTab) -> some View {
+        #if os(macOS)
+        let selected = workspace.selectedTabID == tab.id
+        let showsClose = selected || hoveredTabID == tab.id
+        HStack(spacing: 0) {
+            if tab.layout.panes.contains(where: recordingPaneIDs.contains) {
+                Image(systemName: "record.circle.fill").foregroundStyle(.red)
+                    .accessibilityLabel("正在录制").padding(.trailing, 4)
+            }
+            Button { onSelect(tab) } label: {
+                Label(tab.title + (tab.layout.panes.count > 1 ? " · \(tab.layout.panes.count)" : ""), systemImage: tab.kind.icon)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            }
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityAction(named: "关闭标签") { onClose(tab) }
+            Button { onClose(tab) } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 28, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("关闭 \(tab.title)")
+            .opacity(showsClose ? 1 : 0)
+            .allowsHitTesting(showsClose)
+            .disabled(!showsClose)
+            .focusable(showsClose)
+            .accessibilityHidden(!showsClose)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 2)
+        .frame(width: WorkspaceTabStripMetrics.width(for: tab), height: 40)
+        .background(selected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onHover { hovering in
+            if hovering { hoveredTabID = tab.id }
+            else if hoveredTabID == tab.id { hoveredTabID = nil }
+        }
+        #else
+        HStack(spacing: 0) {
+            if tab.layout.panes.contains(where: recordingPaneIDs.contains) {
+                Image(systemName: "record.circle.fill").foregroundStyle(.red)
+                    .accessibilityLabel("正在录制").padding(.trailing, 4)
+            }
+            Button { onSelect(tab) } label: {
+                Label(tab.title + (tab.layout.panes.count > 1 ? " · \(tab.layout.panes.count)" : ""), systemImage: tab.kind.icon)
+                    .lineLimit(1).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .accessibilityAddTraits(workspace.selectedTabID == tab.id ? .isSelected : [])
+            Button { onClose(tab) } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                .accessibilityLabel("关闭 \(tab.title)")
+        }
+        .padding(.leading, 12).frame(width: 210)
+        .background(workspace.selectedTabID == tab.id ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        #endif
     }
     private func closeMany(_ tabs: [WorkspaceTab]) {
         if let onCloseMultiple { onCloseMultiple(tabs) } else { tabs.forEach(onClose) }
@@ -276,6 +329,29 @@ struct WorkspaceTabStrip: View {
         workspace.advance(offset)
         if let tab = workspace.selectedTab { onSelect(tab) }
     }
+}
+
+enum WorkspaceTabStripMetrics {
+    #if os(macOS)
+    static let height: CGFloat = 44
+    static let tabHeight: CGFloat = 40
+    static let navigationButtonWidth: CGFloat = 32
+    static let showsIndicators = false
+    static let minimumWidth: CGFloat = 144
+    static let maximumWidth: CGFloat = 220
+
+    static func width(for tab: WorkspaceTab) -> CGFloat {
+        let paneSuffix = tab.layout.panes.count > 1 ? 4 : 0
+        let estimatedTitleWidth = CGFloat(tab.title.count + paneSuffix) * 8
+        return min(maximumWidth, max(minimumWidth, estimatedTitleWidth + 76))
+    }
+    #else
+    // Preserve the existing iPhone/iPad tab geometry and always-visible close
+    // action. This round changes only the native macOS workspace.
+    static let height: CGFloat = 50
+    static let navigationButtonWidth: CGFloat = 44
+    static let showsIndicators = true
+    #endif
 }
 
 struct TerminalSplitLayout<Pane: View>: View {

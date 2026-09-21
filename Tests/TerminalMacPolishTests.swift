@@ -27,6 +27,20 @@ final class TerminalMacPolishTests: XCTestCase {
         XCTAssertFalse(TerminalInspectorLayout.usesSidebar(contentWidth: 1180 - 240))
         XCTAssertTrue(TerminalInspectorLayout.usesSidebar(contentWidth: 1440 - 240))
         XCTAssertTrue(TerminalInspectorLayout.usesSidebar(contentWidth: 1920 - 260))
+        XCTAssertFalse(TerminalInspectorPresentation.sidebar.isCompact)
+        XCTAssertTrue(TerminalInspectorPresentation.popover.isCompact)
+    }
+
+    @MainActor func testWorkspaceTabsStayFortyFourPointsHighAndAdaptToTheirTitles() throws {
+        let workspace = TerminalWorkspace()
+        workspace.add(serverID: UUID(), title: "短名称", kind: .local)
+        let short = try XCTUnwrap(workspace.selectedTab)
+        XCTAssertEqual(WorkspaceTabStripMetrics.height, 44)
+        XCTAssertEqual(WorkspaceTabStripMetrics.width(for: short), WorkspaceTabStripMetrics.minimumWidth)
+
+        workspace.add(serverID: UUID(), title: String(repeating: "很长的服务器名称", count: 12), kind: .serial)
+        let long = try XCTUnwrap(workspace.selectedTab)
+        XCTAssertEqual(WorkspaceTabStripMetrics.width(for: long), WorkspaceTabStripMetrics.maximumWidth)
     }
 
     @MainActor func testDisplaySearchFindsExistingOutputAndClearsWithoutShellIntegration() throws {

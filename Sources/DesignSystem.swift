@@ -67,6 +67,248 @@ enum AppleDesign {
     static let quick = Animation.easeOut(duration: 0.18)
 }
 
+/// Test-only display preference overrides carried through the view environment.
+/// Production views still honor the real accessibility environment; the
+/// isolated MacQA app can additionally force each state without changing the
+/// developer machine's system settings. The key exists on every Apple target
+/// because shared design modifiers consume it; only the MacQA target injects it.
+struct MacAccessibilityOverrides: Equatable, Sendable {
+    var reduceMotion = false
+    var reduceTransparency = false
+    var increaseContrast = false
+
+    static let none = MacAccessibilityOverrides()
+}
+
+private struct MacAccessibilityOverridesKey: EnvironmentKey {
+    static let defaultValue = MacAccessibilityOverrides.none
+}
+
+extension EnvironmentValues {
+    var macAccessibilityOverrides: MacAccessibilityOverrides {
+        get { self[MacAccessibilityOverridesKey.self] }
+        set { self[MacAccessibilityOverridesKey.self] = newValue }
+    }
+}
+
+#if os(macOS)
+/// Describes the usable detail area rather than the window's outer frame.
+///
+/// Keeping this calculation in one value type prevents individual pages from
+/// drifting toward slightly different responsive breakpoints. A short window
+/// deliberately enters the compact tier even when it is wide: vertical space
+/// is the limiting resource at ServerDash's supported 900 x 620 window size.
+struct MacWorkspaceMetrics: Equatable {
+    enum Tier: Equatable {
+        case compact
+        case regular
+        case wide
+    }
+
+    static let compactWidth: CGFloat = 760
+    static let compactHeight: CGFloat = 680
+    static let wideWidth: CGFloat = 1_200
+
+    let width: CGFloat
+    let height: CGFloat
+
+    init(width: CGFloat, height: CGFloat) {
+        self.width = max(0, width)
+        self.height = max(0, height)
+    }
+
+    init(size: CGSize) {
+        self.init(width: size.width, height: size.height)
+    }
+
+    var tier: Tier {
+        if width < Self.compactWidth || height < Self.compactHeight {
+            return .compact
+        }
+        return width < Self.wideWidth ? .regular : .wide
+    }
+
+    var isCompact: Bool { tier == .compact }
+    var isWide: Bool { tier == .wide }
+    var pagePadding: CGFloat { isCompact ? AppleDesign.Spacing.md : AppleDesign.Spacing.lg }
+    var gridMinimumWidth: CGFloat { isCompact ? 244 : 280 }
+}
+
+/// Shared native sheet chrome for macOS editors.
+///
+/// Editors keep ownership of validation and dismissal while the scaffold
+/// provides a scroll-safe content region, native button placement and a
+/// consistent inline error announcement. The maximum width is a ceiling, so a
+/// sheet hosted by the minimum supported window can always shrink to fit.
+struct MacEditorSheetScaffold<Content: View>: View {
+    let title: String
+    let accessibilityID: String
+    let cancelTitle: String
+    let cancelRole: ButtonRole?
+    let showsCancelAction: Bool
+    let cancelDisabled: Bool
+    let cancelAccessibilityID: String?
+    let saveTitle: String
+    let showsSaveAction: Bool
+    let saveAccessibilityID: String?
+    let errorMessage: String?
+    let saveDisabled: Bool
+    let maxContentWidth: CGFloat
+    let scrollsContent: Bool
+    let onCancel: () -> Void
+    let onSave: () -> Void
+    let onValidationError: (() -> Void)?
+    @ViewBuilder let content: Content
+
+    @AccessibilityFocusState private var errorIsFocused: Bool
+
+    init(
+        title: String,
+        accessibilityID: String = "mac.editor.sheet",
+        cancelTitle: String = "取消",
+        cancelRole: ButtonRole? = .cancel,
+        showsCancelAction: Bool = true,
+        cancelDisabled: Bool = false,
+        cancelAccessibilityID: String? = nil,
+        saveTitle: String = "保存",
+        showsSaveAction: Bool = true,
+        saveAccessibilityID: String? = nil,
+        errorMessage: String? = nil,
+        saveDisabled: Bool = false,
+        maxContentWidth: CGFloat = 720,
+        scrollsContent: Bool = true,
+        onCancel: @escaping () -> Void,
+        onSave: @escaping () -> Void,
+        onValidationError: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.accessibilityID = accessibilityID
+        self.cancelTitle = cancelTitle
+        self.cancelRole = cancelRole
+        self.showsCancelAction = showsCancelAction
+        self.cancelDisabled = cancelDisabled
+        self.cancelAccessibilityID = cancelAccessibilityID
+        self.saveTitle = saveTitle
+        self.showsSaveAction = showsSaveAction
+        self.saveAccessibilityID = saveAccessibilityID
+        self.errorMessage = errorMessage
+        self.saveDisabled = saveDisabled
+        self.maxContentWidth = max(320, maxContentWidth)
+        self.scrollsContent = scrollsContent
+        self.onCancel = onCancel
+        self.onSave = onSave
+        self.onValidationError = onValidationError
+        self.content = content()
+    }
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geometry in
+                Group {
+                    if scrollsContent {
+                        ScrollView { scrollingSheetContent(width: geometry.size.width) }
+                    } else {
+                        nonScrollingSheetContent(width: geometry.size.width)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.headline)
+                        .accessibilityIdentifier("\(accessibilityID).title")
+                }
+                if showsCancelAction {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(cancelTitle, role: cancelRole, action: onCancel)
+                            .keyboardShortcut(.cancelAction)
+                            .disabled(cancelDisabled)
+                            .accessibilityIdentifier(cancelAccessibilityID ?? "\(accessibilityID).cancel")
+                    }
+                }
+                if showsSaveAction {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(saveTitle, action: onSave)
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(saveDisabled)
+                            .accessibilityIdentifier(saveAccessibilityID ?? "\(accessibilityID).save")
+                    }
+                }
+            }
+        }
+        .frame(idealWidth: min(768, maxContentWidth + AppleDesign.Spacing.xl * 2), idealHeight: 560)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("\(accessibilityID).container")
+        .onAppear { focusValidationTarget(for: errorMessage) }
+        .onChange(of: errorMessage) { _, value in
+            focusValidationTarget(for: value)
+        }
+    }
+
+    private func scrollingSheetContent(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+            content
+            validationError
+        }
+        .frame(
+            maxWidth: min(maxContentWidth, max(0, width - AppleDesign.Spacing.xl * 2)),
+            alignment: .leading
+        )
+        .padding(AppleDesign.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private func nonScrollingSheetContent(width: CGFloat) -> some View {
+        content
+            .frame(
+                maxWidth: min(maxContentWidth, max(0, width - AppleDesign.Spacing.xl * 2)),
+                maxHeight: .infinity,
+                alignment: .topLeading
+            )
+            .padding(AppleDesign.Spacing.lg)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if errorMessage?.isEmpty == false {
+                    validationError
+                        .padding(.horizontal, AppleDesign.Spacing.lg)
+                        .padding(.bottom, AppleDesign.Spacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.bar)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var validationError: some View {
+        if let errorMessage, !errorMessage.isEmpty {
+            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(Color.appError)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityFocused($errorIsFocused)
+                .accessibilityIdentifier("\(accessibilityID).error")
+        }
+    }
+
+    private func focusValidationTarget(for message: String?) {
+        guard message?.isEmpty == false else {
+            errorIsFocused = false
+            return
+        }
+        if let onValidationError {
+            errorIsFocused = false
+            onValidationError()
+        } else {
+            // Editors without field-level validation still expose and focus the
+            // inline error instead of dropping the VoiceOver announcement.
+            errorIsFocused = true
+        }
+    }
+}
+#endif
+
 enum MonitorSeverity: String, Equatable {
     case normal
     case warning
@@ -131,6 +373,7 @@ extension Color {
 
 struct ApplePanelModifier: ViewModifier {
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
 
     var padding: CGFloat = 16
     var radius: CGFloat = AppleDesign.Radius.panel
@@ -143,7 +386,7 @@ struct ApplePanelModifier: ViewModifier {
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .stroke(
-                        Color.appHairline.opacity(contrast == .increased ? 1 : 0.35),
+                        Color.appHairline.opacity((contrast == .increased || accessibilityOverrides.increaseContrast) ? 1 : 0.35),
                         lineWidth: 1
                     )
             }
@@ -166,6 +409,7 @@ extension View {
 
 private struct AppleInteractiveSurface: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
     @State private var hovering = false
     let radius: CGFloat
 
@@ -177,12 +421,13 @@ private struct AppleInteractiveSurface: ViewModifier {
                     .allowsHitTesting(false)
             }
             .onHover { hovering = $0 }
-            .animation(reduceMotion ? nil : AppleDesign.quick, value: hovering)
+            .animation((reduceMotion || accessibilityOverrides.reduceMotion) ? nil : AppleDesign.quick, value: hovering)
     }
 }
 
 struct AppleUnifiedPanel<Content: View>: View {
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
 
     @ViewBuilder let content: Content
 
@@ -199,7 +444,7 @@ struct AppleUnifiedPanel<Content: View>: View {
         .overlay {
             RoundedRectangle(cornerRadius: AppleDesign.Radius.panel, style: .continuous)
                 .stroke(
-                    Color.appHairline.opacity(contrast == .increased ? 1 : 0.35),
+                    Color.appHairline.opacity((contrast == .increased || accessibilityOverrides.increaseContrast) ? 1 : 0.35),
                     lineWidth: 1
                 )
         }
@@ -331,79 +576,15 @@ struct ServerStatusBadge: View {
 struct AppleChromeBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
 
     var body: some View {
-        if reduceTransparency {
+        if reduceTransparency || accessibilityOverrides.reduceTransparency {
             Color.appSurface
         } else {
             Rectangle()
-                .fill(contrast == .increased ? .thickMaterial : .regularMaterial)
+                .fill((contrast == .increased || accessibilityOverrides.increaseContrast) ? .thickMaterial : .regularMaterial)
         }
-    }
-}
-
-struct AppleDismissibleOverlay<Content: View>: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    let maxWidth: CGFloat
-    let maxHeight: CGFloat
-    let onDismiss: () -> Void
-    @ViewBuilder let content: Content
-
-    init(
-        maxWidth: CGFloat,
-        maxHeight: CGFloat,
-        onDismiss: @escaping () -> Void,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.maxWidth = maxWidth
-        self.maxHeight = maxHeight
-        self.onDismiss = onDismiss
-        self.content = content()
-    }
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.22)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onDismiss)
-
-            content
-                .frame(maxWidth: maxWidth, maxHeight: maxHeight)
-                .background(Color.appGround)
-                .clipShape(
-                    RoundedRectangle(
-                        cornerRadius: AppleDesign.Radius.hero,
-                        style: .continuous
-                    )
-                )
-                .shadow(color: .black.opacity(0.22), radius: 28, y: 12)
-                .contentShape(
-                    RoundedRectangle(
-                        cornerRadius: AppleDesign.Radius.hero,
-                        style: .continuous
-                    )
-                )
-                .padding(AppleDesign.Spacing.xl)
-        }
-        .appleExitCommand(perform: onDismiss)
-        .transition(
-            reduceMotion
-                ? .opacity
-                : .opacity.combined(with: .scale(scale: 0.98))
-        )
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func appleExitCommand(perform action: @escaping () -> Void) -> some View {
-#if os(macOS)
-        onExitCommand(perform: action)
-#else
-        self
-#endif
     }
 }
 
@@ -542,6 +723,7 @@ struct StatusDot: View {
 
 struct MetricCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
 
     let title: String
     let value: String
@@ -558,7 +740,7 @@ struct MetricCard: View {
             Text(value)
                 .font(.title2.weight(.semibold))
                 .monospacedDigit()
-                .contentTransition(reduceMotion ? .identity : .numericText())
+                .contentTransition((reduceMotion || accessibilityOverrides.reduceMotion) ? .identity : .numericText())
             ProgressView(value: min(max(progress, 0), 1))
                 .tint(tint)
                 .scaleEffect(x: 1, y: 0.7)
@@ -574,6 +756,7 @@ struct MetricCard: View {
 
 struct ApplePressButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.macAccessibilityOverrides) private var accessibilityOverrides
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -585,8 +768,8 @@ struct ApplePressButtonStyle: ButtonStyle {
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.06))
             )
             .frame(minWidth: 44, minHeight: 44)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-            .animation(reduceMotion ? nil : AppleDesign.quick, value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !(reduceMotion || accessibilityOverrides.reduceMotion) ? 0.98 : 1)
+            .animation((reduceMotion || accessibilityOverrides.reduceMotion) ? nil : AppleDesign.quick, value: configuration.isPressed)
     }
 }
 

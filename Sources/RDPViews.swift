@@ -25,6 +25,10 @@ enum UnifiedMachineEntry: Identifiable {
     }
 }
 
+private enum RDPEditorFocusField: Hashable {
+    case name, host, port, username, domain, password, width, height
+}
+
 struct RDPEditorView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -44,17 +48,38 @@ struct RDPEditorView: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var invalidStoredSettings = false
+    @FocusState private var focusedField: RDPEditorFocusField?
     var body: some View {
-        VStack(spacing: 0) {
-            HStack { Label(record == nil ? "添加 RDP 远程桌面" : "编辑 RDP 远程桌面", systemImage: "desktopcomputer").font(.title2.bold()); Spacer() }.padding(20)
+        MacEditorSheetScaffold(
+            title: record == nil ? "添加 RDP 远程桌面" : "编辑 RDP 远程桌面",
+            accessibilityID: "mac.editor.rdp",
+            saveTitle: "保存并连接",
+            errorMessage: error,
+            saveDisabled: invalidStoredSettings,
+            maxContentWidth: 720,
+            scrollsContent: false,
+            onCancel: {
+                password = ""
+                dismiss()
+            },
+            onSave: { save(intent: .defaultAction) },
+            onValidationError: focusFirstInvalidField
+        ) {
             Form {
                 Section("Windows 连接") {
                     TextField("名称", text: $name)
+                        .focused($focusedField, equals: .name)
                     TextField("主机地址", text: $host)
+                        .focused($focusedField, equals: .host)
+                        .accessibilityIdentifier("mac.editor.rdp.host")
                     TextField("端口", text: $port)
+                        .focused($focusedField, equals: .port)
                     TextField("用户名", text: $username)
+                        .focused($focusedField, equals: .username)
                     TextField("域（可选）", text: $domain)
+                        .focused($focusedField, equals: .domain)
                     SecureField(record?.credentialReference == nil ? "密码" : "新密码（留空保留已保存密码）", text: $password)
+                        .focused($focusedField, equals: .password)
                     Toggle("保存密码到本机 Keychain", isOn: $savePassword)
                     Text("不保存密码时，仅“保存并连接”会将输入交给本次会话。密码不会导出或同步。使用 DOMAIN\\user 或 user@example.com 时通常无需另填域。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -63,8 +88,10 @@ struct RDPEditorView: View {
                 Section("显示") {
                     HStack {
                         TextField("宽度", value: $settings.width, format: .number.grouping(.never))
+                            .focused($focusedField, equals: .width)
                         Text("×")
                         TextField("高度", value: $settings.height, format: .number.grouping(.never))
+                            .focused($focusedField, equals: .height)
                     }
                     Picker("色彩深度", selection: $settings.colorDepth) { ForEach([16, 24, 32], id: \.self) { Text("\($0) 位").tag($0) } }
                     Toggle("随窗口调整远程分辨率", isOn: $settings.dynamicResolution)
@@ -109,16 +136,39 @@ struct RDPEditorView: View {
                     Picker("证书策略", selection: $settings.certificatePolicy) { ForEach(RDPCertificatePolicy.allCases, id: \.self) { Text($0.title).tag($0) } }
                     Toggle("网络中断后自动重连（最多五次）", isOn: $settings.autoReconnect)
                 }
-                if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-            }.formStyle(.grouped)
-            HStack {
-                Button("取消", role: .cancel) { password = ""; dismiss() }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("保存") { save(connect: false) }.disabled(invalidStoredSettings)
-                Button("保存并连接") { save(connect: true) }.buttonStyle(.borderedProminent).disabled(invalidStoredSettings).keyboardShortcut(.defaultAction)
-            }.padding(16)
-        }.frame(width: 620, height: 740).background(Color(nsColor: .windowBackgroundColor))
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button("保存", systemImage: "square.and.arrow.down") { save(intent: .secondaryAction) }
+                    .disabled(invalidStoredSettings)
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
             .onAppear(perform: load)
+    }
+    private func focusFirstInvalidField() {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDomain = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedHost.isEmpty || trimmedHost.contains(where: { $0.isWhitespace || $0 == "/" || $0 == "\\" || $0 == "@" }) {
+            focusedField = .host
+        } else if Int(port).map({ !(1...65_535).contains($0) }) ?? true {
+            focusedField = .port
+        } else if trimmedUsername.isEmpty {
+            focusedField = .username
+        } else if trimmedDomain.contains("\\") || (trimmedUsername.contains("@") && !trimmedDomain.isEmpty) {
+            focusedField = .domain
+        } else if !(200...8_192).contains(settings.width) {
+            focusedField = .width
+        } else if !(200...8_192).contains(settings.height) {
+            focusedField = .height
+        } else {
+            focusedField = .host
+        }
     }
     private func load() {
         guard !loaded else { return }; loaded = true
@@ -136,7 +186,7 @@ struct RDPEditorView: View {
             settings.shares.append(.init(name: url.lastPathComponent, bookmark: bookmark))
         } catch { self.error = "无法授权目录，请重新选择。" }
     }
-    private func save(connect: Bool) {
+    private func save(intent: ConnectionEditorCommitIntent) {
         var newCredential: UUID?
         do {
             guard let portNumber = Int(port), port.allSatisfy(\.isNumber) else { throw RDPValidationError.invalidPort }
@@ -171,7 +221,7 @@ struct RDPEditorView: View {
                 record.tagsText = saved.tagsText; record.notes = saved.notes; record.settingsData = saved.settingsData
                 record.credentialReference = saved.credentialReference; record.updatedAt = saved.updatedAt
             }
-            onSave(record ?? saved, connect, password.isEmpty ? nil : password)
+            onSave(record ?? saved, intent.connectsAfterSaving, password.isEmpty ? nil : password)
             password = ""; dismiss()
         } catch {
             if let newCredential { try? RDPCredentials.delete(newCredential) }

@@ -14,6 +14,12 @@ FEATURE_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/mac-build-reliability"
 LEGACY_REPO="${FIXTURE_ROOT}/legacy/.build/mac-build-reliability"
 CI_REPO="${FIXTURE_ROOT}/ci-checkout"
 WINDOWS_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/windows-installer-preview"
+DESKTOP_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/desktop-preview"
+CMD_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/desktop-cmd-preview"
+RST_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/desktop-rst-preview"
+CASE_WINDOWS_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/mixed-case-windows-preview"
+CASE_DOC_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/uppercase-doc-preview"
+CASE_SCRIPT_REPO="${FIXTURE_ROOT}/ServerDash-worktrees/uppercase-script-preview"
 OUTPUT_FILE="${FIXTURE_ROOT}/output.log"
 TEST_COUNT=0
 
@@ -147,12 +153,103 @@ git -C "${PRIMARY_REPO}" worktree add -q -b codex/windows-installer-preview \
     "${WINDOWS_REPO}" main
 WINDOWS_DOCTOR=(bash "${WINDOWS_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
 expect_failure_containing \
-    "Windows preview branch is rejected for Apple builds" \
-    "not an Apple build workspace" \
+    "Windows client branch is rejected for Apple builds" \
+    "Windows client branch is not an Apple build workspace" \
     "${WINDOWS_DOCTOR[@]}"
 expect_success \
-    "Windows preview diagnostic override is explicit" \
+    "Windows client diagnostic override is explicit" \
     env SERVERDASH_ALLOW_WINDOWS_BRANCH=1 "${WINDOWS_DOCTOR[@]}"
+git -C "${WINDOWS_REPO}" switch -qc windows/align-macos main
+expect_failure_containing \
+    "windows slash branch is rejected for Apple builds" \
+    "Windows client branch is not an Apple build workspace" \
+    "${WINDOWS_DOCTOR[@]}"
+
+git -C "${PRIMARY_REPO}" worktree add -q -b codex/desktop-preview \
+    "${DESKTOP_REPO}" main
+mkdir -p "${DESKTOP_REPO}/Desktop"
+touch "${DESKTOP_REPO}/Desktop/ServerDash.Windows.exe"
+git -C "${DESKTOP_REPO}" add Desktop
+git -C "${DESKTOP_REPO}" commit -qm "Add disguised Windows desktop tree"
+DESKTOP_DOCTOR=(bash "${DESKTOP_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
+expect_failure_containing \
+    "Windows Desktop tree is rejected on a neutral branch" \
+    "contains an independent Windows client tree" \
+    "${DESKTOP_DOCTOR[@]}"
+expect_success \
+    "Windows Desktop tree diagnostic override is explicit" \
+    env SERVERDASH_ALLOW_WINDOWS_BRANCH=1 "${DESKTOP_DOCTOR[@]}"
+
+git -C "${PRIMARY_REPO}" worktree add -q -b codex/desktop-cmd-preview \
+    "${CMD_REPO}" main
+cat >"${CMD_REPO}/Scripts/build-desktop.cmd" <<'EOF'
+@echo off
+dotnet publish Client.csproj
+EOF
+git -C "${CMD_REPO}" add Scripts/build-desktop.cmd
+git -C "${CMD_REPO}" commit -qm "Add neutral Windows command script"
+CMD_DOCTOR=(bash "${CMD_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
+expect_failure_containing \
+    "Windows command script is rejected on a neutral branch" \
+    "contains an independent Windows client tree" \
+    "${CMD_DOCTOR[@]}"
+
+git -C "${PRIMARY_REPO}" worktree add -q -b codex/desktop-rst-preview \
+    "${RST_REPO}" main
+cat >"${RST_REPO}/Docs/desktop-client.rst" <<'EOF'
+Desktop client
+==============
+
+This document describes the WinUI and MSIX application.
+EOF
+git -C "${RST_REPO}" add Docs/desktop-client.rst
+git -C "${RST_REPO}" commit -qm "Add neutral Windows documentation"
+RST_DOCTOR=(bash "${RST_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
+expect_failure_containing \
+    "Windows RST documentation is rejected on a neutral branch" \
+    "contains an independent Windows client tree" \
+    "${RST_DOCTOR[@]}"
+
+git -C "${PRIMARY_REPO}" worktree add -q -b codex/mixed-case-windows-preview \
+    "${CASE_WINDOWS_REPO}" main
+mkdir -p "${CASE_WINDOWS_REPO}/wInDoWs/App"
+touch "${CASE_WINDOWS_REPO}/wInDoWs/App/client.txt"
+git -C "${CASE_WINDOWS_REPO}" add .
+git -C "${CASE_WINDOWS_REPO}" commit -qm "Add mixed-case Windows tree"
+CASE_WINDOWS_DOCTOR=(bash "${CASE_WINDOWS_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
+expect_failure_containing \
+    "Mixed-case Windows tree is rejected on a neutral branch" \
+    "contains an independent Windows client tree" \
+    "${CASE_WINDOWS_DOCTOR[@]}"
+
+git -C "${PRIMARY_REPO}" worktree add -q -b codex/uppercase-doc-preview \
+    "${CASE_DOC_REPO}" main
+cat >"${CASE_DOC_REPO}/Docs/desktop-client.MD" <<'EOF'
+# Desktop client
+
+This document describes the WinUI and MSIX application.
+EOF
+git -C "${CASE_DOC_REPO}" add Docs/desktop-client.MD
+git -C "${CASE_DOC_REPO}" commit -qm "Add uppercase-extension Windows documentation"
+CASE_DOC_DOCTOR=(bash "${CASE_DOC_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
+expect_failure_containing \
+    "Uppercase Markdown Windows documentation is rejected on a neutral branch" \
+    "contains an independent Windows client tree" \
+    "${CASE_DOC_DOCTOR[@]}"
+
+git -C "${PRIMARY_REPO}" worktree add -q -b codex/uppercase-script-preview \
+    "${CASE_SCRIPT_REPO}" main
+cat >"${CASE_SCRIPT_REPO}/Scripts/build-desktop.SH" <<'EOF'
+#!/bin/bash
+dotnet publish Client.csproj
+EOF
+git -C "${CASE_SCRIPT_REPO}" add Scripts/build-desktop.SH
+git -C "${CASE_SCRIPT_REPO}" commit -qm "Add uppercase-extension Windows build script"
+CASE_SCRIPT_DOCTOR=(bash "${CASE_SCRIPT_REPO}/Scripts/dev-doctor.sh" --skip-generated-check)
+expect_failure_containing \
+    "Uppercase shell Windows build tooling is rejected on a neutral branch" \
+    "contains an independent Windows client tree" \
+    "${CASE_SCRIPT_DOCTOR[@]}"
 
 mkdir -p "$(dirname "${LEGACY_REPO}")"
 git -C "${PRIMARY_REPO}" worktree add -q -b codex/legacy "${LEGACY_REPO}" main
