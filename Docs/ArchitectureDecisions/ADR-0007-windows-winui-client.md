@@ -44,6 +44,10 @@ needs its own UI stack, storage, and secret store, while matching macOS
    interoperability claim.
 9. Apple README, CHANGELOG, and the website do not list Windows as a shipped
    client until a Windows build exists and a later decision says so.
+10. The Windows client remains on its dedicated long-lived branch. Apple
+    mainline changes may be merged or cherry-picked into this branch, but the
+    Windows client branch and its product tree must never be merged back into
+    `main`.
 
 ## Consequences
 
@@ -55,8 +59,10 @@ needs its own UI stack, storage, and secret store, while matching macOS
 - Jump hosts, proxies, forwarding, local shell, serial, VNC, WebDAV, recording,
   and AI are planned on this branch to match macOS, but each phase must update
   [WINDOWS.md](../WINDOWS.md) before it is treated as present.
-- A later merge to `main` requires a Windows build that at least compiles and
-  a review of this ADR against shipping claims.
+- Windows work may absorb compatible Apple-mainline fixes. Any generally
+  useful change discovered here must be recreated or selectively applied from
+  an Apple branch based on `main`; the Windows product commit history is not a
+  valid merge source for `main`.
 
 ## Rejected alternatives
 
