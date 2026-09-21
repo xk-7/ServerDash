@@ -506,6 +506,7 @@ final class TerminalHostView: NSView {
     }
     var onFocus: (() -> Void)?
     private var didStart = false
+    private var temporaryKeyPaths: [String] = []
     private var commandObserver: TerminalCommandObservation?
     private var appearanceProfile: TerminalAppearanceProfile
     private var appliedDarkAppearance: Bool?
@@ -698,6 +699,8 @@ final class TerminalHostView: NSView {
         if didStart {
             terminalView.replaceProcess()
         }
+        TemporaryKeyMaterial.cleanup(temporaryKeyPaths)
+        temporaryKeyPaths = []
         didStart = false
         return process
     }
@@ -706,8 +709,10 @@ final class TerminalHostView: NSView {
 
     private func startSSH(handshakeMarker: URL?) throws {
         terminalView.resetHostKeyFailureDetection()
+        TemporaryKeyMaterial.cleanup(temporaryKeyPaths)
         var plan = try SystemOpenSSHConnectionProvider().launchPlan(for: config, purpose: .interactiveShell)
         if let handshakeMarker { plan.arguments.insert(contentsOf: SSHSessionBootstrap.markerArguments(handshakeMarker), at: 0) }
+        temporaryKeyPaths = plan.cleanupPaths
         let environment = plan.environment.map { "\($0.key)=\($0.value)" }.sorted()
         terminalView.startProcess(executable: plan.executable, args: plan.arguments, environment: environment, execName: "ssh")
     }

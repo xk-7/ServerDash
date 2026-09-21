@@ -248,7 +248,29 @@ enum TrustedHostStore {
             "/usr/bin/ssh-keyscan",
             ["-T", "8", "-p", String(port), host]
         )
-        let validLines = scan.output
+        return try parseScanOutput(
+            output: scan.output,
+            error: scan.error,
+            host: host,
+            port: port,
+            preferredAlgorithm: preferredAlgorithm
+        )
+#else
+        _ = preferredAlgorithm
+        throw SSHValidationError.hostKeyUnavailable(
+            "移动端会在 SSH 握手中直接获取并验证主机密钥。"
+        )
+#endif
+    }
+
+    static func parseScanOutput(
+        output: String,
+        error: String,
+        host: String,
+        port: Int,
+        preferredAlgorithm: String?
+    ) throws -> SSHHostKeyProbe {
+        let validLines = output
             .split(whereSeparator: \.isNewline)
             .map(String.init)
             .filter { line in
@@ -262,7 +284,7 @@ enum TrustedHostStore {
         }) ?? validLines.first(where: {
             algorithm(of: $0) == "ssh-ed25519"
         }) ?? validLines.first else {
-            throw SSHValidationError.hostKeyUnavailable(scan.error)
+            throw SSHValidationError.hostKeyUnavailable(error)
         }
         let fields = preferred.split(separator: " ")
         guard fields.count >= 3, let digest = fingerprint(for: preferred) else {
@@ -276,12 +298,6 @@ enum TrustedHostStore {
             keyLine: preferred,
             additionalKeyLines: validLines.filter { $0 != preferred }
         )
-#else
-        _ = preferredAlgorithm
-        throw SSHValidationError.hostKeyUnavailable(
-            "移动端会在 SSH 握手中直接获取并验证主机密钥。"
-        )
-#endif
     }
 
     static func inspect(
@@ -528,10 +544,21 @@ final class HostTrustCoordinator {
     func authorize(
         _ config: ServerConnectionConfig,
         source: HostTrustSource,
-        forceScan: Bool = false
+        forceScan: Bool = false,
+        scanProvider: (@Sendable (String, Int, String?) throws -> SSHHostKeyProbe)? = nil
     ) async throws {
         try Task.checkCancellation()
-        switch try await inspector(config, forceScan) {
+        let decision: HostTrustDecision
+        if let scanProvider {
+            decision = try await TrustedHostStore.inspect(
+                config,
+                forceScan: forceScan,
+                scanProvider: scanProvider
+            )
+        } else {
+            decision = try await inspector(config, forceScan)
+        }
+        switch decision {
         case .trusted(let probe):
             if !TrustedHostStore.hasUsableHostName(host: config.host, port: config.port) {
                 try await truster(probe, false)

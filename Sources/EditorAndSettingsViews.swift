@@ -255,6 +255,11 @@ struct ServerEditorView: View {
     }
 
     private var draftConfig: ServerConnectionConfig {
+        let route: ConnectionRoute? = if let server {
+            appState.connectionConfig(for: server).route
+        } else {
+            .direct
+        }
         if let identity = selectedIdentity {
             let draft = ServerRecord(
                 id: draftID,
@@ -272,6 +277,7 @@ struct ServerEditorView: View {
             )
             config.advancedSettings = advanced
             config.connectTimeout = TimeInterval(advanced.connectTimeout)
+            config.route = route
             return config
         }
         let hasStoredPassphrase = (try? KeychainService.secret(
@@ -289,6 +295,7 @@ struct ServerEditorView: View {
             sshKeyID: draftID,
             hasPassphrase: !passphrase.isEmpty || hasStoredPassphrase,
             connectTimeout: TimeInterval(advanced.connectTimeout),
+            route: route,
             advancedSettings: advanced
         )
     }

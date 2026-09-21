@@ -274,6 +274,14 @@ final class DesktopFileOperationsTests: XCTestCase {
         let remote=try run(["action":"manifest","path":directory.path])
         XCTAssertEqual(remote.entries?.count,2)
     }
+    func testFileDigestMatchesInMemoryDigest() throws {
+        let url=try fixture().appendingPathComponent("payload.bin")
+        let data=Data((0..<100_000).map{UInt8($0 % 256)})
+        try data.write(to:url)
+        XCTAssertEqual(try DesktopFileOperations.digest(fileURL:url),DesktopFileOperations.digest(data))
+        let entries=try DirectorySyncPlanner.localManifest(root:url.deletingLastPathComponent())
+        XCTAssertEqual(entries.first(where:{$0.path=="payload.bin"})?.sha256,DesktopFileOperations.digest(data))
+    }
 }
 
 @MainActor final class DesktopFileUIFixtureTests: XCTestCase {

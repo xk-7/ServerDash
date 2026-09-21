@@ -3,6 +3,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 FOUNDATION_EXPORT BOOL SDRDPCertificateIsSelfSigned(NSData *pem);
+FOUNDATION_EXPORT BOOL SDRDPCertificateChainIsSelfIssued(NSData *pem);
+FOUNDATION_EXPORT NSString * _Nullable SDRDPCertificateCommonName(NSData *pem);
+FOUNDATION_EXPORT NSString *SDRDPSuggestedNLADomain(NSString *username, NSString *domain, NSString * _Nullable certificateCommonName);
 /// All callbacks run on the connection worker. UI must dispatch without blocking that worker.
 @interface SDRDPClient : NSObject
 @property(nonatomic, copy, nullable) BOOL (^verifyCertificate)(NSData *chain, NSString *host, NSInteger port);

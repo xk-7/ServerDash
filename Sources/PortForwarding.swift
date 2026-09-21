@@ -133,6 +133,8 @@ actor PortForwardSupervisor {
         var stopRequested: Bool
         var transportRule: PortForwardRule
         var httpProxy: HTTPToSOCKSProxy?
+        var cleanupPaths: [String]
+        var handshakeMarker: URL?
     }
 
     private let provider: any ConnectionProvider
@@ -182,51 +184,87 @@ actor PortForwardSupervisor {
             transportRule.direction = .dynamic; transportRule.bindAddress = "127.0.0.1"
             transportRule.listenPort = try HTTPToSOCKSProxy.availableLoopbackPort()
         }
-        let plan = try provider.launchPlan(for: config, purpose: .portForward(transportRule))
-        let handle = try launcher.launch(plan)
-        let generation = UUID()
-        var active = ActiveTunnel(
-            rule: rule,
-            config: config,
-            exposureConfirmed: exposureConfirmed,
-            handle: handle,
-            snapshot: PortForwardSnapshot(
-                id: UUID(),
-                ruleID: rule.id,
-                state: .starting,
-                processIdentifier: handle.processIdentifier,
-                startedAt: .now,
-                reconnectAttempt: 0,
-                activeConnections: nil,
-                transferredBytes: nil,
-                lastError: nil
-            ),
-            generation: generation,
-            stopRequested: false,
-            transportRule: transportRule,
-            httpProxy: nil
-        )
-        tunnels[rule.id] = active
+        var plan = try provider.launchPlan(for: config, purpose: .portForward(transportRule))
+        var handshakeMarker: URL?
         do {
-            try await waitUntilReady(rule: transportRule, handle: handle)
-            guard tunnels[rule.id]?.stopRequested == false else { throw CancellationError() }
+            if transportRule.direction == .remote {
+                let marker = try SSHSessionBootstrap.handshakeMarker()
+                handshakeMarker = marker
+                plan.arguments.insert(contentsOf: SSHSessionBootstrap.markerArguments(marker), at: 0)
+            }
+            let handle = try launcher.launch(plan)
+            let generation = UUID()
+            let active = ActiveTunnel(
+                rule: rule,
+                config: config,
+                exposureConfirmed: exposureConfirmed,
+                handle: handle,
+                snapshot: PortForwardSnapshot(
+                    id: UUID(),
+                    ruleID: rule.id,
+                    state: .starting,
+                    processIdentifier: handle.processIdentifier,
+                    startedAt: .now,
+                    reconnectAttempt: 0,
+                    activeConnections: nil,
+                    transferredBytes: nil,
+                    lastError: nil
+                ),
+                generation: generation,
+                stopRequested: false,
+                transportRule: transportRule,
+                httpProxy: nil,
+                cleanupPaths: plan.cleanupPaths,
+                handshakeMarker: handshakeMarker
+            )
+            tunnels[rule.id] = active
+            try await waitUntilReady(
+                rule: transportRule,
+                handle: handle,
+                handshakeMarker: handshakeMarker
+            )
+            guard let current = currentTunnel(ruleID: rule.id, generation: generation) else {
+                _ = await terminateAfterFailedStart(handle)
+                throw CancellationError()
+            }
+            if isStopState(current) {
+                _ = await terminateAfterFailedStart(handle)
+                throw CancellationError()
+            }
+            var ready = current
             if rule.direction == .http {
                 let proxy = HTTPToSOCKSProxy(socksPort: transportRule.listenPort)
                 try proxy.start(bindAddress: rule.bindAddress, port: rule.listenPort)
-                active.httpProxy = proxy
+                ready.httpProxy = proxy
             }
-            active.snapshot.state = .ready
-            tunnels[rule.id] = active
+            ready.snapshot.state = .ready
+            tunnels[rule.id] = ready
             monitorExit(ruleID: rule.id, generation: generation, handle: handle)
-            return active.snapshot
+            return ready.snapshot
         } catch {
-            let stopped = await terminateAfterFailedStart(handle)
-            active.snapshot.state = .failed
-            active.snapshot.processIdentifier = stopped ? nil : handle.processIdentifier
-            active.snapshot.lastError = stopped
-                ? error.localizedDescription
-                : ConnectionRouteError.tunnelStopTimedOut.localizedDescription
-            tunnels[rule.id] = active
+            TemporaryKeyMaterial.cleanup(plan.cleanupPaths)
+            if let handshakeMarker {
+                SSHSessionBootstrap.removeMarker(handshakeMarker)
+            }
+            if let current = tunnels[rule.id], isStopState(current) {
+                throw error
+            }
+            let handle = tunnels[rule.id]?.handle
+            let stopped = if let handle {
+                await terminateAfterFailedStart(handle)
+            } else {
+                true
+            }
+            if var failed = tunnels[rule.id], !isStopState(failed) {
+                failed.snapshot.state = .failed
+                failed.snapshot.processIdentifier = stopped ? nil : failed.handle.processIdentifier
+                failed.snapshot.lastError = stopped
+                    ? error.localizedDescription
+                    : ConnectionRouteError.tunnelStopTimedOut.localizedDescription
+                failed.cleanupPaths = []
+                failed.handshakeMarker = nil
+                tunnels[rule.id] = failed
+            }
             throw error
         }
     }
@@ -274,6 +312,12 @@ actor PortForwardSupervisor {
                 tunnels[ruleID] = active
                 throw ConnectionRouteError.portStillInUse(active.rule.listenPort)
             }
+        }
+        TemporaryKeyMaterial.cleanup(active.cleanupPaths)
+        active.cleanupPaths = []
+        if let marker = active.handshakeMarker {
+            SSHSessionBootstrap.removeMarker(marker)
+            active.handshakeMarker = nil
         }
         active.snapshot.state = .stopped
         active.snapshot.processIdentifier = nil
@@ -343,6 +387,12 @@ actor PortForwardSupervisor {
                     active.rule.listenPort
                 ).localizedDescription
             } else {
+                TemporaryKeyMaterial.cleanup(active.cleanupPaths)
+                active.cleanupPaths = []
+                if let marker = active.handshakeMarker {
+                    SSHSessionBootstrap.removeMarker(marker)
+                    active.handshakeMarker = nil
+                }
                 active.snapshot.state = .stopped
                 active.snapshot.processIdentifier = nil
             }
@@ -387,20 +437,24 @@ actor PortForwardSupervisor {
 
     private func waitUntilReady(
         rule: PortForwardRule,
-        handle: any TunnelProcessHandle
+        handle: any TunnelProcessHandle,
+        handshakeMarker: URL?
     ) async throws {
         let deadline = Date().addingTimeInterval(readinessTimeout)
         if rule.direction == .remote {
+            guard let handshakeMarker else {
+                throw ConnectionRouteError.tunnelReadinessTimedOut
+            }
             while Date() < deadline {
                 guard handle.isRunning() else {
                     throw ConnectionRouteError.tunnelLaunchFailed(
                         sanitized(handle.boundedErrorOutput())
                     )
                 }
-                try? await Task.sleep(for: .milliseconds(50))
-                if Date().timeIntervalSince(deadline) > -max(0.2, readinessTimeout - 0.2) {
+                if FileManager.default.fileExists(atPath: handshakeMarker.path) {
                     return
                 }
+                try? await Task.sleep(for: .milliseconds(50))
             }
         } else {
             while Date() < deadline {
@@ -434,12 +488,17 @@ actor PortForwardSupervisor {
 
     private func observedExit(ruleID: UUID, generation: UUID) async {
         guard var active = tunnels[ruleID], active.generation == generation else { return }
-        if active.stopRequested || active.snapshot.state == .stopping ||
-            active.snapshot.state == .stopped {
+        if isStopState(active) {
             return
         }
         let error = sanitized(active.handle.boundedErrorOutput())
         active.httpProxy?.stop(); active.httpProxy = nil
+        TemporaryKeyMaterial.cleanup(active.cleanupPaths)
+        active.cleanupPaths = []
+        if let marker = active.handshakeMarker {
+            SSHSessionBootstrap.removeMarker(marker)
+            active.handshakeMarker = nil
+        }
         active.snapshot.lastError = error.isEmpty ? "SSH 隧道意外退出。" : error
         if active.snapshot.reconnectAttempt >= maxReconnectAttempts {
             active.snapshot.state = .failed
@@ -457,48 +516,95 @@ actor PortForwardSupervisor {
         } catch {
             return
         }
-        guard var latest = tunnels[ruleID], !latest.stopRequested,
-              latest.generation == generation else { return }
+        guard let current = currentTunnel(ruleID: ruleID, generation: generation),
+              !isStopState(current) else { return }
         var launchedHandle: (any TunnelProcessHandle)?
+        var launchedGeneration: UUID?
+        var launchedCleanup: [String] = []
+        var launchedMarker: URL?
         do {
-            if latest.rule.direction != .remote,
+            if current.rule.direction != .remote,
                !LocalPortAvailability.isAvailable(
-                   address: latest.rule.bindAddress,
-                   port: latest.rule.listenPort,
-                   reuseAddress: latest.rule.direction == .http
+                   address: current.rule.bindAddress,
+                   port: current.rule.listenPort,
+                   reuseAddress: current.rule.direction == .http
                ) {
-                throw ConnectionRouteError.portUnavailable(latest.rule.listenPort)
+                throw ConnectionRouteError.portUnavailable(current.rule.listenPort)
             }
-            let plan = try provider.launchPlan(
-                for: latest.config,
-                purpose: .portForward(latest.transportRule)
+            var plan = try provider.launchPlan(
+                for: current.config,
+                purpose: .portForward(current.transportRule)
             )
+            if current.transportRule.direction == .remote {
+                let marker = try SSHSessionBootstrap.handshakeMarker()
+                launchedMarker = marker
+                plan.arguments.insert(contentsOf: SSHSessionBootstrap.markerArguments(marker), at: 0)
+            }
             let nextHandle = try launcher.launch(plan)
             launchedHandle = nextHandle
+            launchedCleanup = plan.cleanupPaths
             let nextGeneration = UUID()
+            launchedGeneration = nextGeneration
+            var latest = current
             latest.handle = nextHandle
             latest.generation = nextGeneration
+            latest.cleanupPaths = plan.cleanupPaths
+            latest.handshakeMarker = launchedMarker
             latest.snapshot.processIdentifier = nextHandle.processIdentifier
             tunnels[ruleID] = latest
-            try await waitUntilReady(rule: latest.transportRule, handle: nextHandle)
-            guard tunnels[ruleID]?.stopRequested == false else { throw CancellationError() }
-            if latest.rule.direction == .http {
-                let proxy = HTTPToSOCKSProxy(socksPort: latest.transportRule.listenPort)
-                try proxy.start(bindAddress: latest.rule.bindAddress, port: latest.rule.listenPort)
-                latest.httpProxy = proxy
+            try await waitUntilReady(
+                rule: latest.transportRule,
+                handle: nextHandle,
+                handshakeMarker: launchedMarker
+            )
+            guard let refreshed = currentTunnel(ruleID: ruleID, generation: nextGeneration) else {
+                if let launchedHandle { _ = await terminateAfterFailedStart(launchedHandle) }
+                TemporaryKeyMaterial.cleanup(launchedCleanup)
+                if let launchedMarker { SSHSessionBootstrap.removeMarker(launchedMarker) }
+                return
             }
-            latest.snapshot.state = .ready
-            tunnels[ruleID] = latest
+            if isStopState(refreshed) {
+                if let launchedHandle { _ = await terminateAfterFailedStart(launchedHandle) }
+                TemporaryKeyMaterial.cleanup(launchedCleanup)
+                if let launchedMarker { SSHSessionBootstrap.removeMarker(launchedMarker) }
+                return
+            }
+            var ready = refreshed
+            if ready.rule.direction == .http {
+                let proxy = HTTPToSOCKSProxy(socksPort: ready.transportRule.listenPort)
+                try proxy.start(bindAddress: ready.rule.bindAddress, port: ready.rule.listenPort)
+                ready.httpProxy = proxy
+            }
+            ready.snapshot.state = .ready
+            tunnels[ruleID] = ready
             monitorExit(ruleID: ruleID, generation: nextGeneration, handle: nextHandle)
         } catch {
             if let launchedHandle {
                 _ = await terminateAfterFailedStart(launchedHandle)
             }
+            TemporaryKeyMaterial.cleanup(launchedCleanup)
+            if let launchedMarker { SSHSessionBootstrap.removeMarker(launchedMarker) }
+            guard var latest = tunnels[ruleID], !isStopState(latest) else { return }
+            let expectedGeneration = launchedGeneration ?? generation
+            guard latest.generation == expectedGeneration else { return }
             latest.snapshot.lastError = error.localizedDescription
             latest.snapshot.processIdentifier = nil
+            latest.cleanupPaths = []
+            latest.handshakeMarker = nil
             tunnels[ruleID] = latest
             await observedExit(ruleID: ruleID, generation: latest.generation)
         }
+    }
+
+    private func currentTunnel(ruleID: UUID, generation: UUID) -> ActiveTunnel? {
+        guard let active = tunnels[ruleID], active.generation == generation else { return nil }
+        return active
+    }
+
+    private func isStopState(_ active: ActiveTunnel) -> Bool {
+        active.stopRequested
+            || active.snapshot.state == .stopping
+            || active.snapshot.state == .stopped
     }
 
     private func terminateAfterFailedStart(

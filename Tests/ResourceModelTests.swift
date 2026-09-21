@@ -83,6 +83,124 @@ final class ResourceModelTests: XCTestCase {
         XCTAssertTrue(config.privateKeyPath.isEmpty)
     }
 
+    func testResolverUsesDirectRouteOnlyWhenNoMatchingRecordExists() {
+        let server = ServerRecord(
+            name: "Target",
+            host: "target.example.com",
+            username: "deploy"
+        )
+        let unrelatedDamagedRoute = ConnectionRouteRecord(
+            serverID: UUID(),
+            name: "Damaged other route",
+            routeJSON: "{"
+        )
+
+        let config = ConnectionConfigResolver.resolve(
+            server: server,
+            identities: [],
+            keys: [],
+            routes: [unrelatedDamagedRoute]
+        )
+
+        XCTAssertEqual(config.route, .direct)
+    }
+
+    func testResolverMarksMalformedMatchingRouteUnconnectable() {
+        let server = ServerRecord(
+            name: "Target",
+            host: "target.example.com",
+            username: "deploy"
+        )
+        let damagedRoute = ConnectionRouteRecord(
+            serverID: server.id,
+            name: "Damaged route",
+            routeJSON: "{"
+        )
+
+        let config = ConnectionConfigResolver.resolve(
+            server: server,
+            identities: [],
+            keys: [],
+            routes: [damagedRoute]
+        )
+
+        XCTAssertNil(config.route)
+    }
+
+    func testResolverRejectsDuplicateDirectAndMalformedRoutesRegardlessOfOrder() throws {
+        let server = ServerRecord(
+            name: "Target",
+            host: "target.example.com",
+            username: "deploy"
+        )
+        let directRoute = try ConnectionRouteRecord(
+            route: .direct,
+            serverID: server.id
+        )
+        let damagedRoute = ConnectionRouteRecord(
+            serverID: server.id,
+            name: "Damaged route",
+            routeJSON: "{"
+        )
+
+        for routes in [
+            [directRoute, damagedRoute],
+            [damagedRoute, directRoute]
+        ] {
+            let config = ConnectionConfigResolver.resolve(
+                server: server,
+                identities: [],
+                keys: [],
+                routes: routes
+            )
+
+            XCTAssertNil(config.route)
+        }
+    }
+
+    func testResolverRejectsDuplicateDirectAndIndirectRoutesRegardlessOfOrder() throws {
+        let server = ServerRecord(
+            name: "Target",
+            host: "target.example.com",
+            username: "deploy"
+        )
+        let directRoute = try ConnectionRouteRecord(
+            route: .direct,
+            serverID: server.id
+        )
+        let indirectRoute = try ConnectionRouteRecord(
+            route: ConnectionRoute(
+                name: "Indirect route",
+                hops: [
+                    ConnectionHop(
+                        name: "Jump",
+                        endpoint: ConnectionEndpoint(
+                            host: "jump.example.com",
+                            port: 22,
+                            username: "jump"
+                        ),
+                        credential: .sshAgent
+                    )
+                ]
+            ),
+            serverID: server.id
+        )
+
+        for routes in [
+            [directRoute, indirectRoute],
+            [indirectRoute, directRoute]
+        ] {
+            let config = ConnectionConfigResolver.resolve(
+                server: server,
+                identities: [],
+                keys: [],
+                routes: routes
+            )
+
+            XCTAssertNil(config.route)
+        }
+    }
+
     func testKeyThenPasswordWithoutResolvedKeyDisablesAgentFallback() {
         let config = ServerConnectionConfig(
             id: UUID(),

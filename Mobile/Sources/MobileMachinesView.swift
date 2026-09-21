@@ -177,6 +177,11 @@ struct MobileServerDetailView: View {
         )
     }
 
+    private var routeSummary: String {
+        guard let route = config.route else { return "路线数据损坏，已阻止连接" }
+        return route.isDirect ? "直接连接" : "移动端不可用"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -219,7 +224,7 @@ struct MobileServerDetailView: View {
                         LabeledContent("端口", value: String(server.port))
                         LabeledContent("用户名", value: config.username)
                         LabeledContent("认证", value: config.authentication.title)
-                        LabeledContent("路线", value: config.route.isDirect ? "直接连接" : "移动端不可用")
+                        LabeledContent("路线", value: routeSummary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

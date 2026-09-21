@@ -11,7 +11,10 @@ struct CitadelRemoteConnectionEngine: RemoteConnectionEngine {
         _ config: ServerConnectionConfig,
         trustHandler: @escaping RemoteHostTrustHandler
     ) async throws -> any RemoteSession {
-        guard config.route.isDirect else {
+        guard let route = config.route else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
+        guard route.isDirect else {
             throw RemoteConnectionFailure.indirectRouteUnsupported
         }
         let host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)

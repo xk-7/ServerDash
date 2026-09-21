@@ -122,6 +122,19 @@ enum DesktopFileOperations {
         return String(format: "%.1f GB", Double(bytes) / 1_073_741_824)
     }
     static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+    static func digest(fileURL: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        let chunkSize = 1_048_576
+        while autoreleasepool(invoking: {
+            let chunk = handle.readData(ofLength: chunkSize)
+            guard !chunk.isEmpty else { return false }
+            hasher.update(data: chunk)
+            return true
+        }) {}
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
     static func inspect(path: String, config: ServerConnectionConfig, limit: Int = DesktopFilePreferences.editorByteLimit) async throws -> DesktopFileMetadata {
         let result = try await request(["action": "inspect", "path": path, "limit": limit], config: config)
         guard let metadata = result.metadata else { throw DesktopFileError.operation("没有收到远程文件信息。") }
@@ -196,7 +209,7 @@ enum DesktopFileOperations {
             result = try await ConnectionProcessController.shared.run(ProcessRunRequest(executable: plan.executable,
                 arguments: plan.arguments, environment: plan.environment, connectTimeout: config.connectTimeout,
                 totalTimeout: 300, maxOutputBytes: 8_000_000, serverID: config.id, module: .sftp,
-                host: config.host, port: config.port))
+                host: config.host, port: config.port, cleanupPaths: plan.cleanupPaths))
         } catch let error as ConnectionError {
             if error == .remoteCommandMissing { throw DesktopFileError.operation("高级文件操作需要远程主机提供 Python 3；基础 SFTP 仍可使用。") }
             throw error

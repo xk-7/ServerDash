@@ -126,7 +126,7 @@ enum DirectorySyncPlanner {
             let size=kind == "file" ? Int64(values.fileSize ?? 0) : 0
             total += size
             guard result.count<10_000, total<=536_870_912 else {throw DesktopFileError.tooLarge}
-            let hash=kind == "file" ? DesktopFileOperations.digest(try Data(contentsOf:url,options:.mappedIfSafe)) : ""
+            let hash=kind == "file" ? try DesktopFileOperations.digest(fileURL:url) : ""
             let inode=(try FileManager.default.attributesOfItem(atPath:url.path)[.systemFileNumber] as? NSNumber)?.uint64Value
             result.append(.init(path:path,kind:kind,size:size,sha256:hash,modifiedNS:Int64((values.contentModificationDate?.timeIntervalSince1970 ?? 0)*1_000_000_000),inode:inode))
         }

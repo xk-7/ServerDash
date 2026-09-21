@@ -510,7 +510,8 @@ enum SFTPService {
                     serverID: config.id,
                     module: .sftp,
                     host: config.host,
-                    port: config.port
+                    port: config.port,
+                    cleanupPaths: plan.cleanupPaths
                 )
             )
             if let commandError = firstCommandError(in: result.output + "\n" + result.error) {

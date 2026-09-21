@@ -131,7 +131,8 @@ actor ServerLocationService {
                     serverID: config.id,
                     module: .monitoring,
                     host: config.host,
-                    port: config.port
+                    port: config.port,
+                    cleanupPaths: plan.cleanupPaths
                 )
             )
             let output = Data(result.output.utf8)

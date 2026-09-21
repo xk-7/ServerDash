@@ -52,38 +52,70 @@ enum RDPCertificateError: LocalizedError {
 
 enum RDPCertificateVerifier {
     static func inspect(pem: Data, host: String, now: Date = .now) throws -> RDPCertificateEvidence {
-        guard pem.count <= 1024 * 1024, let text = String(data: pem, encoding: .utf8) else { throw RDPCertificateError.malformed }
-        let blocks = text.components(separatedBy: "-----BEGIN CERTIFICATE-----").dropFirst()
-        guard !blocks.isEmpty, blocks.count <= 32 else { throw RDPCertificateError.malformed }
-        let certificates: [SecCertificate] = try blocks.map { block in
-            guard let end = block.range(of: "-----END CERTIFICATE-----") else { throw RDPCertificateError.malformed }
-            let base64 = block[..<end.lowerBound].filter { !$0.isWhitespace }
-            guard let der = Data(base64Encoded: base64), let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
-                throw RDPCertificateError.malformed
-            }
-            return certificate
-        }
+        let certificates = try uniqueCertificates(parseCertificates(pem))
         let leaf = certificates[0]
-        let keys = [kSecOIDX509V1ValidityNotBefore, kSecOIDX509V1ValidityNotAfter] as CFArray
-        guard let values = SecCertificateCopyValues(leaf, keys, nil) as? [CFString: Any],
-              let before = values[kSecOIDX509V1ValidityNotBefore] as? [CFString: Any],
-              let after = values[kSecOIDX509V1ValidityNotAfter] as? [CFString: Any],
-              let start = before[kSecPropertyKeyValue] as? NSNumber,
-              let end = after[kSecPropertyKeyValue] as? NSNumber else { throw RDPCertificateError.malformed }
-        let expires = Date(timeIntervalSinceReferenceDate: end.doubleValue)
-        guard now >= Date(timeIntervalSinceReferenceDate: start.doubleValue), now <= expires else { throw RDPCertificateError.expired }
+        let (start, expires) = try validity(of: leaf)
+        guard now >= start, now <= expires else { throw RDPCertificateError.expired }
         var trust: SecTrust?
         guard SecTrustCreateWithCertificates(certificates as CFArray, SecPolicyCreateSSL(true, host as CFString), &trust) == errSecSuccess,
               let trust else { throw RDPCertificateError.malformed }
         SecTrustSetNetworkFetchAllowed(trust, false)
         SecTrustSetVerifyDate(trust, now as CFDate)
         let trusted = SecTrustEvaluateWithError(trust, nil)
-        // Manual trust is for a correctly signed self-signed leaf, not arbitrary chain/signature failures.
-        guard trusted || (certificates.count == 1 && SDRDPCertificateIsSelfSigned(pem)) else { throw RDPCertificateError.malformed }
+        // FreeRDP hands over leaf+chain PEM. Windows RDP certs are usually self-issued
+        // and presented to an IP, so system SSL trust fails and TOFU must use the leaf.
+        guard trusted || SDRDPCertificateChainIsSelfIssued(pem) else { throw RDPCertificateError.malformed }
         let der = SecCertificateCopyData(leaf) as Data
         let fingerprint = SHA256.hash(data: der).map { String(format: "%02X", $0) }.joined(separator: ":")
         return RDPCertificateEvidence(fingerprint: fingerprint, subject: SecCertificateCopySubjectSummary(leaf) as String? ?? "未知",
             systemTrusted: trusted, expires: expires)
+    }
+
+    private static func parseCertificates(_ pem: Data) throws -> [SecCertificate] {
+        guard (1...1_048_576).contains(pem.count) else { throw RDPCertificateError.malformed }
+        var bytes = pem
+        while bytes.last == 0 { bytes.removeLast() }
+        guard !bytes.isEmpty else { throw RDPCertificateError.malformed }
+        if let text = String(data: bytes, encoding: .utf8) {
+            let blocks = text.components(separatedBy: "-----BEGIN CERTIFICATE-----").dropFirst()
+            if !blocks.isEmpty {
+                guard blocks.count <= 32 else { throw RDPCertificateError.malformed }
+                return try blocks.map { block in
+                    guard let end = block.range(of: "-----END CERTIFICATE-----") else { throw RDPCertificateError.malformed }
+                    let base64 = block[..<end.lowerBound].filter { !$0.isWhitespace }
+                    guard let der = Data(base64Encoded: base64), let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
+                        throw RDPCertificateError.malformed
+                    }
+                    return certificate
+                }
+            }
+        }
+        guard let certificate = SecCertificateCreateWithData(nil, bytes as CFData) else { throw RDPCertificateError.malformed }
+        return [certificate]
+    }
+
+    private static func uniqueCertificates(_ certificates: [SecCertificate]) throws -> [SecCertificate] {
+        var seen = Set<Data>()
+        let unique = certificates.filter { seen.insert(SecCertificateCopyData($0) as Data).inserted }
+        guard !unique.isEmpty else { throw RDPCertificateError.malformed }
+        return unique
+    }
+
+    private static func validity(of certificate: SecCertificate) throws -> (Date, Date) {
+        let keys = [kSecOIDX509V1ValidityNotBefore, kSecOIDX509V1ValidityNotAfter] as CFArray
+        guard let values = SecCertificateCopyValues(certificate, keys, nil) as? [CFString: Any] else {
+            throw RDPCertificateError.malformed
+        }
+        return (try validityDate(values, oid: kSecOIDX509V1ValidityNotBefore),
+                try validityDate(values, oid: kSecOIDX509V1ValidityNotAfter))
+    }
+
+    private static func validityDate(_ values: [CFString: Any], oid: CFString) throws -> Date {
+        guard let property = values[oid] as? [CFString: Any] else { throw RDPCertificateError.malformed }
+        let value = property[kSecPropertyKeyValue]
+        if let number = value as? NSNumber { return Date(timeIntervalSinceReferenceDate: number.doubleValue) }
+        if let date = value as? Date { return date }
+        throw RDPCertificateError.malformed
     }
 }
 

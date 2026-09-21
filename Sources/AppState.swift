@@ -832,6 +832,8 @@ final class AppState: ObservableObject {
             monitoringClock: SystemMonitoringClock(),
             portForwardSupervisor: .shared
         )
+        KeyMaterialStore.cleanupAll()
+        RouteKeyMaterialStore.cleanupAll()
     }
 
     init(
@@ -922,8 +924,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    func cacheConfig(_ config: ServerConnectionConfig) {
-        configs[config.id] = config
+    func cacheConfig(_ value: ServerConnectionConfig) {
+        var config = value
+        if let server = serverRecords[value.id] {
+            config.route = connectionConfig(for: server).route
+        } else if let existing = configs[value.id] {
+            config.route = existing.route
+        }
+        configs[value.id] = config
     }
 
     func applyResolvedConfigs(_ resolved: [UUID: ServerConnectionConfig]) {
@@ -944,6 +952,19 @@ final class AppState: ObservableObject {
         var config = configs[server.id] ?? server.connectionConfig
         if let context = server.modelContext {
             let serverID = server.id
+            do {
+                let routes = try context.fetch(
+                    FetchDescriptor<ConnectionRouteRecord>(
+                        predicate: #Predicate { $0.serverID == serverID }
+                    )
+                )
+                config.route = ConnectionConfigResolver.persistedRoute(
+                    for: serverID,
+                    routes: routes
+                )
+            } catch {
+                config.route = nil
+            }
             if let advanced = try? context.fetch(FetchDescriptor<SSHAdvancedSettingsRecord>(predicate: #Predicate { $0.serverID == serverID })).first {
                 config.advancedSettings = advanced.settings
                 config.connectTimeout = TimeInterval(advanced.settings.connectTimeout)
@@ -1690,8 +1711,9 @@ final class AppState: ObservableObject {
         forceScan: Bool = false
     ) async throws {
         if MacUIFixture.isEnabled { throw URLError(.notConnectedToInternet) }
-        try validateConnectionConfiguration(config)
-        for hop in config.route.hops {
+        let route = try validateConnectionConfiguration(config)
+        var authorizedPrefix: [ConnectionHop] = []
+        for hop in route.hops {
             let hopConfig = ServerConnectionConfig(
                 id: config.id,
                 credentialID: config.credentialID,
@@ -1703,21 +1725,61 @@ final class AppState: ObservableObject {
                 privateKeyPath: "",
                 connectTimeout: hop.connectTimeout
             )
+            if authorizedPrefix.isEmpty {
+                try await trustCoordinator.authorize(
+                    hopConfig,
+                    source: .connectionRoute,
+                    forceScan: forceScan
+                )
+            } else {
+                let prefix = authorizedPrefix
+                try await trustCoordinator.authorize(
+                    hopConfig,
+                    source: .connectionRoute,
+                    forceScan: forceScan,
+                    scanProvider: { host, port, preferred in
+                        try HopHostKeyScanner.scan(
+                            host: host,
+                            port: port,
+                            preferredAlgorithm: preferred,
+                            via: prefix
+                        )
+                    }
+                )
+            }
+            authorizedPrefix.append(hop)
+        }
+        if authorizedPrefix.isEmpty {
             try await trustCoordinator.authorize(
-                hopConfig,
-                source: .connectionRoute,
+                config,
+                source: source,
                 forceScan: forceScan
             )
+        } else {
+            let prefix = authorizedPrefix
+            try await trustCoordinator.authorize(
+                config,
+                source: source,
+                forceScan: forceScan,
+                scanProvider: { host, port, preferred in
+                    try HopHostKeyScanner.scan(
+                        host: host,
+                        port: port,
+                        preferredAlgorithm: preferred,
+                        via: prefix
+                    )
+                }
+            )
         }
-        try await trustCoordinator.authorize(
-            config,
-            source: source,
-            forceScan: forceScan
-        )
     }
 
-    private func validateConnectionConfiguration(_ config: ServerConnectionConfig) throws {
-        _ = try config.route.validated(
+    private func validateConnectionConfiguration(
+        _ config: ServerConnectionConfig
+    ) throws -> ConnectionRoute {
+        guard let persistedRoute = config.route else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
+        let route = try persistedRoute.validated(
             finalEndpoint: ConnectionEndpoint(
                 host: config.host,
                 port: config.port,
@@ -1725,7 +1787,7 @@ final class AppState: ObservableObject {
             )
         )
         let credentialProvider = SystemCredentialProvider()
-        for hop in config.route.hops {
+        for hop in route.hops {
             _ = try credentialProvider.resolve(hop.credential, hopID: hop.id)
         }
         if config.identityReferenceMissing {
@@ -1761,6 +1823,7 @@ final class AppState: ObservableObject {
            !hasPassword {
             throw ConnectionError.credentialMissing
         }
+        return route
     }
 
     func startPortForward(
@@ -1814,6 +1877,16 @@ final class AppState: ObservableObject {
             module: .ssh,
             message: "SSH 隧道停止后复查为 Stopped"
         )
+    }
+
+    func stopPortForwards(ruleIDs: [UUID], serverID: UUID) async throws {
+        for ruleID in ruleIDs {
+            try await stopPortForward(ruleID: ruleID, serverID: serverID)
+            if let snapshot = await portForwardSupervisor.snapshot(ruleID: ruleID),
+               snapshot.state != .stopped {
+                throw ConnectionRouteError.tunnelStopTimedOut
+            }
+        }
     }
 
     func refreshPortForwardSnapshots() async {

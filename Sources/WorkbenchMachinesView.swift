@@ -468,9 +468,10 @@ struct MachineManagementView: View {
                     switch item {
                     case .ssh(let r):
                         let id = r.id
-                        for rule in try context.fetch(FetchDescriptor<PortForwardRuleRecord>()) where rule.serverID == id {
-                            try await appState.stopPortForward(ruleID: rule.id, serverID: id); context.delete(rule)
-                        }
+                        let rules = try context.fetch(FetchDescriptor<PortForwardRuleRecord>())
+                            .filter { $0.serverID == id }
+                        try await appState.stopPortForwards(ruleIDs: rules.map(\.id), serverID: id)
+                        for rule in rules { context.delete(rule) }
                         for route in try context.fetch(FetchDescriptor<ConnectionRouteRecord>()) where route.serverID == id {
                             if let account = route.route?.proxy?.secretAccount { try? KeychainService.deleteSecret(account: account) }
                             context.delete(route)

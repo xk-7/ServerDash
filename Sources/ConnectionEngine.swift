@@ -255,6 +255,7 @@ struct ProcessRunRequest: Sendable {
     var module: DiagnosticModule
     var host: String?
     var port: Int?
+    var cleanupPaths: [String]
 
     init(
         executable: String,
@@ -267,7 +268,8 @@ struct ProcessRunRequest: Sendable {
         serverID: UUID? = nil,
         module: DiagnosticModule = .ssh,
         host: String? = nil,
-        port: Int? = nil
+        port: Int? = nil,
+        cleanupPaths: [String] = []
     ) {
         self.executable = executable
         self.arguments = arguments
@@ -280,6 +282,7 @@ struct ProcessRunRequest: Sendable {
         self.module = module
         self.host = host
         self.port = port
+        self.cleanupPaths = cleanupPaths
     }
 }
 
@@ -403,8 +406,14 @@ actor ConnectionLimiter {
     }
 
     private func drainWaiters() {
-        while let waiter = waiters.first, canAcquire(serverID: waiter.serverID) {
-            waiters.removeFirst()
+        var index = waiters.startIndex
+        while index < waiters.endIndex {
+            let waiter = waiters[index]
+            guard canAcquire(serverID: waiter.serverID) else {
+                index = waiters.index(after: index)
+                continue
+            }
+            waiters.remove(at: index)
             timeoutTasks.removeValue(forKey: waiter.id)?.cancel()
             grant(serverID: waiter.serverID)
             waiter.continuation.resume()
@@ -460,7 +469,10 @@ actor ConnectionProcessController {
 
     func run(_ request: ProcessRunRequest) async throws -> ProcessRunResult {
         let interval = PerformanceTrace.begin(.processRun)
-        defer { PerformanceTrace.end(interval) }
+        defer {
+            TemporaryKeyMaterial.cleanup(request.cleanupPaths)
+            PerformanceTrace.end(interval)
+        }
         guard acceptingNewRuns, !Task.isCancelled else { throw ConnectionError.cancelled }
         do {
             try await limiter.acquire(serverID: request.serverID)
@@ -871,7 +883,8 @@ enum SSHConnectionTester {
                 serverID: config.id,
                 module: .ssh,
                 host: config.host,
-                port: config.port
+                port: config.port,
+                cleanupPaths: plan.cleanupPaths
             )
         )
         guard result.output.contains("serverdash-ok") else {

@@ -8,8 +8,7 @@ import Network
 
 final class RDPConfigurationTests: XCTestCase {
     func testCertificateValidityAndSignatureBeforeTrust() throws {
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/RDP/self-signed.pem")
-        let pem = try Data(contentsOf: url)
+        let pem = try rdpFixture("self-signed.pem")
         let evidence = try RDPCertificateVerifier.inspect(pem: pem, host: "rdp-fixture.invalid", now: Date(timeIntervalSince1970: 2_000_000_000))
         XCTAssertFalse(evidence.systemTrusted)
         XCTAssertEqual(evidence.fingerprint.split(separator: ":").count, 32)
@@ -19,7 +18,45 @@ final class RDPConfigurationTests: XCTestCase {
         var der = try XCTUnwrap(Data(base64Encoded: base64)); der[der.count - 1] ^= 1
         let damaged = Data("-----BEGIN CERTIFICATE-----\n\(der.base64EncodedString())\n-----END CERTIFICATE-----\n".utf8)
         XCTAssertFalse(SDRDPCertificateIsSelfSigned(damaged))
+        XCTAssertFalse(SDRDPCertificateChainIsSelfIssued(damaged))
         XCTAssertThrowsError(try RDPCertificateVerifier.inspect(pem: damaged, host: "rdp-fixture.invalid", now: Date(timeIntervalSince1970: 2_000_000_000)))
+    }
+
+    func testWindowsRDPCertificateChainReachesManualTrust() throws {
+        let pem = try rdpFixture("self-signed.pem")
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let leaf = try RDPCertificateVerifier.inspect(pem: pem, host: "rdp-fixture.invalid", now: now)
+        // FreeRDP writes leaf + SSL_get_peer_cert_chain(), which repeats the leaf.
+        let duplicated = pem + pem
+        let chained = try RDPCertificateVerifier.inspect(pem: duplicated, host: "52.207.82.26", now: now)
+        XCTAssertEqual(chained.fingerprint, leaf.fingerprint)
+        XCTAssertFalse(chained.systemTrusted)
+        XCTAssertTrue(SDRDPCertificateChainIsSelfIssued(duplicated))
+
+        var derPEM = pem
+        derPEM.append(0)
+        XCTAssertEqual(try RDPCertificateVerifier.inspect(pem: derPEM, host: "rdp-fixture.invalid", now: now).fingerprint, leaf.fingerprint)
+
+        let der = try XCTUnwrap(Data(base64Encoded: String(decoding: pem, as: UTF8.self)
+            .split(separator: "\n").filter { !$0.hasPrefix("-----") }.joined()))
+        XCTAssertEqual(try RDPCertificateVerifier.inspect(pem: der, host: "rdp-fixture.invalid", now: now).fingerprint, leaf.fingerprint)
+        XCTAssertTrue(SDRDPCertificateIsSelfSigned(der))
+
+        let windows = try rdpFixture("windows-self-signed.pem")
+        let windowsEvidence = try RDPCertificateVerifier.inspect(pem: windows, host: "192.0.2.10", now: Date())
+        XCTAssertFalse(windowsEvidence.systemTrusted)
+        XCTAssertTrue(SDRDPCertificateChainIsSelfIssued(windows + windows))
+
+        let machineCA = try rdpFixture("windows-machine-ca-chain.pem")
+        let machineEvidence = try RDPCertificateVerifier.inspect(pem: machineCA, host: "192.0.2.10", now: Date())
+        XCTAssertFalse(machineEvidence.systemTrusted)
+        XCTAssertTrue(SDRDPCertificateChainIsSelfIssued(machineCA))
+        XCTAssertFalse(SDRDPCertificateIsSelfSigned(machineCA))
+    }
+
+    private func rdpFixture(_ name: String) throws -> Data {
+        try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().appendingPathComponent("Fixtures/RDP/\(name)"))
     }
 
     func testDefaultsArePrivateAndRDPOnly() throws {
@@ -86,9 +123,23 @@ final class RDPConfigurationTests: XCTestCase {
     }
     func testAuthenticationAndSecurityErrorsNeverRetryAsTransport() {
         XCTAssertEqual(RDPFailure.native(0x20009).kind, .authentication)
+        XCTAssertTrue(RDPFailure.native(0x20009).message.contains("NLA"))
+        XCTAssertTrue(RDPFailure.native(0x20015).message.contains("密码"))
+        XCTAssertTrue(RDPFailure.native(0x2001A).message.contains("Remote Desktop Users"))
         XCTAssertEqual(RDPFailure.native(0x20008).kind, .certificate)
         XCTAssertEqual(RDPFailure.native(0x2000D).kind, .transport)
         XCTAssertEqual(RDPFailure.native(0x1000C).kind, .loggedOff)
+    }
+
+    func testWorkgroupNLADomainUsesCertificateCommonName() throws {
+        let pem = try rdpFixture("windows-self-signed.pem")
+        XCTAssertEqual(SDRDPCertificateCommonName(pem), "WIN-FIXTURE")
+        XCTAssertEqual(RDPConnectionConfiguration.nlaDomain(username: "Administrator", domain: "", certificateCommonName: "EC2AMAZ-U110KH9"), "EC2AMAZ-U110KH9")
+        XCTAssertEqual(RDPConnectionConfiguration.nlaDomain(username: "Administrator", domain: "CORP", certificateCommonName: "EC2AMAZ-U110KH9"), "CORP")
+        XCTAssertEqual(RDPConnectionConfiguration.nlaDomain(username: #"CORP\operator"#, domain: "", certificateCommonName: "EC2AMAZ-U110KH9"), "CORP")
+        XCTAssertEqual(RDPConnectionConfiguration.nlaDomain(username: "admin@example.test", domain: "", certificateCommonName: "EC2AMAZ-U110KH9"), "")
+        XCTAssertEqual(RDPConnectionConfiguration.nlaDomain(username: "Administrator", domain: "", certificateCommonName: "rdp.example.test"), "")
+        XCTAssertEqual(SDRDPSuggestedNLADomain("Administrator", "", SDRDPCertificateCommonName(pem)), "WIN-FIXTURE")
     }
     func testTrustGateCancellationReleasesWaiterAndCannotBeReaccepted() async {
         let gate = RDPTrustGate()

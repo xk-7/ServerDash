@@ -114,6 +114,7 @@ final class SSHConfigImporterTests: XCTestCase {
         XCTAssertEqual(result.route.hops.map(\.endpoint.username), ["jump1", "jump2", "jump3"])
         XCTAssertEqual(result.route.hops.first?.connectTimeout, 9)
         XCTAssertEqual(result.reports.map(\.alias), ["jump-1", "jump-2", "jump-3", "target"])
+        XCTAssertNil(result.identityFile)
     }
 
     func testResyncNeverOverwritesExplicitUserFields() throws {
@@ -161,6 +162,87 @@ final class SSHConfigImporterTests: XCTestCase {
         confirmed.importedProxyCommandConfirmed = true
         XCTAssertNoThrow(try confirmed.validated(finalEndpoint: endpoint))
     }
+
+    func testConfirmedProxyCommandStillRejectsControlCharacters() {
+        let endpoint = ConnectionEndpoint(host: "target", port: 22, username: "user")
+        for command in ["nc %h %p\ncurl evil", "nc %h %p\0more", "nc %h %p\u{0007}"] {
+            let route = ConnectionRoute(
+                name: "Imported",
+                importedProxyCommand: command,
+                importedProxyCommandConfirmed: true
+            )
+            XCTAssertThrowsError(try route.validated(finalEndpoint: endpoint), command) { error in
+                XCTAssertEqual(error as? ConnectionRouteError, .invalidProxyCommand)
+            }
+        }
+    }
+
+    func testImportedRouteAppliesFinalEndpointAndIdentityFile() throws {
+        let container = try PersistenceController.makeInMemoryContainer()
+        let context = ModelContext(container)
+        let key = SSHKeyRecord(
+            name: "Key",
+            filePath: "/old/key",
+            algorithm: "ed25519",
+            fingerprint: "SHA256:old"
+        )
+        let identity = IdentityRecord(
+            name: "ID",
+            username: "old-user",
+            authentication: .privateKey,
+            sshKeyID: key.id
+        )
+        let server = ServerRecord(
+            name: "S",
+            host: "old.example",
+            port: 22,
+            username: "old-user",
+            identityID: identity.id
+        )
+        context.insert(key)
+        context.insert(identity)
+        context.insert(server)
+        let result = SSHConfigRouteImport(
+            route: ConnectionRoute(name: "Imported"),
+            endpoint: ConnectionEndpoint(host: "new.internal", port: 2200, username: "imported-user"),
+            identityFile: "/imported/key",
+            reports: []
+        )
+
+        SSHConfigRouteImportApplier.apply(
+            result,
+            to: server,
+            identities: [identity],
+            keys: [key]
+        )
+
+        XCTAssertEqual(server.host, "new.internal")
+        XCTAssertEqual(server.port, 2200)
+        XCTAssertEqual(server.username, "imported-user")
+        XCTAssertEqual(server.privateKeyPath, "/imported/key")
+        XCTAssertEqual(identity.username, "imported-user")
+        XCTAssertEqual(key.filePath, "/imported/key")
+    }
+
+    func testDirectConfigImportExposesFinalIdentityFile() throws {
+        let fixture = try TemporarySSHConfigFixture(files: [
+            "config": """
+            Host target
+                HostName target.internal
+                User app
+                Port 2200
+                IdentityFile /imported/final-key
+            """
+        ])
+
+        let result = try SSHConfigImporter().importRoute(alias: "target", from: fixture.root)
+
+        XCTAssertTrue(result.route.hops.isEmpty)
+        XCTAssertEqual(result.endpoint.host, "target.internal")
+        XCTAssertEqual(result.endpoint.port, 2200)
+        XCTAssertEqual(result.endpoint.username, "app")
+        XCTAssertEqual(result.identityFile, "/imported/final-key")
+    }
 }
 
 final class ConnectionRouteProviderTests: XCTestCase {
@@ -174,6 +256,47 @@ final class ConnectionRouteProviderTests: XCTestCase {
         XCTAssertThrowsError(try route.validated(finalEndpoint: repeated)) { error in
             guard case .routeLoop = error as? ConnectionRouteError else {
                 return XCTFail("Expected routeLoop, got \(error)")
+            }
+        }
+    }
+
+    func testMalformedPersistedRouteBlocksEveryBusinessPurpose() {
+        let server = ServerRecord(
+            name: "Target",
+            host: "target.example.com",
+            username: "deploy"
+        )
+        let damagedRoute = ConnectionRouteRecord(
+            serverID: server.id,
+            name: "Damaged route",
+            routeJSON: "{"
+        )
+        let config = ConnectionConfigResolver.resolve(
+            server: server,
+            identities: [],
+            keys: [],
+            routes: [damagedRoute]
+        )
+        let forward = PortForwardRule(
+            name: "Database",
+            serverID: server.id,
+            direction: .local,
+            listenPort: 12_345,
+            targetHost: "database.internal",
+            targetPort: 5432
+        )
+        let purposes: [ConnectionPurpose] = [
+            .interactiveShell,
+            .remoteCommand("true"),
+            .fileTransfer,
+            .portForward(forward)
+        ]
+        let provider = SystemOpenSSHConnectionProvider()
+
+        XCTAssertNil(config.route)
+        for purpose in purposes {
+            XCTAssertThrowsError(try provider.launchPlan(for: config, purpose: purpose)) { error in
+                XCTAssertEqual(error as? ConnectionRouteError, .invalidPersistedRoute)
             }
         }
     }
@@ -323,11 +446,7 @@ final class ConnectionRouteProviderTests: XCTestCase {
         XCTAssertTrue(contents.contains("'socks5'"))
         XCTAssertFalse(contents.localizedCaseInsensitiveContains("password="))
 
-        let prefix = "/usr/bin/perl '"
-        let start = try XCTUnwrap(contents.range(of: prefix)?.upperBound)
-        let suffix = contents[start...]
-        let end = try XCTUnwrap(suffix.firstIndex(of: "'"))
-        let bridgePath = String(suffix[..<end])
+        let bridgePath = try proxyBridgePath(from: plan)
         let process = Process()
         let error = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
@@ -341,6 +460,712 @@ final class ConnectionRouteProviderTests: XCTestCase {
             as: UTF8.self
         )
         XCTAssertEqual(process.terminationStatus, 0, errorText)
+    }
+
+    func testSOCKSBridgeRefusesCredentialDowngradeToAnonymous() throws {
+        let key = try TemporaryReadableKey()
+        let account = "proxy-test.\(UUID().uuidString)"
+        try KeychainService.saveSecret("proxy-secret", account: account)
+        defer { try? KeychainService.deleteSecret(account: account) }
+
+        let route = ConnectionRoute(
+            name: "Authenticated SOCKS",
+            proxy: NetworkProxy(
+                kind: .socks5,
+                host: "127.0.0.1",
+                port: 1080,
+                username: "proxy-user",
+                secretAccount: account
+            )
+        )
+        let plan = try SystemOpenSSHConnectionProvider().launchPlan(
+            for: makeConfig(keyURL: key.url, route: route),
+            purpose: .interactiveShell
+        )
+        let bridgePath = try proxyBridgePath(from: plan)
+        let proxy = try LoopbackTCPProbe()
+
+        let process = Process()
+        let standardInput = Pipe()
+        let standardError = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = [
+            bridgePath,
+            "socks5",
+            "127.0.0.1",
+            String(proxy.port),
+            "target.internal",
+            "22",
+            "proxy-user",
+            account
+        ]
+        process.standardInput = standardInput
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = standardError
+        try process.run()
+        try? standardInput.fileHandleForWriting.close()
+
+        let client = try proxy.acceptClient()
+        defer { Darwin.close(client) }
+        let greeting = try LoopbackTCPProbe.readExactly(client, count: 3)
+        XCTAssertEqual(greeting, Data([5, 1, 2]))
+        try LoopbackTCPProbe.write(client, Data([5, 0]))
+        Darwin.shutdown(client, SHUT_RDWR)
+
+        process.waitUntilExit()
+        let errorText = String(
+            decoding: standardError.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        XCTAssertNotEqual(process.terminationStatus, 0)
+        XCTAssertTrue(errorText.contains("SOCKS5 authentication required"), errorText)
+    }
+
+    func testAnonymousSOCKSBridgeAdvertisesOnlyNoAuthentication() throws {
+        let key = try TemporaryReadableKey()
+        let route = ConnectionRoute(
+            name: "Anonymous SOCKS",
+            proxy: NetworkProxy(
+                kind: .socks5,
+                host: "127.0.0.1",
+                port: 1080,
+                username: nil,
+                secretAccount: nil
+            )
+        )
+        let plan = try SystemOpenSSHConnectionProvider().launchPlan(
+            for: makeConfig(keyURL: key.url, route: route),
+            purpose: .interactiveShell
+        )
+        let bridgePath = try proxyBridgePath(from: plan)
+        let proxy = try LoopbackTCPProbe()
+
+        let process = Process()
+        let standardError = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = [
+            bridgePath,
+            "socks5",
+            "127.0.0.1",
+            String(proxy.port),
+            "target.internal",
+            "22",
+            "",
+            ""
+        ]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = standardError
+        try process.run()
+
+        let client = try proxy.acceptClient()
+        defer { Darwin.close(client) }
+        let greeting = try LoopbackTCPProbe.readExactly(client, count: 3)
+        XCTAssertEqual(greeting, Data([5, 1, 0]))
+        try LoopbackTCPProbe.write(client, Data([5, 2]))
+        Darwin.shutdown(client, SHUT_RDWR)
+
+        process.waitUntilExit()
+        let errorText = String(
+            decoding: standardError.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        XCTAssertNotEqual(process.terminationStatus, 0)
+        XCTAssertTrue(errorText.contains("SOCKS5 negotiation failed"), errorText)
+    }
+
+    func testCredentialedProxyRequiresLiteralLoopbackHost() throws {
+        let endpoint = ConnectionEndpoint(
+            host: "target.internal",
+            port: 22,
+            username: "app"
+        )
+        let rejectedHosts = [
+            "proxy.example.com",
+            "192.0.2.10",
+            "localhost",
+            "127.0.0.2",
+            "[::1]",
+            "::ffff:127.0.0.1"
+        ]
+
+        for kind in NetworkProxyKind.allCases {
+            for host in rejectedHosts {
+                let route = ConnectionRoute(
+                    name: "Remote authenticated proxy",
+                    proxy: NetworkProxy(
+                        kind: kind,
+                        host: host,
+                        port: 1080,
+                        username: "proxy-user",
+                        secretAccount: "missing-test-account"
+                    )
+                )
+
+                XCTAssertThrowsError(
+                    try route.validated(finalEndpoint: endpoint),
+                    "\(kind.rawValue) unexpectedly allowed credentials for \(host)"
+                ) { error in
+                    XCTAssertEqual(
+                        error as? ConnectionRouteError,
+                        .proxyCredentialsRequireLoopback
+                    )
+                }
+            }
+        }
+    }
+
+    func testCredentialedProxyAllowsIPv4AndIPv6Loopback() throws {
+        let endpoint = ConnectionEndpoint(
+            host: "target.internal",
+            port: 22,
+            username: "app"
+        )
+        let account = "proxy-test.\(UUID().uuidString)"
+        try KeychainService.saveSecret("proxy-secret", account: account)
+        defer { try? KeychainService.deleteSecret(account: account) }
+
+        for kind in NetworkProxyKind.allCases {
+            for host in ["127.0.0.1", "::1"] {
+                let route = ConnectionRoute(
+                    name: "Loopback authenticated proxy",
+                    proxy: NetworkProxy(
+                        kind: kind,
+                        host: host,
+                        port: 1080,
+                        username: "proxy-user",
+                        secretAccount: account
+                    )
+                )
+
+                XCTAssertNoThrow(
+                    try route.validated(finalEndpoint: endpoint),
+                    "\(kind.rawValue) rejected loopback host \(host)"
+                )
+            }
+        }
+    }
+
+    func testAnonymousRemoteProxyRemainsAllowed() {
+        let endpoint = ConnectionEndpoint(
+            host: "target.internal",
+            port: 22,
+            username: "app"
+        )
+
+        for kind in NetworkProxyKind.allCases {
+            let route = ConnectionRoute(
+                name: "Remote anonymous proxy",
+                proxy: NetworkProxy(
+                    kind: kind,
+                    host: "proxy.example.com",
+                    port: 1080,
+                    username: nil,
+                    secretAccount: nil
+                )
+            )
+            XCTAssertNoThrow(try route.validated(finalEndpoint: endpoint))
+        }
+    }
+
+    func testIncompleteRemoteProxyCredentialStillReportsMissingPair() {
+        let route = ConnectionRoute(
+            name: "Incomplete proxy credential",
+            proxy: NetworkProxy(
+                kind: .socks5,
+                host: "proxy.example.com",
+                port: 1080,
+                username: "proxy-user",
+                secretAccount: nil
+            )
+        )
+        let endpoint = ConnectionEndpoint(
+            host: "target.internal",
+            port: 22,
+            username: "app"
+        )
+
+        XCTAssertThrowsError(try route.validated(finalEndpoint: endpoint)) { error in
+            XCTAssertEqual(error as? ConnectionRouteError, .proxyCredentialMissing)
+        }
+    }
+
+    func testRoutedAskPassTreatsShellMetacharactersAsLiteralSelectorData() throws {
+        let dollarMarker = URL(
+            fileURLWithPath: "/tmp/sd-ap-dollar-\(UUID().uuidString)"
+        )
+        let backtickMarker = URL(
+            fileURLWithPath: "/tmp/sd-ap-backtick-\(UUID().uuidString)"
+        )
+        defer {
+            try? FileManager.default.removeItem(at: dollarMarker)
+            try? FileManager.default.removeItem(at: backtickMarker)
+        }
+        let dollarSelector = "/tmp/key$(/usr/bin/touch \(dollarMarker.path))"
+        let backtickSelector = "/tmp/key`/usr/bin/touch \(backtickMarker.path)`"
+        let quotedGlobSelector = "/tmp/\\\"quoted\\\"-'single'-*literal?-\\\\key"
+        let firstHop = ConnectionHop(
+            name: "Dollar",
+            endpoint: ConnectionEndpoint(host: "dollar.internal", port: 22, username: "jump"),
+            credential: .externalPrivateKey(path: dollarSelector)
+        )
+        let secondHop = ConnectionHop(
+            name: "Backtick",
+            endpoint: ConnectionEndpoint(host: "backtick.internal", port: 22, username: "jump"),
+            credential: .externalPrivateKey(path: backtickSelector)
+        )
+        let thirdHop = ConnectionHop(
+            name: "Quotes and globs",
+            endpoint: ConnectionEndpoint(host: "quoted.internal", port: 22, username: "jump"),
+            credential: .externalPrivateKey(path: quotedGlobSelector)
+        )
+        let route = ConnectionRoute(
+            name: "Literal selectors",
+            hops: [firstHop, secondHop, thirdHop]
+        )
+        let provider = SystemOpenSSHConnectionProvider(
+            credentialProvider: AskPassFixtureCredentialProvider(
+                passphrasePaths: [dollarSelector, backtickSelector, quotedGlobSelector]
+            )
+        )
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Target",
+            host: "target.internal",
+            port: 22,
+            username: "app",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/serverdash-final-key",
+            route: route
+        )
+
+        let plan = try provider.launchPlan(for: config, purpose: .interactiveShell)
+        let helperPath = try XCTUnwrap(plan.environment["SSH_ASKPASS"])
+        let helper = try String(contentsOfFile: helperPath, encoding: .utf8)
+        let selectors = Set(plan.environment.compactMap { key, value in
+            key.hasPrefix("SERVERDASH_ROUTE_ASKPASS_SELECTOR_") ? value : nil
+        })
+
+        XCTAssertEqual(
+            selectors,
+            Set([dollarSelector, backtickSelector, quotedGlobSelector].map {
+                "Enter passphrase for key '\($0)': "
+            })
+        )
+        XCTAssertFalse(helper.contains(dollarSelector))
+        XCTAssertFalse(helper.contains(backtickSelector))
+        XCTAssertFalse(helper.contains(quotedGlobSelector))
+        XCTAssertFalse(helper.contains("$("))
+
+        func runHelper(prompt: String) throws -> Int32 {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: helperPath)
+            process.arguments = [prompt]
+            process.environment = plan.environment
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+        for selector in [dollarSelector, backtickSelector, quotedGlobSelector] {
+            XCTAssertNotEqual(
+                try runHelper(prompt: "Enter passphrase for key '\(selector)': "),
+                1
+            )
+        }
+        let globNearMiss = quotedGlobSelector.replacingOccurrences(
+            of: "*literal?",
+            with: "XliteralY"
+        )
+
+        XCTAssertEqual(
+            try runHelper(prompt: "Enter passphrase for key '\(globNearMiss)': "),
+            1
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dollarMarker.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backtickMarker.path))
+    }
+
+    func testRoutedAskPassPrefixTreatsShellMetacharactersAsLiteralData() throws {
+        let dollarMarker = URL(
+            fileURLWithPath: "/tmp/sd-ap-prefix-dollar-\(UUID().uuidString)"
+        )
+        let backtickMarker = URL(
+            fileURLWithPath: "/tmp/sd-ap-prefix-backtick-\(UUID().uuidString)"
+        )
+        defer {
+            try? FileManager.default.removeItem(at: dollarMarker)
+            try? FileManager.default.removeItem(at: backtickMarker)
+        }
+        let username = "jump*?[$(/usr/bin/touch${IFS}\(dollarMarker.path))]" +
+            "`/usr/bin/touch${IFS}\(backtickMarker.path)`"
+        let route = ConnectionRoute(
+            name: "Literal prefix",
+            hops: [
+                ConnectionHop(
+                    name: "Password",
+                    endpoint: ConnectionEndpoint(
+                        host: "prefix.internal",
+                        port: 22,
+                        username: username
+                    ),
+                    credential: .password(accountID: UUID())
+                )
+            ]
+        )
+        let provider = SystemOpenSSHConnectionProvider(
+            credentialProvider: AskPassFixtureCredentialProvider(passphrasePaths: [])
+        )
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Target",
+            host: "target.internal",
+            port: 22,
+            username: "app",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/serverdash-final-key",
+            route: route
+        )
+
+        let plan = try provider.launchPlan(for: config, purpose: .interactiveShell)
+        let helperPath = try XCTUnwrap(plan.environment["SSH_ASKPASS"])
+        let helper = try String(contentsOfFile: helperPath, encoding: .utf8)
+
+        XCTAssertFalse(helper.contains(username))
+        XCTAssertFalse(helper.contains("$("))
+        XCTAssertFalse(helper.contains("`"))
+
+        func runHelper(prompt: String) throws -> Int32 {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: helperPath)
+            process.arguments = [prompt]
+            process.environment = plan.environment
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+
+        XCTAssertNotEqual(
+            try runHelper(prompt: "(\(username)@prefix.internal) Verification code: "),
+            1
+        )
+        let nearMiss = username.replacingOccurrences(of: "*?[", with: "XYZ")
+        XCTAssertEqual(
+            try runHelper(prompt: "(\(nearMiss)@prefix.internal) Verification code: "),
+            1
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dollarMarker.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backtickMarker.path))
+    }
+
+    func testRoutedAskPassMatchesOpenSSHPromptFormats() throws {
+        let longKeyPath = "/tmp/" + String(repeating: "a", count: 120)
+        let keyHop = ConnectionHop(
+            name: "Long key",
+            endpoint: ConnectionEndpoint(
+                host: "key.internal",
+                port: 22,
+                username: "key-user"
+            ),
+            credential: .externalPrivateKey(path: longKeyPath)
+        )
+        let passwordHop = ConnectionHop(
+            name: "Password",
+            endpoint: ConnectionEndpoint(
+                host: "İMiXeD.Internal",
+                port: 2222,
+                username: "jump"
+            ),
+            credential: .password(accountID: UUID())
+        )
+        let provider = SystemOpenSSHConnectionProvider(
+            credentialProvider: AskPassFixtureCredentialProvider(
+                passphrasePaths: [longKeyPath]
+            )
+        )
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Target",
+            host: "target.internal",
+            port: 22,
+            username: "app",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/serverdash-final-key",
+            route: ConnectionRoute(
+                name: "OpenSSH prompts",
+                hops: [keyHop, passwordHop]
+            )
+        )
+
+        let plan = try provider.launchPlan(for: config, purpose: .interactiveShell)
+        let helperPath = try XCTUnwrap(plan.environment["SSH_ASKPASS"])
+        let displayedKeyPath = try XCTUnwrap(
+            String(bytes: longKeyPath.utf8.prefix(100), encoding: .utf8)
+        )
+
+        func runHelper(
+            prompt: String,
+            environment: [String: String]? = nil
+        ) throws -> Int32 {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: helperPath)
+            process.arguments = [prompt]
+            process.environment = environment ?? plan.environment
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+
+        XCTAssertNotEqual(
+            try runHelper(
+                prompt: "Enter passphrase for key '\(displayedKeyPath)': "
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try runHelper(prompt: "Enter passphrase for key '\(longKeyPath)': "),
+            1
+        )
+        XCTAssertNotEqual(
+            try runHelper(prompt: "jump@[İmixed.internal]:2222's password: "),
+            1
+        )
+        XCTAssertNotEqual(
+            try runHelper(
+                prompt: "(jump@[İmixed.internal]:2222) Verification code: "
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try runHelper(
+                prompt: "prefix (jump@[İmixed.internal]:2222) Verification code: "
+            ),
+            1
+        )
+        XCTAssertEqual(
+            try runHelper(prompt: "jump@İMiXeD.Internal's password: "),
+            1
+        )
+        XCTAssertEqual(
+            try runHelper(prompt: "jump@[İmixed.internal]:2222-prod's password: "),
+            1
+        )
+        XCTAssertEqual(
+            try runHelper(
+                prompt: "(jump@[İmixed.internal]:2222-prod) Verification code: "
+            ),
+            1
+        )
+        var missingSelectors = plan.environment
+        for key in missingSelectors.keys.filter({
+            $0.hasPrefix("SERVERDASH_ROUTE_ASKPASS_SELECTOR_")
+        }) {
+            missingSelectors.removeValue(forKey: key)
+        }
+        XCTAssertEqual(
+            try runHelper(prompt: "", environment: missingSelectors),
+            1
+        )
+    }
+
+    func testRoutedAskPassRejectsSubstringPasswordIdentities() {
+        let databaseAccount = UUID()
+        let productionAccount = UUID()
+        let route = ConnectionRoute(
+            name: "Substring identities",
+            hops: [
+                ConnectionHop(
+                    name: "Database",
+                    endpoint: ConnectionEndpoint(
+                        host: "db",
+                        port: 22,
+                        username: "alice"
+                    ),
+                    credential: .password(accountID: databaseAccount)
+                ),
+                ConnectionHop(
+                    name: "Production database",
+                    endpoint: ConnectionEndpoint(
+                        host: "db-prod",
+                        port: 22,
+                        username: "alice"
+                    ),
+                    credential: .password(accountID: productionAccount)
+                )
+            ]
+        )
+        let provider = SystemOpenSSHConnectionProvider(
+            credentialProvider: AskPassFixtureCredentialProvider(passphrasePaths: [])
+        )
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Target",
+            host: "target.internal",
+            port: 22,
+            username: "app",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/serverdash-final-key",
+            route: route
+        )
+
+        XCTAssertThrowsError(
+            try provider.launchPlan(for: config, purpose: .interactiveShell)
+        ) { error in
+            XCTAssertEqual(
+                error as? ConnectionRouteError,
+                .multipleInteractiveCredentialsUnsupported
+            )
+        }
+    }
+
+    func testRoutedAskPassRejectsControlCharactersInSelectors() {
+        for controlCharacter in [
+            "\0", "\t", "\n", "\r", "\u{7F}", "\u{85}", "\u{2028}", "\u{2029}"
+        ] {
+            let unsafeSelector = "/tmp/key\(controlCharacter)unsafe"
+            let hop = ConnectionHop(
+                name: "Unsafe",
+                endpoint: ConnectionEndpoint(
+                    host: "jump.internal",
+                    port: 22,
+                    username: "jump"
+                ),
+                credential: .externalPrivateKey(path: unsafeSelector)
+            )
+            let route = ConnectionRoute(name: "Unsafe selector", hops: [hop])
+            let provider = SystemOpenSSHConnectionProvider(
+                credentialProvider: AskPassFixtureCredentialProvider(
+                    passphrasePaths: [unsafeSelector]
+                )
+            )
+            let config = ServerConnectionConfig(
+                id: UUID(),
+                credentialID: UUID(),
+                name: "Target",
+                host: "target.internal",
+                port: 22,
+                username: "app",
+                authentication: .privateKey,
+                privateKeyPath: "/tmp/serverdash-final-key",
+                route: route
+            )
+
+            XCTAssertThrowsError(
+                try provider.launchPlan(for: config, purpose: .interactiveShell)
+            ) { error in
+                XCTAssertEqual(
+                    error as? ConnectionRouteError,
+                    .invalidInteractiveCredentialSelector
+                )
+            }
+        }
+    }
+
+    func testRoutedAskPassRejectsKeyPromptCollisionsAfterTruncation() {
+        let sharedPrefix = "/tmp/" + String(repeating: "a", count: 110)
+        let firstPath = sharedPrefix + "-first"
+        let secondPath = sharedPrefix + "-second"
+        let route = ConnectionRoute(
+            name: "Colliding key prompts",
+            hops: [
+                ConnectionHop(
+                    name: "First",
+                    endpoint: ConnectionEndpoint(
+                        host: "first.internal",
+                        port: 22,
+                        username: "jump"
+                    ),
+                    credential: .externalPrivateKey(path: firstPath)
+                ),
+                ConnectionHop(
+                    name: "Second",
+                    endpoint: ConnectionEndpoint(
+                        host: "second.internal",
+                        port: 22,
+                        username: "jump"
+                    ),
+                    credential: .externalPrivateKey(path: secondPath)
+                )
+            ]
+        )
+        let provider = SystemOpenSSHConnectionProvider(
+            credentialProvider: AskPassFixtureCredentialProvider(
+                passphrasePaths: [firstPath, secondPath]
+            )
+        )
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Target",
+            host: "target.internal",
+            port: 22,
+            username: "app",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/serverdash-final-key",
+            route: route
+        )
+
+        XCTAssertThrowsError(
+            try provider.launchPlan(for: config, purpose: .interactiveShell)
+        ) { error in
+            XCTAssertEqual(
+                error as? ConnectionRouteError,
+                .multipleInteractiveCredentialsUnsupported
+            )
+        }
+    }
+
+    func testRoutedAskPassRejectsKeyPromptWithSplitUTF8Scalar() {
+        let keyPath = "/tmp/" + String(repeating: "a", count: 94) + "é"
+        XCTAssertEqual(keyPath.utf8.count, 101)
+        let route = ConnectionRoute(
+            name: "Split UTF-8 prompt",
+            hops: [
+                ConnectionHop(
+                    name: "Key",
+                    endpoint: ConnectionEndpoint(
+                        host: "key.internal",
+                        port: 22,
+                        username: "jump"
+                    ),
+                    credential: .externalPrivateKey(path: keyPath)
+                )
+            ]
+        )
+        let provider = SystemOpenSSHConnectionProvider(
+            credentialProvider: AskPassFixtureCredentialProvider(
+                passphrasePaths: [keyPath]
+            )
+        )
+        let config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Target",
+            host: "target.internal",
+            port: 22,
+            username: "app",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/serverdash-final-key",
+            route: route
+        )
+
+        XCTAssertThrowsError(
+            try provider.launchPlan(for: config, purpose: .interactiveShell)
+        ) { error in
+            XCTAssertEqual(
+                error as? ConnectionRouteError,
+                .invalidInteractiveCredentialSelector
+            )
+        }
     }
 
     func testRouteFailureClassifierLocatesHopAndStageWithoutParsingLocalizedText() {
@@ -456,6 +1281,16 @@ final class ConnectionRouteProviderTests: XCTestCase {
         guard let index = plan.arguments.firstIndex(of: "-F"),
               plan.arguments.indices.contains(index + 1) else { return nil }
         return plan.arguments[index + 1]
+    }
+
+    private func proxyBridgePath(from plan: OpenSSHLaunchPlan) throws -> String {
+        let configPath = try XCTUnwrap(configurationPath(plan))
+        let contents = try String(contentsOfFile: configPath, encoding: .utf8)
+        let prefix = "/usr/bin/perl '"
+        let start = try XCTUnwrap(contents.range(of: prefix)?.upperBound)
+        let suffix = contents[start...]
+        let end = try XCTUnwrap(suffix.firstIndex(of: "'"))
+        return String(suffix[..<end])
     }
 }
 
@@ -664,6 +1499,125 @@ final class PortForwardSupervisorTests: XCTestCase {
         XCTAssertTrue(LocalPortAvailability.isAvailable(address: "127.0.0.1", port: secondPort))
     }
 
+    func testStopDuringReconnectReadyWaitLeavesTunnelStoppedAndDoesNotRelaunch() async throws {
+        let port = try availablePort()
+        let launcher = StallOnReconnectLauncher()
+        let supervisor = PortForwardSupervisor(
+            provider: TestConnectionProvider(),
+            launcher: launcher,
+            maxReconnectAttempts: 3,
+            readinessTimeout: 2
+        )
+        let serverID = UUID()
+        let rule = PortForwardRule(
+            name: "Reconnect stop",
+            serverID: serverID,
+            direction: .local,
+            listenPort: port,
+            targetHost: "127.0.0.1",
+            targetPort: 80
+        )
+        let started = try await supervisor.start(
+            rule: rule,
+            config: directConfig(id: serverID)
+        )
+        XCTAssertEqual(started.state, .ready)
+        XCTAssertEqual(launcher.launchCount, 1)
+
+        launcher.handles[0].simulateUnexpectedExit()
+        let waitDeadline = Date().addingTimeInterval(2)
+        while Date() < waitDeadline, launcher.launchCount < 2 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(launcher.launchCount, 2)
+
+        let stopped = try await supervisor.stop(ruleID: rule.id)
+        XCTAssertEqual(stopped?.state, .stopped)
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(launcher.launchCount, 2)
+        let snapshot = await supervisor.snapshot(ruleID: rule.id)
+        XCTAssertEqual(snapshot?.state, .stopped)
+    }
+
+    func testRemoteForwardBecomesReadyAfterHandshakeMarker() async throws {
+        let port = try availablePort()
+        let launcher = TestTunnelLauncher(ignoreTerminate: false, bindPort: false)
+        let supervisor = PortForwardSupervisor(
+            provider: TestConnectionProvider(),
+            launcher: launcher,
+            maxReconnectAttempts: 0,
+            readinessTimeout: 1
+        )
+        let serverID = UUID()
+        let rule = PortForwardRule(
+            name: "Remote",
+            serverID: serverID,
+            direction: .remote,
+            listenPort: port,
+            targetHost: "127.0.0.1",
+            targetPort: 80
+        )
+        let started = try await supervisor.start(
+            rule: rule,
+            config: directConfig(id: serverID),
+            remoteForwardConfirmed: true
+        )
+        XCTAssertEqual(started.state, .ready)
+        let stopped = try await supervisor.stop(ruleID: rule.id)
+        XCTAssertEqual(stopped?.state, .stopped)
+    }
+
+    func testImportedKeyMaterialUsesUniquePathsAndCleansUpIndependently() throws {
+        let keyID = UUID()
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture\n-----END OPENSSH PRIVATE KEY-----"
+        try KeychainService.saveSecret(
+            pem,
+            account: KeychainService.importedKeyAccount(for: keyID)
+        )
+        defer {
+            try? KeychainService.deleteSecret(
+                account: KeychainService.importedKeyAccount(for: keyID)
+            )
+            KeyMaterialStore.cleanupAll()
+            RouteKeyMaterialStore.cleanupAll()
+        }
+
+        let first = try RouteKeyMaterialStore.materializeImportedKey(keyID: keyID)
+        let second = try RouteKeyMaterialStore.materializeImportedKey(keyID: keyID)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(first.contains(keyID.uuidString))
+        XCTAssertTrue(second.contains(keyID.uuidString))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second))
+
+        TemporaryKeyMaterial.cleanup([first])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second))
+    }
+
+    func testHopKeyscanMissingIsFailClosed() {
+        XCTAssertEqual(
+            HopHostKeyScanner.unavailableMessage(
+                output: "",
+                error: "SERVERDASH_KEYSCAN_MISSING"
+            ),
+            HopHostKeyScanner.missingKeyscanMessage
+        )
+        XCTAssertEqual(
+            HopHostKeyScanner.unavailableMessage(
+                output: "",
+                error: "bash: ssh-keyscan: not found"
+            ),
+            HopHostKeyScanner.missingKeyscanMessage
+        )
+        XCTAssertNil(
+            HopHostKeyScanner.unavailableMessage(
+                output: "10.0.0.5 ssh-ed25519 AAAA",
+                error: ""
+            )
+        )
+    }
+
     private func directConfig(id: UUID) -> ServerConnectionConfig {
         ServerConnectionConfig(
             id: id,
@@ -687,6 +1641,36 @@ final class PortForwardSupervisorTests: XCTestCase {
     }
 }
 
+private struct AskPassFixtureCredentialProvider: CredentialProvider {
+    let passphrasePaths: Set<String>
+
+    func resolve(
+        _ reference: CredentialReference,
+        hopID: UUID
+    ) throws -> ResolvedCredential {
+        switch reference {
+        case .sshAgent:
+            .sshAgent
+        case .externalPrivateKey(let path):
+            .privateKey(
+                path: path,
+                passphraseAccount: passphrasePaths.contains(path)
+                    ? "passphrase.\(hopID.uuidString)"
+                    : nil
+            )
+        case .importedPrivateKey(let keyID, let hasPassphrase):
+            .privateKey(
+                path: "/tmp/\(keyID.uuidString)",
+                passphraseAccount: hasPassphrase
+                    ? "passphrase.\(keyID.uuidString)"
+                    : nil
+            )
+        case .password(let accountID):
+            .password(account: accountID.uuidString)
+        }
+    }
+}
+
 private struct TestConnectionProvider: ConnectionProvider {
     let capabilities: Set<ConnectionCapability> = Set(ConnectionCapability.allCases)
 
@@ -694,6 +1678,9 @@ private struct TestConnectionProvider: ConnectionProvider {
         for config: ServerConnectionConfig,
         purpose: ConnectionPurpose
     ) throws -> OpenSSHLaunchPlan {
+        guard let route = config.route else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
         guard case .portForward(let rule) = purpose else {
             throw ConnectionRouteError.tunnelLaunchFailed("unexpected purpose")
         }
@@ -701,7 +1688,7 @@ private struct TestConnectionProvider: ConnectionProvider {
             executable: "/usr/bin/true",
             arguments: rule.openSSHArguments,
             environment: [:],
-            routeRevision: config.route.revision,
+            routeRevision: route.revision,
             diagnosticEndpoints: []
         )
     }
@@ -728,6 +1715,13 @@ private final class TestTunnelLauncher: TunnelProcessLaunching, @unchecked Senda
     }
 
     func launch(_ plan: OpenSSHLaunchPlan) throws -> any TunnelProcessHandle {
+        if let marker = Self.handshakeMarkerPath(from: plan.arguments) {
+            try FileManager.default.createDirectory(
+                at: URL(fileURLWithPath: marker).deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            FileManager.default.createFile(atPath: marker, contents: Data())
+        }
         let port = try Self.listenPort(from: plan.arguments)
         let handle = try TestTunnelHandle(
             port: port,
@@ -742,7 +1736,7 @@ private final class TestTunnelLauncher: TunnelProcessLaunching, @unchecked Senda
         return handle
     }
 
-    private static func listenPort(from arguments: [String]) throws -> Int {
+    fileprivate static func listenPort(from arguments: [String]) throws -> Int {
         for flag in ["-L", "-D", "-R"] {
             guard let index = arguments.firstIndex(of: flag),
                   arguments.indices.contains(index + 1) else { continue }
@@ -756,6 +1750,44 @@ private final class TestTunnelLauncher: TunnelProcessLaunching, @unchecked Senda
             }
         }
         throw ConnectionRouteError.tunnelLaunchFailed("missing listen port")
+    }
+
+    fileprivate static func handshakeMarkerPath(from arguments: [String]) -> String? {
+        for (index, argument) in arguments.enumerated() {
+            guard argument == "-o", arguments.indices.contains(index + 1) else { continue }
+            let option = arguments[index + 1]
+            let prefix = "LocalCommand=/usr/bin/touch '"
+            guard option.hasPrefix(prefix), option.hasSuffix("'") else { continue }
+            let start = option.index(option.startIndex, offsetBy: prefix.count)
+            let end = option.index(before: option.endIndex)
+            return String(option[start..<end]).replacingOccurrences(of: "'\\''", with: "'")
+        }
+        return nil
+    }
+}
+
+private final class StallOnReconnectLauncher: TunnelProcessLaunching, @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var launchCount = 0
+    private(set) var handles: [TestTunnelHandle] = []
+
+    func launch(_ plan: OpenSSHLaunchPlan) throws -> any TunnelProcessHandle {
+        lock.lock()
+        launchCount += 1
+        let count = launchCount
+        lock.unlock()
+        let port = try TestTunnelLauncher.listenPort(from: plan.arguments)
+        let handle = try TestTunnelHandle(
+            port: port,
+            ignoreTerminate: false,
+            failImmediately: false,
+            bindPort: count == 1,
+            errorOutput: ""
+        )
+        lock.lock()
+        handles.append(handle)
+        lock.unlock()
+        return handle
     }
 }
 
@@ -844,6 +1876,10 @@ private final class TestTunnelHandle: TunnelProcessHandle, @unchecked Sendable {
 
     func boundedErrorOutput() -> String { errorOutput }
 
+    func simulateUnexpectedExit() {
+        closeIfNeeded()
+    }
+
     private func closeIfNeeded() {
         lock.lock()
         defer { lock.unlock() }
@@ -852,6 +1888,115 @@ private final class TestTunnelHandle: TunnelProcessHandle, @unchecked Sendable {
         if descriptor >= 0 {
             Darwin.close(descriptor)
             descriptor = -1
+        }
+    }
+}
+
+private final class LoopbackTCPProbe {
+    let port: Int
+    private var listener: Int32
+
+    init() throws {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw POSIXError(.EIO) }
+        var reuse: Int32 = 1
+        _ = setsockopt(
+            descriptor,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &reuse,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(
+                    descriptor,
+                    $0,
+                    socklen_t(MemoryLayout<sockaddr_in>.size)
+                )
+            }
+        }
+        guard bindResult == 0, Darwin.listen(descriptor, 1) == 0 else {
+            Darwin.close(descriptor)
+            throw POSIXError(.EIO)
+        }
+        var addressLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+        guard withUnsafeMutablePointer(to: &address, { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(descriptor, $0, &addressLength)
+            }
+        }) == 0 else {
+            Darwin.close(descriptor)
+            throw POSIXError(.EIO)
+        }
+        listener = descriptor
+        port = Int(UInt16(bigEndian: address.sin_port))
+    }
+
+    deinit {
+        if listener >= 0 { Darwin.close(listener) }
+    }
+
+    func acceptClient() throws -> Int32 {
+        var descriptor = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)
+        guard Darwin.poll(&descriptor, 1, 5_000) > 0 else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+        let client = Darwin.accept(listener, nil, nil)
+        guard client >= 0 else { throw POSIXError(.EIO) }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        var noSignal: Int32 = 1
+        _ = setsockopt(
+            client,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        )
+        _ = setsockopt(
+            client,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        )
+        _ = setsockopt(
+            client,
+            SOL_SOCKET,
+            SO_NOSIGPIPE,
+            &noSignal,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
+        return client
+    }
+
+    static func readExactly(_ descriptor: Int32, count: Int) throws -> Data {
+        var result = Data()
+        while result.count < count {
+            var bytes = [UInt8](repeating: 0, count: count - result.count)
+            let readCount = Darwin.read(descriptor, &bytes, bytes.count)
+            guard readCount > 0 else { throw POSIXError(.EIO) }
+            result.append(contentsOf: bytes.prefix(readCount))
+        }
+        return result
+    }
+
+    static func write(_ descriptor: Int32, _ data: Data) throws {
+        var offset = 0
+        while offset < data.count {
+            let written = data.withUnsafeBytes { bytes in
+                Darwin.write(
+                    descriptor,
+                    bytes.baseAddress!.advanced(by: offset),
+                    bytes.count - offset
+                )
+            }
+            guard written > 0 else { throw POSIXError(.EIO) }
+            offset += written
         }
     }
 }

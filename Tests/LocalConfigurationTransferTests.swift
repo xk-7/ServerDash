@@ -141,4 +141,43 @@ import XCTest
         XCTAssertEqual(registry.workspace.tabs.map(\.id), existingTabs)
         XCTAssertTrue(registry.controller(for: active.id) === active)
     }
+
+    func testRuntimeReloadAndCacheKeepMalformedRouteFailClosed() throws {
+        let container = try PersistenceController.makeInMemoryContainer()
+        let context = container.mainContext
+        let server = ServerRecord(
+            name: "Damaged route host",
+            host: "192.0.2.20",
+            username: "operator",
+            enableDashboardMonitor: false
+        )
+        context.insert(server)
+        context.insert(
+            ConnectionRouteRecord(
+                serverID: server.id,
+                name: "Damaged route",
+                routeJSON: "{"
+            )
+        )
+        try context.save()
+        let app = AppState(
+            trustCoordinator: HostTrustCoordinator(),
+            fileServicesEnabled: false
+        )
+
+        try app.reloadConnectionConfigurations(from: container)
+        let reloaded = try XCTUnwrap(app.configs[server.id])
+        XCTAssertNil(reloaded.route)
+        XCTAssertThrowsError(
+            try SystemOpenSSHConnectionProvider().launchPlan(
+                for: reloaded,
+                purpose: .interactiveShell
+            )
+        ) { error in
+            XCTAssertEqual(error as? ConnectionRouteError, .invalidPersistedRoute)
+        }
+
+        app.cacheConfig(server.connectionConfig)
+        XCTAssertNil(app.connectionConfig(for: server).route)
+    }
 }

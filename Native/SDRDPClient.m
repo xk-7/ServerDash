@@ -17,19 +17,136 @@
 #include <freerdp/error.h>
 #include <winpr/synch.h>
 #include <winpr/wlog.h>
+#include <stdlib.h>
+#include <string.h>
 #include <openssl/pem.h>
 #include <openssl/x509v3.h>
 extern PVIRTUALCHANNELENTRY SDRDPAddinProvider(LPCSTR name, LPCSTR subsystem, LPCSTR type, DWORD flags);
 
-BOOL SDRDPCertificateIsSelfSigned(NSData *pem) {
-    if (!pem.length || pem.length > 1024 * 1024) return NO;
-    BIO *bio = BIO_new_mem_buf(pem.bytes, (int)pem.length);
-    if (!bio) return NO;
-    X509 *certificate = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+static BOOL SDRDPCertificateIsSelfSignedX509(X509 *certificate) {
     EVP_PKEY *key = certificate ? X509_get_pubkey(certificate) : NULL;
     BOOL valid = key && X509_NAME_cmp(X509_get_issuer_name(certificate), X509_get_subject_name(certificate)) == 0 &&
         X509_verify(certificate, key) == 1;
-    EVP_PKEY_free(key); X509_free(certificate); BIO_free(bio);
+    EVP_PKEY_free(key);
+    return valid;
+}
+
+static BOOL SDRDPCertificatesEqual(X509 *left, X509 *right) {
+    unsigned char *leftDER = NULL, *rightDER = NULL;
+    int leftLength = i2d_X509(left, &leftDER);
+    int rightLength = i2d_X509(right, &rightDER);
+    BOOL equal = leftLength > 0 && leftLength == rightLength && leftDER && rightDER &&
+        memcmp(leftDER, rightDER, (size_t)leftLength) == 0;
+    OPENSSL_free(leftDER);
+    OPENSSL_free(rightDER);
+    return equal;
+}
+
+/// Consumes `certificate` on every path.
+static BOOL SDRDPPushUniqueCertificate(STACK_OF(X509) *certs, X509 *certificate) {
+    if (!certs || !certificate) {
+        X509_free(certificate);
+        return NO;
+    }
+    for (int index = 0; index < sk_X509_num(certs); index++) {
+        if (SDRDPCertificatesEqual(sk_X509_value(certs, index), certificate)) {
+            X509_free(certificate);
+            return YES;
+        }
+    }
+    if (sk_X509_num(certs) >= 32 || sk_X509_push(certs, certificate) <= 0) {
+        X509_free(certificate);
+        return NO;
+    }
+    return YES;
+}
+
+static STACK_OF(X509) *SDRDPParseCertificates(NSData *data) {
+    STACK_OF(X509) *certs = sk_X509_new_null();
+    if (!certs) return NULL;
+    BIO *bio = BIO_new_mem_buf(data.bytes, (int)data.length);
+    if (!bio) {
+        sk_X509_free(certs);
+        return NULL;
+    }
+    X509 *certificate = NULL;
+    while ((certificate = PEM_read_bio_X509(bio, NULL, NULL, NULL))) {
+        if (!SDRDPPushUniqueCertificate(certs, certificate)) {
+            BIO_free(bio);
+            sk_X509_pop_free(certs, X509_free);
+            return NULL;
+        }
+    }
+    BIO_free(bio);
+    if (sk_X509_num(certs) > 0) return certs;
+
+    size_t length = data.length;
+    const unsigned char *bytes = data.bytes;
+    while (length > 0 && bytes[length - 1] == 0) length--;
+    const unsigned char *cursor = bytes;
+    certificate = d2i_X509(NULL, &cursor, (long)length);
+    if (!certificate) {
+        sk_X509_pop_free(certs, X509_free);
+        return NULL;
+    }
+    if (!SDRDPPushUniqueCertificate(certs, certificate)) {
+        sk_X509_pop_free(certs, X509_free);
+        return NULL;
+    }
+    return certs;
+}
+
+BOOL SDRDPCertificateIsSelfSigned(NSData *pem) {
+    STACK_OF(X509) *certs = pem.length && pem.length <= 1024 * 1024 ? SDRDPParseCertificates(pem) : NULL;
+    BOOL valid = certs && sk_X509_num(certs) > 0 && SDRDPCertificateIsSelfSignedX509(sk_X509_value(certs, 0));
+    sk_X509_pop_free(certs, X509_free);
+    return valid;
+}
+
+NSString *SDRDPCertificateCommonName(NSData *pem) {
+    STACK_OF(X509) *certs = pem.length && pem.length <= 1024 * 1024 ? SDRDPParseCertificates(pem) : NULL;
+    if (!certs || sk_X509_num(certs) < 1) {
+        sk_X509_pop_free(certs, X509_free);
+        return nil;
+    }
+    char cn[64] = {0};
+    int length = X509_NAME_get_text_by_NID(X509_get_subject_name(sk_X509_value(certs, 0)), NID_commonName, cn, sizeof(cn));
+    sk_X509_pop_free(certs, X509_free);
+    if (length <= 0) return nil;
+    return [[NSString alloc] initWithBytes:cn length:(NSUInteger)length encoding:NSUTF8StringEncoding];
+}
+
+NSString *SDRDPSuggestedNLADomain(NSString *username, NSString *domain, NSString *certificateCommonName) {
+    NSRange slash = [username rangeOfString:@"\\"];
+    if (slash.location != NSNotFound) return [username substringToIndex:slash.location];
+    if (domain.length) return domain;
+    if ([username containsString:@"@"]) return @"";
+    NSString *cn = [certificateCommonName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!cn.length || cn.length > 63) return @"";
+    static NSCharacterSet *rejected;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ rejected = [NSCharacterSet characterSetWithCharactersInString:@".@\\/ "]; });
+    if ([cn rangeOfCharacterFromSet:rejected].location != NSNotFound) return @"";
+    return cn;
+}
+
+BOOL SDRDPCertificateChainIsSelfIssued(NSData *pem) {
+    STACK_OF(X509) *certs = pem.length && pem.length <= 1024 * 1024 ? SDRDPParseCertificates(pem) : NULL;
+    if (!certs || sk_X509_num(certs) < 1) {
+        sk_X509_pop_free(certs, X509_free);
+        return NO;
+    }
+    BOOL valid = SDRDPCertificateIsSelfSignedX509(sk_X509_value(certs, 0));
+    if (!valid) {
+        valid = YES;
+        for (int index = 0; valid && index < sk_X509_num(certs) - 1; index++) {
+            EVP_PKEY *key = X509_get_pubkey(sk_X509_value(certs, index + 1));
+            valid = key && X509_verify(sk_X509_value(certs, index), key) == 1;
+            EVP_PKEY_free(key);
+        }
+        valid = valid && SDRDPCertificateIsSelfSignedX509(sk_X509_value(certs, sk_X509_num(certs) - 1));
+    }
+    sk_X509_pop_free(certs, X509_free);
     return valid;
 }
 
@@ -119,13 +236,41 @@ static int verifyCertificate(freerdp *instance, const BYTE *pem, size_t size, co
     if (atomic_load(&client->_cancelled) || !pem || size == 0 || size > 1024 * 1024 ||
         flags & (VERIFY_CERT_FLAG_GATEWAY | VERIFY_CERT_FLAG_REDIRECT)) return 0;
     if (!client.verifyCertificate) return 0;
-    return client.verifyCertificate([NSData dataWithBytes:pem length:size], @(host), port) &&
-        !atomic_load(&client->_cancelled) ? 1 : 0;
+    NSData *chain = [NSData dataWithBytes:pem length:size];
+    if (!client.verifyCertificate(chain, @(host), port) || atomic_load(&client->_cancelled)) return 0;
+    // NLA runs after TLS. Workgroup/AWS local accounts hash NTLMv2 with the machine
+    // NetBIOS name; the self-signed RDS certificate CN is that name.
+    rdpSettings *settings = instance->context->settings;
+    NSString *suggested = SDRDPSuggestedNLADomain(
+        @(freerdp_settings_get_string(settings, FreeRDP_Username) ?: ""),
+        @(freerdp_settings_get_string(settings, FreeRDP_Domain) ?: ""),
+        SDRDPCertificateCommonName(chain));
+    if (suggested.length) freerdp_settings_set_string(settings, FreeRDP_Domain, suggested.UTF8String);
+    return 1;
 }
 static BOOL noRedirect(freerdp *instance) { return FALSE; }
+static BOOL replaceCredential(char **slot, const char *value) {
+    if (!slot || !value) return NO;
+    char *copy = strdup(value);
+    if (!copy) return NO;
+    free(*slot);
+    *slot = copy;
+    return YES;
+}
 static BOOL noAuthentication(freerdp *instance, char **username, char **password, char **domain, rdp_auth_reason reason) {
     // Credentials were provided in the immutable request. Never prompt/fallback inside FreeRDP.
-    return reason == AUTH_NLA && username && *username && password && *password;
+    SDRDPClient *client = owner(instance->context);
+    if ((reason != AUTH_NLA && reason != AUTH_RDSTLS) || !username || !password || !domain) return NO;
+    NSString *user = client->_configuration[@"username"];
+    NSString *pass = client->_password;
+    NSString *configuredDomain = client->_configuration[@"domain"];
+    if (!user.length || !pass.length) return NO;
+    if (!*username || !**username) { if (!replaceCredential(username, user.UTF8String)) return NO; }
+    if (!*password || !**password) { if (!replaceCredential(password, pass.UTF8String)) return NO; }
+    if ((!*domain || !**domain) && configuredDomain.length) {
+        if (!replaceCredential(domain, configuredDomain.UTF8String)) return NO;
+    }
+    return *username && **username && *password && **password;
 }
 static UINT clipCapabilities(CliprdrClientContext *clip, const CLIPRDR_CAPABILITIES *caps) {
     SDRDPClient *client = owner(clip->rdpcontext);

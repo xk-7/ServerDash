@@ -215,4 +215,9 @@ struct RDPConnectionConfiguration: Equatable, Sendable {
         }
         return (username, domain)
     }
+
+    /// Workgroup NTLMv2 uses the machine NetBIOS name as the domain. RDS self-signed certificates expose that as CN.
+    static func nlaDomain(username: String, domain: String, certificateCommonName: String?) -> String {
+        SDRDPSuggestedNLADomain(username, domain, certificateCommonName)
+    }
 }

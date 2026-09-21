@@ -8,6 +8,9 @@ struct OpenSSHRemoteConnectionEngine: RemoteConnectionEngine {
         _ config: ServerConnectionConfig,
         trustHandler: @escaping RemoteHostTrustHandler
     ) async throws -> any RemoteSession {
+        guard config.route != nil else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
         // Existing macOS entry points authorize every route hop through
         // HostTrustCoordinator before constructing this adapter. The generated
         // OpenSSH plans still enforce StrictHostKeyChecking=yes against the
@@ -46,7 +49,8 @@ private struct OpenSSHRemoteSession: RemoteSession {
                 serverID: config.id,
                 module: .ssh,
                 host: config.host,
-                port: config.port
+                port: config.port,
+                cleanupPaths: plan.cleanupPaths
             )
         )
         return RemoteCommandResult(
@@ -82,6 +86,7 @@ private final class OpenSSHRemoteShellSession: RemoteShellSession, @unchecked Se
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let lock = NSLock()
     private var closed = false
+    private let cleanupPaths: [String]
 
     init(plan: OpenSSHLaunchPlan, dimensions: RemoteShellDimensions) throws {
         _ = dimensions
@@ -101,6 +106,7 @@ private final class OpenSSHRemoteShellSession: RemoteShellSession, @unchecked Se
         self.process = process
         input = inputPipe.fileHandleForWriting
         output = outputPipe.fileHandleForReading
+        cleanupPaths = plan.cleanupPaths
 
         output.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
@@ -110,6 +116,7 @@ private final class OpenSSHRemoteShellSession: RemoteShellSession, @unchecked Se
         process.terminationHandler = { [weak self] process in
             guard let self else { return }
             self.output.readabilityHandler = nil
+            TemporaryKeyMaterial.cleanup(self.cleanupPaths)
             if process.terminationStatus == 0 {
                 self.continuation.finish()
             } else {
@@ -125,6 +132,7 @@ private final class OpenSSHRemoteShellSession: RemoteShellSession, @unchecked Se
         } catch {
             output.readabilityHandler = nil
             continuation.finish(throwing: error)
+            TemporaryKeyMaterial.cleanup(cleanupPaths)
             throw error
         }
     }
@@ -150,6 +158,7 @@ private final class OpenSSHRemoteShellSession: RemoteShellSession, @unchecked Se
         output.readabilityHandler = nil
         try? input.close()
         if process.isRunning { process.terminate() }
+        TemporaryKeyMaterial.cleanup(cleanupPaths)
         continuation.finish()
     }
 }

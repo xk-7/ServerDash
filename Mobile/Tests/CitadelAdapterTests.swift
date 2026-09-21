@@ -77,6 +77,21 @@ final class CitadelAdapterTests: XCTestCase {
         }
     }
 
+    func testMalformedPersistedRouteFailsBeforeAuthenticationOrNetworkAccess() async {
+        var config = RemoteConnectionContractTests.makeConfig(id: UUID())
+        config.route = nil
+
+        do {
+            _ = try await CitadelRemoteConnectionEngine().connect(config) { _ in
+                XCTFail("A malformed route must not begin host-key negotiation")
+                return .reject
+            }
+            XCTFail("Expected invalidPersistedRoute")
+        } catch {
+            XCTAssertEqual(error as? ConnectionRouteError, .invalidPersistedRoute)
+        }
+    }
+
     func testDiagnosticsRedactPasswordPrivateKeyAndSessionPayload() {
         let armor = "OPENSSH " + "PRIVATE KEY"
         let privateKey = "-----BEGIN \(armor)-----\nprivate-material\n-----END \(armor)-----"

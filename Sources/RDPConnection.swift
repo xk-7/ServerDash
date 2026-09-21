@@ -49,8 +49,17 @@ struct RDPFailure: Error, Equatable, Sendable {
     static func native(_ code: UInt32) -> Self {
         switch code {
         case 0x00020006, 0x0002000D: .init(kind: .transport, message: "网络连接中断。")
-        case 0x00020009, 0x00020014...0x0002001B, 0x0002000E...0x00020013:
-            .init(kind: .authentication, message: "Windows 拒绝了身份验证，请核对用户名、域、密码及远程登录权限。")
+        case 0x00020015: .init(kind: .authentication, message: "Windows 拒绝了密码，请重新输入。")
+        case 0x00020014: .init(kind: .authentication, message: "Windows 登录失败，请核对用户名、域和密码。")
+        case 0x00020016, 0x0002001A:
+            .init(kind: .authentication, message: "该账户无权通过远程桌面登录。请把用户加入 Remote Desktop Users。")
+        case 0x0002001B: .init(kind: .authentication, message: "未提供完整的 Windows 凭据。")
+        case 0x00020012, 0x00020018: .init(kind: .authentication, message: "账户已禁用或锁定。")
+        case 0x0002000E, 0x0002000F, 0x00020013: .init(kind: .authentication, message: "密码已过期或必须先修改才能登录。")
+        case 0x00020011:
+            .init(kind: .authentication, message: "无法联系域控制器。工作组或云主机请将域留空，不要填写 AD 域名。")
+        case 0x00020009, 0x00020010, 0x00020017, 0x00020019:
+            .init(kind: .authentication, message: "NLA 身份验证失败。工作组/云主机用户名填 Administrator（或实际账户）并将域留空，再核对密码。")
         case 0x00020008, 0x0002000C, 0x0002001E:
             .init(kind: .certificate, message: "安全握手失败；需要 NLA/CredSSP 和 TLS 1.2 以上，不会降级连接。")
         case 0x0002000B: .init(kind: .cancelled, message: "连接已取消。")

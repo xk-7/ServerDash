@@ -8,6 +8,8 @@ struct ProfessionalConnectionsView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var appState: AppState
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
+    @Query(sort: \IdentityRecord.name) private var identities: [IdentityRecord]
+    @Query(sort: \SSHKeyRecord.name) private var keys: [SSHKeyRecord]
     @Query(sort: \ConnectionRouteRecord.updatedAt, order: .reverse)
     private var routeRecords: [ConnectionRouteRecord]
     @Query(sort: \PortForwardRuleRecord.updatedAt, order: .reverse)
@@ -284,7 +286,7 @@ struct ProfessionalConnectionsView: View {
                     SecureField("代理密码（可选）", text: $proxySecret)
                 }
                 HStack(alignment: .top, spacing: AppleDesign.Spacing.md) {
-                    Text("需要认证时，请同时填写用户名和密码。密码安全保存在 macOS 钥匙串中。")
+                    Text("需要认证时，请同时填写用户名和密码。凭据保存在 macOS 钥匙串中；当前代理链路没有 TLS，带凭据时仅允许 127.0.0.1 或 ::1。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -477,6 +479,14 @@ struct ProfessionalConnectionsView: View {
                         sourceAlias: alias,
                         sourcePathHint: configURL?.lastPathComponent ?? "config"
                     )
+                )
+            }
+            if let server = servers.first(where: { $0.id == selectedServerID }) {
+                SSHConfigRouteImportApplier.apply(
+                    result,
+                    to: server,
+                    identities: identities,
+                    keys: keys
                 )
             }
             try modelContext.save()

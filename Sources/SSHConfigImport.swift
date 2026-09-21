@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import SwiftData
 
 enum SSHConfigField: String, CaseIterable, Codable, Sendable {
     case hostName
@@ -103,7 +104,39 @@ struct SSHConfigResolutionReport: Hashable, Codable, Sendable {
 struct SSHConfigRouteImport: Sendable {
     var route: ConnectionRoute
     var endpoint: ConnectionEndpoint
+    var identityFile: String?
     var reports: [SSHConfigResolutionReport]
+}
+
+enum SSHConfigRouteImportApplier {
+    static func apply(
+        _ result: SSHConfigRouteImport,
+        to server: ServerRecord,
+        identities: [IdentityRecord],
+        keys: [SSHKeyRecord]
+    ) {
+        server.host = result.endpoint.host
+        server.port = result.endpoint.port
+        server.username = result.endpoint.username
+        if let identityFile = result.identityFile?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !identityFile.isEmpty {
+            server.privateKeyPath = identityFile
+        }
+        guard let identityID = server.identityID,
+              let identity = identities.first(where: { $0.id == identityID }) else {
+            return
+        }
+        identity.username = result.endpoint.username
+        identity.updatedAt = .now
+        if let identityFile = result.identityFile?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !identityFile.isEmpty,
+           let keyID = identity.sshKeyID,
+           let key = keys.first(where: { $0.id == keyID }) {
+            key.filePath = identityFile
+        }
+    }
 }
 
 enum SSHConfigImportError: LocalizedError, Equatable {
@@ -213,6 +246,7 @@ struct SSHConfigImporter {
         return SSHConfigRouteImport(
             route: route,
             endpoint: finalEndpoint,
+            identityFile: finalReport.values.last(where: { $0.field == .identityFile })?.value,
             reports: reports
         )
     }

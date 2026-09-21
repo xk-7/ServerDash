@@ -99,6 +99,7 @@ final class SSHSupportAuthenticationTests: XCTestCase {
         let sftp = try SSHSupport.directArgumentsForSFTP(config: config)
 
         for arguments in [command, sftp] {
+            XCTAssertEqual(Array(arguments.prefix(2)), ["-F", "none"])
             XCTAssertTrue(arguments.contains("BatchMode=no"))
             XCTAssertTrue(arguments.contains("PreferredAuthentications=password,keyboard-interactive"))
             XCTAssertTrue(arguments.contains("PubkeyAuthentication=no"))
@@ -143,6 +144,30 @@ final class SSHSupportAuthenticationTests: XCTestCase {
             XCTAssertTrue(arguments.contains("PasswordAuthentication=no"))
             XCTAssertTrue(arguments.contains("KbdInteractiveAuthentication=no"))
         }
+    }
+
+    func testMalformedPersistedRouteCannotReachDirectSSHCompatibilityPath() {
+        var config = makeConfig(authentication: .password)
+        config.route = nil
+
+        XCTAssertThrowsError(
+            try SSHSupport.directArguments(
+                for: config,
+                strictHostChecking: "yes"
+            )
+        ) { error in
+            XCTAssertEqual(error as? ConnectionRouteError, .invalidPersistedRoute)
+        }
+        XCTAssertThrowsError(try SSHSupport.directArgumentsForSFTP(config: config)) { error in
+            XCTAssertEqual(error as? ConnectionRouteError, .invalidPersistedRoute)
+        }
+
+        let compatibilityArguments = SSHSupport.arguments(
+            for: config,
+            strictHostChecking: "yes"
+        )
+        XCTAssertTrue(compatibilityArguments.contains("ProxyCommand=/usr/bin/false"))
+        XCTAssertEqual(Array(compatibilityArguments.prefix(2)), ["-F", "none"])
     }
 
     func testAskPassKeepsPasswordAndKeyPassphraseAccountsSeparate() throws {
@@ -502,6 +527,47 @@ final class TrustedHostStoreTests: XCTestCase {
         }
 
         XCTAssertEqual(store.allKeys().count, 24)
+    }
+
+    func testHopScanProviderIsUsedForUnknownHostAndMatchesHostKeyAlias() async throws {
+        let config = makeConfig(host: "10.0.0.5", port: 2222)
+        let key = Data("hop-key".utf8).base64EncodedString()
+        var scanned: (String, Int)?
+        let decision = try await store.inspect(config, forceScan: false) { host, port, _ in
+            scanned = (host, port)
+            let alias = OpenSSHHostKeyNaming.alias(host: host, port: port)
+            let line = "\(alias) ssh-ed25519 \(key)"
+            return SSHHostKeyProbe(
+                host: host,
+                port: port,
+                algorithm: "ED25519",
+                fingerprint: TrustedHostStore.fingerprint(for: line) ?? "",
+                keyLine: line
+            )
+        }
+
+        guard case .unknown(let probe) = decision else {
+            return XCTFail("Unknown hop must use the injected scan provider")
+        }
+        XCTAssertEqual(scanned?.0, "10.0.0.5")
+        XCTAssertEqual(scanned?.1, 2222)
+        XCTAssertEqual(probe.host, "10.0.0.5")
+        XCTAssertEqual(probe.port, 2222)
+        XCTAssertEqual(OpenSSHHostKeyNaming.alias(host: probe.host, port: probe.port), "[10.0.0.5]:2222")
+    }
+
+    func testHopScanProviderFailureDoesNotSkipVerification() async throws {
+        let config = makeConfig(host: "missing-keyscan.internal", port: 22)
+        do {
+            _ = try await store.inspect(config, forceScan: false) { _, _, _ in
+                throw SSHValidationError.hostKeyUnavailable(
+                    HopHostKeyScanner.missingKeyscanMessage
+                )
+            }
+            XCTFail("Missing ssh-keyscan must fail closed")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("ssh-keyscan"))
+        }
     }
 
     private func makeConfig(host: String, port: Int) -> ServerConnectionConfig {
@@ -2092,6 +2158,33 @@ final class ConnectionLimiterTests: XCTestCase {
         await limiter.release(serverID: nil)
     }
 
+    func testDifferentServerWaiterIsGrantedWhileHeadIsBlocked() async throws {
+        let serverA = UUID()
+        let serverB = UUID()
+        let limiter = ConnectionLimiter(maxGlobal: 2, maxPerServer: 1, waitTimeout: 2)
+        try await limiter.acquire(serverID: serverA)
+
+        let blocked = Task {
+            try await limiter.acquire(serverID: serverA)
+        }
+        await waitForWaiterCount(1, limiter: limiter)
+
+        try await limiter.acquire(serverID: serverB)
+        let waitingCount = await limiter.waitingCount()
+        XCTAssertEqual(waitingCount, 1)
+
+        blocked.cancel()
+        do {
+            try await blocked.value
+        } catch {
+            XCTAssertTrue(
+                error is CancellationError || (error as? ConnectionError) == .cancelled
+            )
+        }
+        await limiter.release(serverID: serverA)
+        await limiter.release(serverID: serverB)
+    }
+
     private func waitForWaiterCount(_ count: Int, limiter: ConnectionLimiter) async {
         let deadline = Date().addingTimeInterval(1)
         while Date() < deadline, await limiter.waitingCount() != count {
@@ -2183,6 +2276,42 @@ final class PerformanceInstrumentationTests: XCTestCase {
 
 @MainActor
 final class SessionNavigationRegressionTests: XCTestCase {
+    func testMalformedPersistedRouteFailsBeforeHostKeyInspection() async {
+        let scans = IntegerRecorder()
+        let trust = HostTrustCoordinator(
+            inspector: { _, _ in
+                await scans.append(1)
+                throw CancellationError()
+            },
+            truster: { _, _ in }
+        )
+        let app = AppState(
+            trustCoordinator: trust,
+            terminalRegistry: TerminalSessionRegistry(attachProcess: false),
+            fileServicesEnabled: false
+        )
+        var config = ServerConnectionConfig(
+            id: UUID(),
+            credentialID: UUID(),
+            name: "Damaged route",
+            host: "target.example.com",
+            port: 22,
+            username: "deploy",
+            authentication: .privateKey,
+            privateKeyPath: "/tmp/not-used"
+        )
+        config.route = nil
+
+        do {
+            try await app.authorizeConnection(config, source: .sshTest)
+            XCTFail("Expected invalidPersistedRoute")
+        } catch {
+            XCTAssertEqual(error as? ConnectionRouteError, .invalidPersistedRoute)
+        }
+        let recordedScans = await scans.values()
+        XCTAssertTrue(recordedScans.isEmpty)
+    }
+
     func testReuseDisconnectedMRUDoesNotAuthorizeOrChangeMonitorSelection() async {
         let scans = IntegerRecorder()
         let trust = HostTrustCoordinator(inspector: { _, _ in

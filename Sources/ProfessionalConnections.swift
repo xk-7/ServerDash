@@ -143,6 +143,13 @@ struct NetworkProxy: Hashable, Codable, Sendable {
     var username: String?
     /// The Keychain account reference only. The secret itself is never serialized here.
     var secretAccount: String?
+
+    var allowsPlaintextCredentials: Bool {
+        switch host.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "127.0.0.1", "::1": true
+        default: false
+        }
+    }
 }
 
 struct ConnectionRoute: Identifiable, Hashable, Codable, Sendable {
@@ -211,17 +218,36 @@ struct ConnectionRoute: Identifiable, Hashable, Codable, Sendable {
             guard (username == nil) == (secretAccount == nil) else {
                 throw ConnectionRouteError.proxyCredentialMissing
             }
+            if secretAccount != nil, !proxy.allowsPlaintextCredentials {
+                throw ConnectionRouteError.proxyCredentialsRequireLoopback
+            }
             if let secretAccount,
-               (try KeychainService.secret(account: secretAccount)) == nil {
+               !KeychainService.hasSecret(account: secretAccount) {
                 throw ConnectionRouteError.proxyCredentialMissing
             }
         }
-        if let command = importedProxyCommand,
-           !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           !importedProxyCommandConfirmed {
-            throw ConnectionRouteError.proxyCommandRequiresConfirmation
+        if let command = importedProxyCommand {
+            let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                if !importedProxyCommandConfirmed {
+                    throw ConnectionRouteError.proxyCommandRequiresConfirmation
+                }
+                if containsUnsafeProxyCommandCharacters(command) {
+                    throw ConnectionRouteError.invalidProxyCommand
+                }
+            }
         }
         return self
+    }
+}
+
+private func containsUnsafeProxyCommandCharacters(_ value: String) -> Bool {
+    value.unicodeScalars.contains {
+        $0.value < 0x20 ||
+            $0.value == 0x7F ||
+            (0x80...0x9F).contains($0.value) ||
+            $0.value == 0x2028 ||
+            $0.value == 0x2029
     }
 }
 
@@ -264,12 +290,16 @@ private extension ConnectionFailureStage {
 enum ConnectionRouteError: LocalizedError, Equatable, Sendable {
     case invalidEndpoint(String)
     case invalidProxy
+    case invalidPersistedRoute
     case proxyCredentialMissing
+    case proxyCredentialsRequireLoopback
     case proxyCommandRequiresConfirmation
+    case invalidProxyCommand
     case routeLoop(String)
     case tooManyHops(Int)
     case credentialUnavailable(hopID: UUID, reason: String)
     case multipleInteractiveCredentialsUnsupported
+    case invalidInteractiveCredentialSelector
     case unsafeListenRequiresConfirmation(String)
     case remoteForwardRequiresConfirmation
     case portUnavailable(Int)
@@ -284,10 +314,16 @@ enum ConnectionRouteError: LocalizedError, Equatable, Sendable {
             "\(label)的主机、端口或用户名无效。"
         case .invalidProxy:
             "代理主机或端口无效。"
+        case .invalidPersistedRoute:
+            "已保存的连接路线损坏、重复或与当前版本不兼容；已阻止直连。"
         case .proxyCredentialMissing:
             "代理凭据引用缺失；不会回退为匿名代理。"
+        case .proxyCredentialsRequireLoopback:
+            "带凭据的 SOCKS5 / HTTP CONNECT 代理仅允许使用 127.0.0.1 或 ::1；远程代理链路没有 TLS，已阻止连接。"
         case .proxyCommandRequiresConfirmation:
             "导入的 ProxyCommand 可执行本机命令，必须明确确认后才能使用。"
+        case .invalidProxyCommand:
+            "导入的 ProxyCommand 包含换行或控制字符，已阻止连接。"
         case .routeLoop(let endpoint):
             "连接路线包含循环：\(endpoint)。"
         case .tooManyHops(let count):
@@ -296,6 +332,8 @@ enum ConnectionRouteError: LocalizedError, Equatable, Sendable {
             "路线身份不可用：\(reason)。不会尝试其他身份。"
         case .multipleInteractiveCredentialsUnsupported:
             "多个交互式凭据无法可靠区分，已阻止连接。"
+        case .invalidInteractiveCredentialSelector:
+            "交互式凭据选择器包含无效字符，已阻止连接。"
         case .unsafeListenRequiresConfirmation(let address):
             "监听 \(address) 会向其他网络设备暴露端口，必须明确确认。"
         case .remoteForwardRequiresConfirmation:
@@ -393,7 +431,7 @@ enum RouteKeyMaterialStore {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        let file = directory.appendingPathComponent(keyID.uuidString)
+        let file = directory.appendingPathComponent("\(keyID.uuidString)-\(UUID().uuidString)")
         try Data(pem.utf8).write(to: file, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
@@ -415,6 +453,7 @@ struct OpenSSHLaunchPlan: Sendable, Equatable {
     var environment: [String: String]
     var routeRevision: UUID
     var diagnosticEndpoints: [ConnectionEndpoint]
+    var cleanupPaths: [String] = []
 }
 
 struct SystemOpenSSHConnectionProvider: ConnectionProvider {
@@ -440,15 +479,18 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
         for config: ServerConnectionConfig,
         purpose: ConnectionPurpose
     ) throws -> OpenSSHLaunchPlan {
+        guard let persistedRoute = config.route else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
         try config.advancedSettings?.validate()
         let finalEndpoint = ConnectionEndpoint(
             host: config.host,
             port: config.port,
             username: config.username
         )
-        let route = try config.route.validated(finalEndpoint: finalEndpoint)
+        let route = try persistedRoute.validated(finalEndpoint: finalEndpoint)
         if route.isDirect {
-            return try directPlan(config: config, purpose: purpose)
+            return try directPlan(config: config, purpose: purpose, route: route)
         }
         return try routedPlan(
             config: config,
@@ -460,7 +502,8 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
 
     private func directPlan(
         config: ServerConnectionConfig,
-        purpose: ConnectionPurpose
+        purpose: ConnectionPurpose,
+        route: ConnectionRoute
     ) throws -> OpenSSHLaunchPlan {
         var arguments: [String]
         var executable = "/usr/bin/ssh"
@@ -487,14 +530,18 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
             )
             arguments.insert(contentsOf: rule.openSSHArguments, at: 0)
         }
+        if !arguments.starts(with: ["-F", "none"]) {
+            arguments.insert(contentsOf: ["-F", "none"], at: 0)
+        }
         return OpenSSHLaunchPlan(
             executable: executable,
             arguments: arguments,
             environment: SSHSupport.environment(for: config),
-            routeRevision: routeRevision(config.route),
+            routeRevision: routeRevision(route),
             diagnosticEndpoints: [
                 ConnectionEndpoint(host: config.host, port: config.port, username: config.username)
-            ]
+            ],
+            cleanupPaths: TemporaryKeyMaterial.managedIdentityPaths(from: arguments)
         )
     }
 
@@ -538,8 +585,22 @@ struct SystemOpenSSHConnectionProvider: ConnectionProvider {
             arguments: arguments,
             environment: materialized.environment,
             routeRevision: route.revision,
-            diagnosticEndpoints: route.hops.map(\.endpoint) + [finalEndpoint]
+            diagnosticEndpoints: route.hops.map(\.endpoint) + [finalEndpoint],
+            cleanupPaths: ephemeralKeyPaths(
+                from: resolvedHops.map(\.1) + [finalCredential]
+            )
         )
+    }
+
+    private func ephemeralKeyPaths(from credentials: [ResolvedCredential]) -> [String] {
+        credentials.compactMap { credential in
+            switch credential {
+            case .privateKey(let path, _), .keyThenPassword(let path, _, _):
+                TemporaryKeyMaterial.isManaged(path) ? path : nil
+            case .sshAgent, .password:
+                nil
+            }
+        }
     }
 
     private func resolveFinalCredential(
@@ -640,6 +701,22 @@ private struct MaterializedOpenSSHRoute {
 }
 
 private enum OpenSSHRouteMaterializer {
+    private enum AskPassMatchKind: Int, Hashable {
+        case exact
+        case prefix
+    }
+
+    private struct AskPassSelector: Hashable {
+        var kind: AskPassMatchKind
+        var value: String
+    }
+
+    private struct InteractiveAccount {
+        var selector: AskPassSelector
+        var selectionPattern: String
+        var account: String
+    }
+
     static func materialize(
         route: ConnectionRoute,
         finalEndpoint: ConnectionEndpoint,
@@ -673,10 +750,10 @@ private enum OpenSSHRouteMaterializer {
             "    ForwardAgent no",
             "    ExitOnForwardFailure yes"
         ]
-        var interactiveAccounts: [(pattern: String, account: String)] = []
+        var interactiveAccounts: [InteractiveAccount] = []
         for (index, item) in resolvedHops.enumerated() {
             let (hop, credential) = item
-            lines += hostBlock(
+            lines += try hostBlock(
                 alias: hopAliases[index],
                 endpoint: hop.endpoint,
                 timeout: hop.connectTimeout,
@@ -687,7 +764,7 @@ private enum OpenSSHRouteMaterializer {
                 lines += try proxyLines(route: route)
             }
         }
-        lines += hostBlock(
+        lines += try hostBlock(
             alias: finalAlias,
             endpoint: finalEndpoint,
             timeout: finalTimeout,
@@ -699,6 +776,17 @@ private enum OpenSSHRouteMaterializer {
         } else {
             lines.append("    ProxyJump \(hopAliases.joined(separator: ","))")
         }
+        let askPassHelper: (
+            url: URL,
+            environment: [String: String]
+        )? = if interactiveAccounts.isEmpty {
+            nil
+        } else {
+            try makeAskPassHelper(
+                routeRevision: route.revision,
+                accounts: interactiveAccounts
+            )
+        }
         try (lines.joined(separator: "\n") + "\n")
             .write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
@@ -709,12 +797,17 @@ private enum OpenSSHRouteMaterializer {
         var environment = ProcessInfo.processInfo.environment
         environment["TERM"] = "xterm-256color"
         environment["LANG"] = environment["LANG"] ?? "en_US.UTF-8"
-        if !interactiveAccounts.isEmpty {
-            let helper = try makeAskPassHelper(
-                routeRevision: route.revision,
-                accounts: interactiveAccounts
-            )
-            environment["SSH_ASKPASS"] = helper.path
+        environment.removeValue(forKey: "SSH_ASKPASS")
+        environment.removeValue(forKey: "SSH_ASKPASS_REQUIRE")
+        environment.removeValue(forKey: "SERVERDASH_KEYCHAIN_SERVICE")
+        for key in environment.keys.filter({
+            $0.hasPrefix("SERVERDASH_ROUTE_ASKPASS_")
+        }) {
+            environment.removeValue(forKey: key)
+        }
+        if let helper = askPassHelper {
+            environment.merge(helper.environment) { _, newValue in newValue }
+            environment["SSH_ASKPASS"] = helper.url.path
             environment["SSH_ASKPASS_REQUIRE"] = "force"
             if environment["DISPLAY"]?.isEmpty != false {
                 environment["DISPLAY"] = ":0"
@@ -733,8 +826,8 @@ private enum OpenSSHRouteMaterializer {
         endpoint: ConnectionEndpoint,
         timeout: TimeInterval,
         credential: ResolvedCredential,
-        interactiveAccounts: inout [(pattern: String, account: String)]
-    ) -> [String] {
+        interactiveAccounts: inout [InteractiveAccount]
+    ) throws -> [String] {
         var lines = [
             "Host \(alias)",
             "    HostName \(quote(endpoint.host))",
@@ -753,7 +846,12 @@ private enum OpenSSHRouteMaterializer {
                 "    PreferredAuthentications publickey"
             ]
             if let passphraseAccount {
-                interactiveAccounts.append((path, passphraseAccount))
+                interactiveAccounts.append(
+                    try privateKeyInteractiveAccount(
+                        path: path,
+                        account: passphraseAccount
+                    )
+                )
             }
         case .password(let account):
             lines += [
@@ -762,7 +860,10 @@ private enum OpenSSHRouteMaterializer {
                 "    KbdInteractiveAuthentication yes",
                 "    PreferredAuthentications password,keyboard-interactive"
             ]
-            interactiveAccounts.append(("\(endpoint.username)@\(endpoint.host)", account))
+            interactiveAccounts += passwordInteractiveAccounts(
+                endpoint: endpoint,
+                account: account
+            )
         case .keyThenPassword(let path, let passphraseAccount, let passwordAccount):
             lines += [
                 "    IdentityFile \(quote(path))",
@@ -772,16 +873,68 @@ private enum OpenSSHRouteMaterializer {
                 "    PreferredAuthentications publickey,password,keyboard-interactive"
             ]
             if let passphraseAccount {
-                interactiveAccounts.append((path, passphraseAccount))
+                interactiveAccounts.append(
+                    try privateKeyInteractiveAccount(
+                        path: path,
+                        account: passphraseAccount
+                    )
+                )
             }
             if let passwordAccount {
-                interactiveAccounts.append((
-                    "\(endpoint.username)@\(endpoint.host)",
-                    passwordAccount
-                ))
+                interactiveAccounts += passwordInteractiveAccounts(
+                    endpoint: endpoint,
+                    account: passwordAccount
+                )
             }
         }
         return lines
+    }
+
+    private static func privateKeyInteractiveAccount(
+        path: String,
+        account: String
+    ) throws -> InteractiveAccount {
+        guard !path.isEmpty,
+              !containsControlCharacter(path),
+              let displayedPath = String(
+                  bytes: path.utf8.prefix(100),
+                  encoding: .utf8
+              ) else {
+            throw ConnectionRouteError.invalidInteractiveCredentialSelector
+        }
+        return InteractiveAccount(
+            selector: AskPassSelector(
+                kind: .exact,
+                value: "Enter passphrase for key '\(displayedPath)': "
+            ),
+            selectionPattern: displayedPath,
+            account: account
+        )
+    }
+
+    private static func passwordInteractiveAccounts(
+        endpoint: ConnectionEndpoint,
+        account: String
+    ) -> [InteractiveAccount] {
+        let identity = "\(endpoint.username)@\(asciiLowercased(hostKeyAlias(endpoint)))"
+        return [
+            InteractiveAccount(
+                selector: AskPassSelector(
+                    kind: .exact,
+                    value: "\(identity)'s password: "
+                ),
+                selectionPattern: identity,
+                account: account
+            ),
+            InteractiveAccount(
+                selector: AskPassSelector(
+                    kind: .prefix,
+                    value: "(\(identity)) "
+                ),
+                selectionPattern: identity,
+                account: account
+            )
+        ]
     }
 
     private static func proxyLines(route: ConnectionRoute) throws -> [String] {
@@ -804,18 +957,57 @@ private enum OpenSSHRouteMaterializer {
         }
         if let command = route.importedProxyCommand,
            route.importedProxyCommandConfirmed {
-            return ["    ProxyCommand \(command)"]
+            let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return [] }
+            if containsControlCharacter(command) {
+                throw ConnectionRouteError.invalidProxyCommand
+            }
+            return ["    ProxyCommand \(trimmed)"]
         }
         return []
     }
 
     private static func makeAskPassHelper(
         routeRevision: UUID,
-        accounts: [(pattern: String, account: String)]
-    ) throws -> URL {
-        let distinct = Dictionary(grouping: accounts, by: \.pattern)
+        accounts: [InteractiveAccount]
+    ) throws -> (url: URL, environment: [String: String]) {
+        guard accounts.allSatisfy({
+            !$0.selectionPattern.isEmpty &&
+                !containsControlCharacter($0.selectionPattern)
+        }) else {
+            throw ConnectionRouteError.invalidInteractiveCredentialSelector
+        }
+        for (index, entry) in accounts.enumerated() {
+            for other in accounts.dropFirst(index + 1)
+            where entry.account != other.account &&
+                selectionPatternsOverlap(entry.selectionPattern, other.selectionPattern) {
+                throw ConnectionRouteError.multipleInteractiveCredentialsUnsupported
+            }
+        }
+        let distinct = Dictionary(grouping: accounts, by: \.selector)
         guard distinct.values.allSatisfy({ Set($0.map(\.account)).count == 1 }) else {
             throw ConnectionRouteError.multipleInteractiveCredentialsUnsupported
+        }
+        let entries = distinct.sorted {
+            if $0.key.kind.rawValue != $1.key.kind.rawValue {
+                return $0.key.kind.rawValue < $1.key.kind.rawValue
+            }
+            return $0.key.value < $1.key.value
+        }.map { (selector: $0.key, account: $0.value[0].account) }
+        guard entries.allSatisfy({
+            !$0.selector.value.isEmpty &&
+                !$0.account.isEmpty &&
+                !containsControlCharacter($0.selector.value) &&
+                !containsControlCharacter($0.account)
+        }) else {
+            throw ConnectionRouteError.invalidInteractiveCredentialSelector
+        }
+        for (index, entry) in entries.enumerated() {
+            for other in entries.dropFirst(index + 1)
+            where entry.account != other.account &&
+                selectorsCanMatchSamePrompt(entry.selector, other.selector) {
+                throw ConnectionRouteError.multipleInteractiveCredentialsUnsupported
+            }
         }
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ServerDash/routes/askpass", isDirectory: true)
@@ -825,25 +1017,79 @@ private enum OpenSSHRouteMaterializer {
             attributes: [.posixPermissions: 0o700]
         )
         let file = directory.appendingPathComponent(routeRevision.uuidString)
-        var script = "#!/bin/sh\nprompt=$1\naccount=''\ncase \"$prompt\" in\n"
-        for item in distinct.sorted(by: { $0.key < $1.key }) {
-            let pattern = item.key
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-                .replacingOccurrences(of: "*", with: "\\*")
-                .replacingOccurrences(of: "?", with: "\\?")
-            let account = item.value[0].account
-                .replacingOccurrences(of: "'", with: "'\\''")
-            script += "  *\"\(pattern)\"*) account='\(account)' ;;\n"
+        var script = #"""
+        #!/bin/sh
+        prompt=${1-}
+        account=''
+        matches_prefix() {
+          prefix=$1
+          [ -n "$prefix" ] || return 1
+          case "$prompt" in
+            "$prefix"*) return 0 ;;
+            *) return 1 ;;
+          esac
         }
-        script += "esac\n[ -n \"$account\" ] || exit 1\n"
+
+        """#
+        var helperEnvironment: [String: String] = [:]
+        for (index, entry) in entries.enumerated() {
+            let selectorKey = "SERVERDASH_ROUTE_ASKPASS_SELECTOR_\(index)"
+            let accountKey = "SERVERDASH_ROUTE_ASKPASS_ACCOUNT_\(index)"
+            helperEnvironment[selectorKey] = entry.selector.value
+            helperEnvironment[accountKey] = entry.account
+            switch entry.selector.kind {
+            case .exact:
+                script += #"if [ -n "${\#(selectorKey):-}" ] && [ "$prompt" = "${\#(selectorKey):-}" ]; then"# + "\n"
+            case .prefix:
+                script += #"if matches_prefix "${\#(selectorKey):-}"; then"# + "\n"
+            }
+            script += #"""
+              candidate="${\#(accountKey):-}"
+              [ -n "$candidate" ] || exit 1
+              if [ -n "$account" ] && [ "$account" != "$candidate" ]; then
+                exit 1
+              fi
+              account="$candidate"
+            fi
+            """# + "\n"
+        }
+        script += "[ -n \"$account\" ] || exit 1\n"
         script += "exec /usr/bin/security find-generic-password -s \"$SERVERDASH_KEYCHAIN_SERVICE\" -a \"$account\" -w\n"
         try Data(script.utf8).write(to: file, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o700],
             ofItemAtPath: file.path
         )
-        return file
+        return (file, helperEnvironment)
+    }
+
+    private static func selectorsCanMatchSamePrompt(
+        _ lhs: AskPassSelector,
+        _ rhs: AskPassSelector
+    ) -> Bool {
+        switch (lhs.kind, rhs.kind) {
+        case (.exact, .exact):
+            lhs.value == rhs.value
+        case (.prefix, .prefix):
+            lhs.value.hasPrefix(rhs.value) || rhs.value.hasPrefix(lhs.value)
+        case (.exact, .prefix):
+            lhs.value.hasPrefix(rhs.value)
+        case (.prefix, .exact):
+            rhs.value.hasPrefix(lhs.value)
+        }
+    }
+
+    private static func selectionPatternsOverlap(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.contains(rhs) || rhs.contains(lhs)
+    }
+
+    private static func containsControlCharacter(_ value: String) -> Bool {
+        value.unicodeScalars.contains {
+            $0.value <= 0x1F ||
+                (0x7F...0x9F).contains($0.value) ||
+                $0.value == 0x2028 ||
+                $0.value == 0x2029
+        }
     }
 
     private static func quote(_ value: String) -> String {
@@ -855,7 +1101,149 @@ private enum OpenSSHRouteMaterializer {
     }
 
     private static func hostKeyAlias(_ endpoint: ConnectionEndpoint) -> String {
-        endpoint.port == 22 ? endpoint.host : "[\(endpoint.host)]:\(endpoint.port)"
+        OpenSSHHostKeyNaming.alias(for: endpoint)
+    }
+
+    private static func asciiLowercased(_ value: String) -> String {
+        let bytes = value.utf8.map { byte in
+            (0x41...0x5A).contains(byte) ? byte + 0x20 : byte
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+}
+
+enum OpenSSHHostKeyNaming {
+    static func alias(for endpoint: ConnectionEndpoint) -> String {
+        alias(host: endpoint.host, port: endpoint.port)
+    }
+
+    static func alias(host: String, port: Int) -> String {
+        port == 22 ? host : "[\(host)]:\(port)"
+    }
+}
+
+enum HopHostKeyScanner {
+    static let missingKeyscanMessage = "跳板机未安装 ssh-keyscan，无法校验后续主机密钥。"
+
+    static func unavailableMessage(output: String, error: String) -> String? {
+        let combined = output + "\n" + error
+        if combined.contains("SERVERDASH_KEYSCAN_MISSING")
+            || combined.contains("ssh-keyscan: not found")
+            || combined.range(of: "command not found", options: .caseInsensitive) != nil {
+            return missingKeyscanMessage
+        }
+        return nil
+    }
+
+    static func scan(
+        host: String,
+        port: Int,
+        preferredAlgorithm: String?,
+        via prefix: [ConnectionHop]
+    ) throws -> SSHHostKeyProbe {
+#if os(macOS)
+        guard let last = prefix.last else {
+            return try TrustedHostStore.scan(
+                host: host,
+                port: port,
+                preferredAlgorithm: preferredAlgorithm
+            )
+        }
+        let earlier = Array(prefix.dropLast())
+        let credentialProvider = SystemCredentialProvider()
+        var resolvedHops: [(ConnectionHop, ResolvedCredential)] = []
+        for hop in earlier {
+            resolvedHops.append((hop, try credentialProvider.resolve(hop.credential, hopID: hop.id)))
+        }
+        let finalCredential = try credentialProvider.resolve(last.credential, hopID: last.id)
+        let route = ConnectionRoute(
+            revision: UUID(),
+            name: "keyscan-prefix",
+            hops: earlier
+        )
+        let materialized = try OpenSSHRouteMaterializer.materialize(
+            route: route,
+            finalEndpoint: last.endpoint,
+            finalCredential: finalCredential,
+            resolvedHops: resolvedHops,
+            finalTimeout: last.connectTimeout,
+            keepAliveInterval: 15,
+            keepAliveCountMax: 3
+        )
+        let escapedHost = "'" + host.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let command = """
+        command -v ssh-keyscan >/dev/null 2>&1 || { printf 'SERVERDASH_KEYSCAN_MISSING\\n' >&2; exit 127; }; exec ssh-keyscan -T 8 -p \(port) \(escapedHost)
+        """
+        let process = Process()
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = [
+            "-F", materialized.configurationURL.path,
+            materialized.finalAlias,
+            command
+        ]
+        process.environment = materialized.environment
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        process.standardInput = FileHandle.nullDevice
+        defer {
+            TemporaryKeyMaterial.cleanup(
+                (resolvedHops.map(\.1) + [finalCredential]).compactMap { credential in
+                    switch credential {
+                    case .privateKey(let path, _), .keyThenPassword(let path, _, _):
+                        TemporaryKeyMaterial.isManaged(path) ? path : nil
+                    case .sshAgent, .password:
+                        nil
+                    }
+                }
+            )
+            try? FileManager.default.removeItem(at: materialized.configurationURL)
+        }
+        do {
+            try process.run()
+        } catch {
+            throw SSHValidationError.hostKeyUnavailable(error.localizedDescription)
+        }
+        let deadline = Date().addingTimeInterval(20)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning {
+                process.interrupt()
+            }
+            throw SSHValidationError.hostKeyUnavailable("经跳板扫描主机密钥超时。")
+        }
+        let output = String(
+            decoding: outputPipe.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        let errorOutput = String(
+            decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        if let message = unavailableMessage(output: output, error: errorOutput) {
+            throw SSHValidationError.hostKeyUnavailable(message)
+        }
+        return try TrustedHostStore.parseScanOutput(
+            output: output,
+            error: errorOutput,
+            host: host,
+            port: port,
+            preferredAlgorithm: preferredAlgorithm
+        )
+#else
+        _ = host
+        _ = port
+        _ = preferredAlgorithm
+        _ = prefix
+        throw SSHValidationError.hostKeyUnavailable(
+            "移动端会在 SSH 握手中直接获取并验证主机密钥。"
+        )
+#endif
     }
 }
 
@@ -873,23 +1261,25 @@ private enum RouteProxyBridge {
         #!/usr/bin/perl
         use strict;
         use warnings;
-        use IO::Socket::INET;
+        use IO::Socket::IP;
         use IO::Select;
         use MIME::Base64 qw(encode_base64);
 
         my ($kind, $proxy_host, $proxy_port, $target_host, $target_port, $user, $account) = @ARGV;
         die "invalid proxy arguments\n" unless defined $account && $proxy_port =~ /^\d+$/ && $target_port =~ /^\d+$/;
         my $secret = '';
-        if (length $account) {
+        sub credential_secret {
+            my ($account) = @_;
             open(my $keychain, '-|', '/usr/bin/security', 'find-generic-password',
                 '-s', 'com.serverdash.credentials', '-a', $account, '-w') or die "proxy credential unavailable\n";
             local $/;
-            $secret = <$keychain> // '';
+            my $value = <$keychain> // '';
             close($keychain) or die "proxy credential unavailable\n";
-            $secret =~ s/[\r\n]+\z//;
-            die "proxy credential unavailable\n" unless length $secret;
+            $value =~ s/[\r\n]+\z//;
+            die "proxy credential unavailable\n" unless length $value;
+            return $value;
         }
-        my $socket = IO::Socket::INET->new(
+        my $socket = IO::Socket::IP->new(
             PeerHost => $proxy_host,
             PeerPort => int($proxy_port),
             Proto => 'tcp',
@@ -920,17 +1310,20 @@ private enum RouteProxyBridge {
         }
 
         if ($kind eq 'socks5') {
-            my $methods = length($account) ? "\x00\x02" : "\x00";
-            write_all($socket, pack('CC', 5, length($methods)) . $methods);
-            my ($version, $method) = unpack('CC', read_exact($socket, 2));
-            die "SOCKS5 negotiation failed\n" unless $version == 5 && $method != 255;
-            if ($method == 2) {
-                die "SOCKS5 credentials unavailable\n" unless length($user) && length($secret) && length($user) < 256 && length($secret) < 256;
+            if (length($account)) {
+                die "SOCKS5 credentials unavailable\n" unless length($user) && length($user) < 256;
+                write_all($socket, pack('CCC', 5, 1, 2));
+                my ($version, $method) = unpack('CC', read_exact($socket, 2));
+                die "SOCKS5 authentication required\n" unless $version == 5 && $method == 2;
+                $secret = credential_secret($account);
+                die "SOCKS5 credentials unavailable\n" unless length($secret) < 256;
                 write_all($socket, pack('CC', 1, length($user)) . $user . pack('C', length($secret)) . $secret);
                 my ($auth_version, $status) = unpack('CC', read_exact($socket, 2));
                 die "SOCKS5 authentication failed\n" unless $auth_version == 1 && $status == 0;
-            } elsif ($method != 0) {
-                die "SOCKS5 method unsupported\n";
+            } else {
+                write_all($socket, pack('CCC', 5, 1, 0));
+                my ($version, $method) = unpack('CC', read_exact($socket, 2));
+                die "SOCKS5 negotiation failed\n" unless $version == 5 && $method == 0;
             }
             die "target host too long\n" unless length($target_host) < 256;
             write_all($socket, pack('CCCC', 5, 1, 0, 3) . pack('C', length($target_host)) . $target_host . pack('n', $target_port));
@@ -944,6 +1337,7 @@ private enum RouteProxyBridge {
         } elsif ($kind eq 'httpConnect') {
             my $request = "CONNECT $target_host:$target_port HTTP/1.1\r\nHost: $target_host:$target_port\r\n";
             if (length($account)) {
+                $secret = credential_secret($account);
                 my $encoded = encode_base64("$user:$secret", '');
                 $request .= "Proxy-Authorization: Basic $encoded\r\n";
             }

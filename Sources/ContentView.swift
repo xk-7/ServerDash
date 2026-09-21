@@ -254,6 +254,9 @@ struct ContentView: View {
             .onChange(of: connectionRoutes.map(\.revision)) {
                 synchronizeIdentityConnections()
             }
+            .onChange(of: connectionRoutes.map(\.routeJSON)) {
+                synchronizeIdentityConnections()
+            }
             .onChange(of: servers.map(\.id)) { _, serverIDs in
                 handleServerListChange(serverIDs)
             }
@@ -417,8 +420,12 @@ struct ContentView: View {
             let proxySecretAccounts = connectionRoutes
                 .filter { $0.serverID == server.id }
                 .compactMap { $0.route?.proxy?.secretAccount }
-            for rule in portForwardRules where rule.serverID == server.id {
-                try? await appState.stopPortForward(ruleID: rule.id, serverID: server.id)
+            let victimRules = portForwardRules.filter { $0.serverID == server.id }
+            try await appState.stopPortForwards(
+                ruleIDs: victimRules.map(\.id),
+                serverID: server.id
+            )
+            for rule in victimRules {
                 modelContext.delete(rule)
             }
             for connectionRoute in connectionRoutes where connectionRoute.serverID == server.id {

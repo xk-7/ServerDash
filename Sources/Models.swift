@@ -416,13 +416,27 @@ enum ResourceDeletionPolicy {
 }
 
 enum ConnectionConfigResolver {
+    static func persistedRoute(
+        for serverID: UUID,
+        routes: [ConnectionRouteRecord]
+    ) -> ConnectionRoute? {
+        let records = routes.filter { $0.serverID == serverID }
+        guard !records.isEmpty else {
+            return .direct
+        }
+        guard records.count == 1 else {
+            return nil
+        }
+        return records[0].route
+    }
+
     static func resolve(
         server: ServerRecord,
         identities: [IdentityRecord],
         keys: [SSHKeyRecord],
         routes: [ConnectionRouteRecord] = []
     ) -> ServerConnectionConfig {
-        let route = routes.first(where: { $0.serverID == server.id })?.route ?? .direct
+        let route = persistedRoute(for: server.id, routes: routes)
         guard let identityID = server.identityID,
               let identity = identities.first(where: { $0.id == identityID }) else {
             guard server.identityID != nil else {
@@ -488,7 +502,9 @@ struct ServerConnectionConfig: Hashable, Sendable {
     var usesImportedKey: Bool = false
     var hasPassphrase: Bool = false
     var connectTimeout: TimeInterval = PrivacySettings.connectTimeout
-    var route: ConnectionRoute = .direct
+    /// `.direct` means there is no persisted route record. `nil` means matching
+    /// persisted data is malformed or ambiguous and must block connection.
+    var route: ConnectionRoute? = .direct
     var identityReferenceMissing: Bool = false
     var advancedSettings: SSHAdvancedSettingsDraft? = nil
 }

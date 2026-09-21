@@ -21,11 +21,7 @@ enum KeychainService {
     static let serviceName = "com.serverdash.credentials"
 
     private static var accessibility: CFString {
-#if os(iOS)
         kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-#else
-        kSecAttrAccessibleWhenUnlocked
-#endif
     }
 
     static func savePassword(_ password: String, for credentialID: UUID) throws {
@@ -39,7 +35,8 @@ enum KeychainService {
 
         let attributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: accessibility
+            kSecAttrAccessible as String: accessibility,
+            kSecAttrSynchronizable as String: false
         ]
 
         let status: OSStatus
@@ -103,7 +100,8 @@ enum KeychainService {
         ]
         let attributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: accessibility
+            kSecAttrAccessible as String: accessibility,
+            kSecAttrSynchronizable as String: false
         ]
         let status: OSStatus
         if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
@@ -174,7 +172,7 @@ enum KeyMaterialStore {
                 withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o700]
             )
-            let file = directory.appendingPathComponent(keyID.uuidString)
+            let file = directory.appendingPathComponent("\(keyID.uuidString)-\(UUID().uuidString)")
             try Data(pem.utf8).write(to: file, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             return file.path
@@ -189,15 +187,65 @@ enum KeyMaterialStore {
 
     static func cleanupTemporaryKey(for config: ServerConnectionConfig) {
         guard config.usesImportedKey, let keyID = config.sshKeyID else { return }
-        let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ServerDash/keys/\(keyID.uuidString)")
-        try? FileManager.default.removeItem(at: file)
+        TemporaryKeyMaterial.cleanupPrefix(
+            keyID.uuidString,
+            in: FileManager.default.temporaryDirectory
+                .appendingPathComponent("ServerDash/keys", isDirectory: true)
+        )
     }
 
     static func cleanupAll() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ServerDash/keys", isDirectory: true)
         try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+enum TemporaryKeyMaterial {
+    static func isManaged(_ path: String) -> Bool {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return directoryPrefixes.contains { standardized.hasPrefix($0) }
+    }
+
+    static func cleanup(_ paths: [String]) {
+        for path in Set(paths) where isManaged(path) {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+
+    static func cleanupPrefix(_ prefix: String, in directory: URL) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        for url in entries where url.lastPathComponent.hasPrefix(prefix) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    static func managedIdentityPaths(from arguments: [String]) -> [String] {
+        var paths: [String] = []
+        var index = arguments.startIndex
+        while index < arguments.endIndex {
+            if arguments[index] == "-i" {
+                let next = arguments.index(after: index)
+                if next < arguments.endIndex, isManaged(arguments[next]) {
+                    paths.append(arguments[next])
+                }
+                index = next
+            } else {
+                index = arguments.index(after: index)
+            }
+        }
+        return paths
+    }
+
+    private static var directoryPrefixes: [String] {
+        let root = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        return [
+            root + "/ServerDash/keys/",
+            root + "/ServerDash/routes/keys/"
+        ]
     }
 }
 
@@ -242,7 +290,11 @@ enum SSHSupport {
         batchMode: Bool = false,
         remoteCommand: String? = nil
     ) throws -> [String] {
+        guard config.route != nil else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
         var arguments = [
+            "-F", "none",
             "-p", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.effectiveConnectTimeout))",
             "-o", "BatchMode=\(batchMode ? "yes" : "no")",
@@ -299,7 +351,11 @@ enum SSHSupport {
     }
 
     static func directArgumentsForSFTP(config: ServerConnectionConfig) throws -> [String] {
+        guard config.route != nil else {
+            throw ConnectionRouteError.invalidPersistedRoute
+        }
         var arguments = [
+            "-F", "none",
             "-q",
             "-P", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.effectiveConnectTimeout))",
@@ -377,6 +433,7 @@ enum SSHSupport {
         remoteCommand: String?
     ) -> [String] {
         var arguments = [
+            "-F", "none",
             "-p", String(config.port),
             "-o", "ConnectTimeout=\(Int(config.connectTimeout))",
             "-o", "BatchMode=\(batchMode ? "yes" : "no")",
@@ -390,6 +447,9 @@ enum SSHSupport {
             "-o", "PasswordAuthentication=no",
             "-o", "KbdInteractiveAuthentication=no"
         ]
+        if config.route == nil {
+            arguments += ["-o", "ProxyCommand=/usr/bin/false"]
+        }
         arguments.append("\(config.username)@\(config.host)")
         if let remoteCommand { arguments.append(remoteCommand) }
         return arguments
@@ -874,7 +934,8 @@ enum SSHMonitoringService {
                 serverID: config.id,
                 module: .monitoring,
                 host: config.host,
-                port: config.port
+                port: config.port,
+                cleanupPaths: plan.cleanupPaths
             )
         )
         return result.output
