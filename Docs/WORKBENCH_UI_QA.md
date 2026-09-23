@@ -126,7 +126,8 @@ Debug 隔离入口使用独立的 `ServerDashMacQA` 应用 target 和 `ServerDas
 
 - 当前宿主的 XCTest UI runtime 仍在启用 automation mode 时受 TCC 超时阻断，因此只标记 UI 测试 `build-for-testing` 通过，不标记完整 XCUI 矩阵通过，也没有修改系统隐私权限。
 - 实际 VoiceOver 朗读、完整键盘遍历、实体串口、实体 iPhone/iPad 及真实 SSH、VNC、RDP、WebDAV 服务互通尚未执行。
-- GitHub `main` 规则集需在分支推送后配置并回读确认：必需检查固定为 `Apple main scope / Validate Apple-only tree`，同时要求 PR、禁止强推和删除，并且不允许管理员绕过。
+
+GitHub [`Apple-only main protection` 规则集](https://github.com/xk-7/ServerDash/rules/23774515)已于 2026-09-23 通过只读 API 回读：状态为 `active`，目标为默认分支，要求 PR 和严格的 `Apple main scope / Validate Apple-only tree` 必需检查，只允许普通 merge，禁止强推与删除，`bypass_actors` 为空。
 
 ## 2026-09-13 v1.0.3 并发与退出可靠性验收
 
@@ -167,3 +168,25 @@ Debug 隔离入口使用独立的 `ServerDashMacQA` 应用 target 和 `ServerDas
 - [ ] 真实 SSH 多因素认证、VNC 系统屏幕共享、RDP Windows 互操作及长时间会话退出。
 - [ ] 真实 WebDAV 强 ETag、双设备同步、冲突、断网恢复与恢复密钥交换。
 - [ ] 实体 iPhone/iPad 的兼容性、前后台行为和辅助功能。
+
+## 2026-09-23 macOS 界面与交互一致性复验
+
+本轮工作分支为 `codex/mac-ui-consistency`。项目配置仍为 1.0.4（Build 9）；以下为本轮独立验收清单，不沿用先前版本的通过状态。
+
+### 行为与性能
+
+- [x] 仪表盘目录投影回归覆盖父子分组、空分组和标签、旧主机的默认分组、旧名称筛选迁移至目录 ID、跨页面改名后保持 ID 及删除后清除失效选择。真实窗口选择“生产环境”父组后显示 4/8 台主机，包含子组主机；筛选菜单显示空分组与空标签。
+- [x] 搜索、标签和监控开关的组合筛选回归通过；“刷新全部”在 900×620 真实仪表盘窗口仍可见。筛选只计算主机投影，未触发监控调度；现有会话控制器生命周期回归包含在全量测试中。本轮未连接真实服务验证远端监控任务。
+- [x] SFTP 真实浏览器在 900×620 与 1440×900 间原位缩放：宽窄两种操作栏、列显示随实际内容宽度切换，长中文路径和搜索始终可见。往返缩放后同一个表格保持“应用配置-15.txt”选中，滚动条值保持为 1。窄窗更多菜单包含上传、下载和隐藏文件等操作；权限与压缩原生弹窗可打开，非法权限值原位报错并聚焦输入框。控制器未因布局切换重建，未连接真实 SFTP 服务。
+- [x] 终端与快捷键分类使用 grouped Form；真实窄窗终端外观预览在编辑区下方可展开/收起，宽窗改为左右排列。现有设置绑定与终端会话生命周期回归通过；未对真实 PTY 会话执行本轮窗口缩放验收。
+- [x] 隔离数据操作基准在 M1、16 GB 内存、macOS 26.3.2、Xcode 26.3 上完成：Dashboard 1,000 台合成主机与 48 个分组的投影构建耗时 16.138 ms，5 次查询耗时 33.556 ms，总计 49.694 ms；SFTP 10,000 项相关操作总计 60.234 ms。这些数字不包含 UI 绘制、滚动或网络，测试范围与旧基线不同，不能直接作同比结论。
+
+### 隔离窗口与构建
+
+- [x] `ServerDashMacQA` 的 SFTP 路由现在挂载真实 `SFTPBrowserView`、合成控制器和文件表格，控制器不自动连接；设置分类启动参数可进入终端、快捷键及其他分类。夹具仍使用内存数据库、隔离凭据域及禁用网络的连接入口。
+- [x] 真实隔离应用窗口检查了仪表盘和 SFTP 的 900×620、1440×900 浅色与深色四种组合，以及全部九个设置分类在同样四种组合下的布局。检查包含长中文路径、表单焦点、文件菜单、弹窗、折叠预览和辅助功能树中控件名称/标识；未以缓存截图替代真实窗口。
+- [x] 严格并发 `build-for-testing` 通过，项目自有代码编译告警为 0；macOS 全量测试 **482/482** 通过。日志分别为 `.build/concurrency-gate/build.log` 和 `.build/ui-consistency-results/macos-full.log`。Xcode 工程生成检查通过，Apple-only tracked-tree 夹具 **17/17** 通过。
+- [x] 通用无签名 Mac Release 构建及 `verify-ci-release.sh` 架构/动态链接路径检查通过；iOS Simulator Release 和无签名 Device Release 兼容构建通过。日志位于 `.build/ui-consistency-results/macos-release.log`、`ios-simulator-release.log` 和 `ios-device-release.log`。
+- [ ] XCUI 运行时矩阵。测试目标已在严格并发门禁中成功编译，但本机 `test-without-building` 在测试进程建立连接前被 signal kill，结果包显示 `passedTests: 0` 和 “Early unexpected exit, operation never finished bootstrapping”。结果包为 `.build/ui-consistency-results/macqa-targeted.xcresult`；原因尚未确认，不能标记 XCUI 运行时通过。
+
+实际 VoiceOver 朗读、实体串口、实体 iPhone/iPad，以及真实 SSH、VNC、RDP、WebDAV 服务互通尚未在本轮执行，继续保留为设备验收项。

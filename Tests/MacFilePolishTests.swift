@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import SwiftUI
 import XCTest
 @testable import ServerDash
 
@@ -39,6 +40,33 @@ final class MacFilePolishTests: XCTestCase {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
+    }
+    func testSFTPBrowserUsesItsOwnWidthForCompactActionsAndColumns() {
+        let narrow = SFTPBrowserLayout(width: 580, chromeMode: .full)
+        let wide = SFTPBrowserLayout(width: 1_050, chromeMode: .full)
+        let inspector = SFTPBrowserLayout(width: 1_050, chromeMode: .inspector)
+        XCTAssertTrue(narrow.compactActions)
+        XCTAssertFalse(narrow.showsSecondaryColumns)
+        XCTAssertFalse(wide.compactActions)
+        XCTAssertTrue(wide.showsSecondaryColumns)
+        XCTAssertTrue(inspector.compactActions)
+        XCTAssertFalse(inspector.showsSecondaryColumns)
+
+        let columns = TableColumnCustomization<RemoteFileItem>()
+        XCTAssertEqual(narrow.tableColumns(from: columns)[visibility: "permissions"], .hidden)
+        XCTAssertEqual(narrow.tableColumns(from: columns)[visibility: "owner"], .hidden)
+        XCTAssertEqual(wide.tableColumns(from: columns)[visibility: "permissions"], .visible)
+        XCTAssertEqual(wide.tableColumns(from: columns)[visibility: "owner"], .visible)
+    }
+    func testSFTPDialogInputsKeepExactRemoteNamesAndRejectInvalidValues() {
+        XCTAssertEqual(SFTPDialogInput.permissionMode(" 0755 "), 0o755)
+        XCTAssertEqual(SFTPDialogInput.permissionMode("644"), 0o644)
+        XCTAssertNil(SFTPDialogInput.permissionMode("888"))
+        XCTAssertNil(SFTPDialogInput.permissionMode("12345"))
+        XCTAssertEqual(SFTPDialogInput.archiveName("  中文 配置[*]?  "), "中文 配置[*]?")
+        XCTAssertNil(SFTPDialogInput.archiveName(" "))
+        XCTAssertNil(SFTPDialogInput.archiveName("../backup"))
+        XCTAssertNil(SFTPDialogInput.archiveName(".."))
     }
     @MainActor func testFilteringPrunesInvisibleSelectionAndRefreshRetainsExistingRows() {
         let app = AppState(trustCoordinator: HostTrustCoordinator(), fileServicesEnabled: false)

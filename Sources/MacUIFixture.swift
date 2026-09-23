@@ -119,6 +119,8 @@ enum MacUIFixture {
         defaults.set(false, forKey: "hideIPInformation")
         let machineView = argument("--fixture-machine-view")
         defaults.set(machineView == "list" ? "list" : "grid", forKey: "machineViewMode")
+        let settingsPage = argument("--fixture-settings-page").flatMap(SettingsPage.init(rawValue:)) ?? .general
+        defaults.set(settingsPage.rawValue, forKey: "mac.settings.selectedPage")
         if let theme = argument("--fixture-theme"), ["light", "dark"].contains(theme) {
             defaults.set(theme, forKey: "appAppearance")
         }
@@ -146,8 +148,10 @@ enum MacUIFixture {
         context.insert(group)
         context.insert(MachineGroupRecord(name: "核心数据库", parentID: group.id))
         context.insert(MachineGroupRecord(name: "开发测试"))
+        context.insert(MachineGroupRecord(name: "暂无主机的分组"))
         context.insert(MachineTagRecord(name: "生产", colorName: "red"))
         context.insert(MachineTagRecord(name: "开发", colorName: "blue"))
+        context.insert(MachineTagRecord(name: "暂无主机的标签", colorName: "gray"))
         let count = argument("--fixture-hosts").flatMap(Int.init).map { min(1000, max(0, $0)) }
             ?? (page == .empty ? 0 : 8)
         var servers: [ServerRecord] = []
@@ -203,10 +207,6 @@ enum MacUIFixture {
             app.select(server)
             app.detailMode = .monitor
             app.route = .server(id: server.id, origin: .machines, mode: .monitor)
-        } else if page == .sftp, let server = servers.first {
-            app.select(server)
-            app.detailMode = .sftp
-            app.route = .server(id: server.id, origin: .machines, mode: .sftp)
         } else if page == .rdp, let rdpID {
             app.route = .rdp(rdpID)
         } else {
@@ -320,6 +320,7 @@ struct MacUIFixtureRootView: View {
                     increaseContrast: MacUIFixture.hasArgument("--fixture-increase-contrast")
                 )
             )
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("macqa.page.\(page.rawValue)")
     }
 
@@ -328,6 +329,20 @@ struct MacUIFixtureRootView: View {
         switch page {
         case .settings:
             SettingsView()
+        case .sftp:
+            if let server = servers.first {
+                NavigationSplitView {
+                    List {
+                        Label("远程文件", systemImage: "folder")
+                    }
+                    .navigationTitle("工作区")
+                    .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 220)
+                } detail: {
+                    MacUIFixtureSFTPHost(server: server, appState: appState)
+                }
+            } else {
+                MacUIFixtureStateView(kind: .empty)
+            }
         case .ai:
             AIGeneralWindow()
         case .editor:
@@ -397,6 +412,54 @@ struct MacUIFixtureRootView: View {
         default:
             ServerEditorView(server: nil)
         }
+    }
+}
+
+/// The SFTP QA route mounts the production browser with a synthetic listing.
+/// Its controller never connects, so layout checks cannot contact a saved host.
+@MainActor
+private struct MacUIFixtureSFTPHost: View {
+    @StateObject private var controller: MacSFTPController
+
+    init(server: ServerRecord, appState: AppState) {
+        _controller = StateObject(wrappedValue: MacSFTPController(
+            server: server,
+            appState: appState,
+            automaticallyConnect: false
+        ))
+    }
+
+    var body: some View {
+        SFTPBrowserView(controller: controller, chromeMode: .full)
+            .onAppear {
+                guard !controller.hasLoadedDirectory else { return }
+                let path = "/srv/生产环境/包含空格与中文的长期部署路径/应用程序"
+                let items = (0..<24).map { index in
+                    let name = index == 0 ? "上海生产环境核心数据库配置文件.yaml" : String(format: "应用配置-%02d.txt", index)
+                    return RemoteFileItem(
+                        path: path + "/" + name,
+                        name: name,
+                        kind: .file,
+                        size: Int64(1_024 + index * 2_048),
+                        permissions: "rw-r--r--",
+                        owner: "fixture",
+                        group: "fixture",
+                        modifiedText: "2026-09-21"
+                    )
+                } + [RemoteFileItem(
+                    path: path + "/.hidden-config",
+                    name: ".hidden-config",
+                    kind: .file,
+                    size: 128,
+                    permissions: "rw-------",
+                    owner: "fixture",
+                    group: "fixture",
+                    modifiedText: "2026-09-21"
+                )]
+                controller.applyDirectoryListing(SFTPDirectoryListing(path: path, items: items))
+                controller.selection = [items[0].id]
+                controller.statusMessage = "离线夹具 · \(items.count) 项"
+            }
     }
 }
 

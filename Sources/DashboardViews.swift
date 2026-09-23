@@ -1,13 +1,19 @@
 import AppKit
+import SwiftData
 import SwiftUI
 
 struct DashboardOverviewView: View {
     @EnvironmentObject private var appState: AppState
     @SceneStorage("dashboard.filter.search") private var searchText = ""
-    @SceneStorage("dashboard.filter.group") private var selectedGroup = ""
-    @SceneStorage("dashboard.filter.tag") private var selectedTag = ""
+    @SceneStorage("dashboard.filter.group.id") private var selectedGroupID = ""
+    @SceneStorage("dashboard.filter.tag.id") private var selectedTagID = ""
+    @SceneStorage("dashboard.filter.group") private var legacySelectedGroup = ""
+    @SceneStorage("dashboard.filter.tag") private var legacySelectedTag = ""
     @SceneStorage("dashboard.sort") private var sortRawValue = ServerBrowserSort.name.rawValue
     @SceneStorage("dashboard.filter.monitoring") private var monitoringRawValue = ServerMonitorFilter.all.rawValue
+    @Query(sort: \MachineGroupRecord.name) private var groups: [MachineGroupRecord]
+    @Query(sort: \MachineTagRecord.name) private var tags: [MachineTagRecord]
+    @State private var projectionCache = MachineBrowserProjectionCache()
 
     let servers: [ServerRecord]
     @Binding var scrollAnchor: UUID?
@@ -15,15 +21,44 @@ struct DashboardOverviewView: View {
     let onOpenTerminal: (ServerRecord) -> Void
     let onAdd: () -> Void
 
-    private var query: ServerBrowserQuery {
-        ServerBrowserQuery(search: searchText, group: selectedGroup, tag: selectedTag,
-                           sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name,
-                           monitoring: ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all)
+    private func query(catalog: DashboardFilterCatalog) -> ServerBrowserQuery {
+        ServerBrowserQuery(
+            search: searchText,
+            group: catalog.group(id: selectedGroupID)?.name ?? "",
+            includedGroupNames: catalog.includedGroupNames(id: selectedGroupID),
+            tag: catalog.tag(id: selectedTagID)?.name ?? "",
+            sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name,
+            monitoring: ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all
+        )
+    }
+
+    private func reconcileStoredFilters(with catalog: DashboardFilterCatalog) {
+        let groupID = catalog.resolvedGroupID(selectedGroupID, legacyName: legacySelectedGroup)
+        let tagID = catalog.resolvedTagID(selectedTagID, legacyName: legacySelectedTag)
+        if selectedGroupID != groupID { selectedGroupID = groupID }
+        if selectedTagID != tagID { selectedTagID = tagID }
+        if !legacySelectedGroup.isEmpty { legacySelectedGroup = "" }
+        if !legacySelectedTag.isEmpty { legacySelectedTag = "" }
     }
 
     var body: some View {
         GeometryReader { geometry in
             let metrics = MacWorkspaceMetrics(size: geometry.size)
+            let items = servers.map { server in
+                MachineBrowserItem(
+                    id: server.id.uuidString, name: server.displayName, address: server.host,
+                    group: server.groupName.isEmpty ? "默认分组" : server.groupName,
+                    tags: server.tags, notes: server.notes, kind: "SSH",
+                    createdAt: server.createdAt, monitoringEnabled: server.enableDashboardMonitor
+                )
+            }
+            let groupItems = groups.map { MachineBrowserGroup(id: $0.id, name: $0.name, parentID: $0.parentID) }
+            let projection = projectionCache.resolve(items: items, groups: groupItems)
+            let catalog = DashboardFilterCatalog(
+                projection: projection, items: items,
+                tags: tags.map { DashboardCatalogTag(id: $0.id, name: $0.name) }
+            )
+            let query = query(catalog: catalog)
             let visibleServers = query.apply(to: servers)
             ScrollView {
                 VStack(alignment: .leading, spacing: metrics.isCompact ? AppleDesign.Spacing.md : AppleDesign.Spacing.lg) {
@@ -53,17 +88,17 @@ struct DashboardOverviewView: View {
 
                         if metrics.isCompact {
                             DashboardCompactFilters(
-                                servers: servers,
+                                catalog: catalog,
                                 search: $searchText,
-                                group: $selectedGroup,
-                                tag: $selectedTag,
+                                group: $selectedGroupID,
+                                tag: $selectedTagID,
                                 sortRawValue: $sortRawValue,
                                 monitoringRawValue: $monitoringRawValue
                             )
                         } else {
                             ServerBrowserControls(
-                                servers: servers, search: $searchText, group: $selectedGroup,
-                                tag: $selectedTag, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
+                                catalog: catalog, search: $searchText, group: $selectedGroupID,
+                                tag: $selectedTagID, sortRawValue: $sortRawValue, monitoringRawValue: $monitoringRawValue
                             )
                         }
 
@@ -114,8 +149,10 @@ struct DashboardOverviewView: View {
                             } actions: {
                                 Button("清除筛选") {
                                     searchText = ""
-                                    selectedGroup = ""
-                                    selectedTag = ""
+                                    selectedGroupID = ""
+                                    selectedTagID = ""
+                                    legacySelectedGroup = ""
+                                    legacySelectedTag = ""
                                     monitoringRawValue = ServerMonitorFilter.all.rawValue
                                 }
                             }
@@ -132,6 +169,10 @@ struct DashboardOverviewView: View {
             .toolbar { dashboardToolbar(compact: metrics.isCompact) }
             .onChange(of: visibleServers.map(\.id)) { _, ids in
                 if let scrollAnchor, !ids.contains(scrollAnchor) { self.scrollAnchor = ids.first }
+            }
+            .onAppear { reconcileStoredFilters(with: catalog) }
+            .onChange(of: catalog.groups.map(\.id) + catalog.tags.map(\.id)) { _, _ in
+                reconcileStoredFilters(with: catalog)
             }
         }
     }
@@ -246,24 +287,12 @@ private struct DashboardSummaryCard: View {
 }
 
 private struct DashboardCompactFilters: View {
-    let servers: [ServerRecord]
+    let catalog: DashboardFilterCatalog
     @Binding var search: String
     @Binding var group: String
     @Binding var tag: String
     @Binding var sortRawValue: String
     @Binding var monitoringRawValue: String
-
-    private var groups: [String] {
-        Set(servers.map(\.groupName).filter { !$0.isEmpty }).sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
-    }
-
-    private var tags: [String] {
-        Set(servers.flatMap(\.tags)).sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
-    }
 
     private var activeFilterCount: Int {
         [!group.isEmpty, !tag.isEmpty, monitoringRawValue != ServerMonitorFilter.all.rawValue,
@@ -279,11 +308,16 @@ private struct DashboardCompactFilters: View {
                 Menu {
                     Picker("分组", selection: $group) {
                         Text("全部分组").tag("")
-                        ForEach(groups, id: \.self) { Text($0).tag($0) }
+                        ForEach(catalog.groups) { option in
+                            Text(String(repeating: "　", count: option.depth) + option.name + "（\(option.count)）")
+                                .tag(option.id)
+                        }
                     }
                     Picker("标签", selection: $tag) {
                         Text("全部标签").tag("")
-                        ForEach(tags, id: \.self) { Text($0).tag($0) }
+                        ForEach(catalog.tags) { option in
+                            Text("\(option.name)（\(option.count)）").tag(option.id)
+                        }
                     }
                     Picker("监控范围", selection: $monitoringRawValue) {
                         ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) }

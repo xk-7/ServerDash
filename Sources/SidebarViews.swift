@@ -101,26 +101,12 @@ struct AppSidebar: View {
 }
 
 struct ServerBrowserControls: View {
-    let servers: [ServerRecord]
-    var additionalGroups: [String] = []
-    var additionalTags: [String] = []
+    let catalog: DashboardFilterCatalog
     @Binding var search: String
     @Binding var group: String
     @Binding var tag: String
     @Binding var sortRawValue: String
     @Binding var monitoringRawValue: String
-
-    private var groups: [String] {
-        Set((servers.map(\.groupName) + additionalGroups).filter { !$0.isEmpty }).sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
-    }
-
-    private var tags: [String] {
-        Set(servers.flatMap(\.tags) + additionalTags).sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
@@ -130,14 +116,18 @@ struct ServerBrowserControls: View {
                 Menu {
                     Picker("分组", selection: $group) {
                         Text("全部分组").tag("")
-                        ForEach(groups, id: \.self) { Text($0).tag($0) }
+                        ForEach(catalog.groups) { option in
+                            Text(String(repeating: "　", count: option.depth) + option.name + "（\(option.count)）")
+                                .tag(option.id)
+                        }
                     }
                 } label: {
-                    Label(group.isEmpty ? "全部分组" : group, systemImage: "folder")
+                    Label(catalog.group(id: group)?.name ?? "全部分组", systemImage: "folder")
                         .lineLimit(1)
                 }
                 .frame(maxWidth: 150)
-                .help(group.isEmpty ? "按分组筛选服务器" : group)
+                .help(group.isEmpty ? "按分组筛选服务器" : (catalog.group(id: group)?.name ?? "全部分组"))
+                .accessibilityIdentifier("dashboard.groups.filter")
                 Menu {
                     Picker("监控范围", selection: $monitoringRawValue) {
                         ForEach(ServerMonitorFilter.allCases) { Text($0.title).tag($0.rawValue) }
@@ -158,12 +148,15 @@ struct ServerBrowserControls: View {
                 .help("排序：\((ServerBrowserSort(rawValue: sortRawValue) ?? .name).title)")
                 .accessibilityLabel("服务器排序")
             }
-            if !tags.isEmpty || !tag.isEmpty || !group.isEmpty || !search.isEmpty || monitoringRawValue != "all" {
+            if !catalog.tags.isEmpty || !tag.isEmpty || !group.isEmpty || !search.isEmpty || monitoringRawValue != "all" {
                 HStack(spacing: AppleDesign.Spacing.sm) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: AppleDesign.Spacing.xs) {
                             tagButton("全部标签", value: "")
-                            ForEach(tags, id: \.self) { tagButton($0, value: $0) }
+                            ForEach(catalog.tags) { option in
+                                tagButton(option.name, value: option.id)
+                                    .help("\(option.name)：\(option.count) 台 SSH 服务器")
+                            }
                         }
                         .padding(.vertical, AppleDesign.Spacing.xxs)
                     }
