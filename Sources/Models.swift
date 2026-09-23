@@ -195,18 +195,21 @@ enum ServerMonitorFilter: String, CaseIterable, Identifiable {
 struct ServerBrowserQuery {
     var search = ""
     var group = ""
+    /// The dashboard supplies catalog descendants here; other callers retain exact-name filtering.
+    var includedGroupNames: Set<String>? = nil
     var tag = ""
     var sort: ServerBrowserSort = .name
     var monitoring: ServerMonitorFilter = .all
 
     var hasFilters: Bool {
-        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !group.isEmpty || !tag.isEmpty || monitoring != .all
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !group.isEmpty || includedGroupNames != nil || !tag.isEmpty || monitoring != .all
     }
 
     func apply(to servers: [ServerRecord]) -> [ServerRecord] {
         let terms = search.split(whereSeparator: \.isWhitespace).map(String.init)
         return servers.filter { server in
-            guard (group.isEmpty || server.groupName == group),
+            let effectiveGroup = server.groupName.isEmpty ? "默认分组" : server.groupName
+            guard (includedGroupNames.map { $0.contains(effectiveGroup) } ?? (group.isEmpty || effectiveGroup == group)),
                   (tag.isEmpty || server.tags.contains(tag)),
                   (monitoring == .all || server.enableDashboardMonitor == (monitoring == .enabled)) else {
                 return false

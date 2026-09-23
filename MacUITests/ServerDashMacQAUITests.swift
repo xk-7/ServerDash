@@ -41,6 +41,53 @@ final class ServerDashMacQAUITests: XCTestCase {
         )
     }
 
+    func testSFTPRouteMountsOfflineBrowserAtCompactAndRegularWidths() {
+        for theme in ["light", "dark"] {
+            for width in [900, 1440] {
+                let app = launch(page: "sftp", width: width, height: width == 900 ? 620 : 900, theme: theme)
+                assertFixturePage("sftp", in: app)
+                XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.table"].waitForExistence(timeout: 10))
+                XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.path"].exists)
+                XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.search"].exists)
+                XCTAssertTrue(app.buttons["sftp.browser.refresh"].exists)
+                XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.more"].exists)
+                let fixtureFile = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label CONTAINS %@", "上海生产环境核心数据库配置文件.yaml"))
+                    .firstMatch
+                XCTAssertTrue(fixtureFile.exists)
+                app.terminate()
+            }
+        }
+    }
+
+    func testTerminalAndShortcutSettingsUseResponsiveNativeForms() {
+        for theme in ["light", "dark"] {
+            for width in [900, 1440] {
+                let height = width == 900 ? 620 : 900
+                let terminal = launch(
+                    page: "settings", width: width, height: height, theme: theme,
+                    extraArguments: ["--fixture-settings-page", "terminal"]
+                )
+                assertFixturePage("settings", in: terminal)
+                XCTAssertTrue(terminal.descendants(matching: .any)["mac.settings.terminal.editor"].waitForExistence(timeout: 10))
+                if width == 900 {
+                    XCTAssertTrue(terminal.descendants(matching: .any)["mac.settings.terminal.previewDisclosure"].exists)
+                } else {
+                    XCTAssertTrue(terminal.descendants(matching: .any)["mac.settings.terminal.preview"].exists)
+                }
+                terminal.terminate()
+
+                let shortcuts = launch(
+                    page: "settings", width: width, height: height, theme: theme,
+                    extraArguments: ["--fixture-settings-page", "shortcuts"]
+                )
+                assertFixturePage("settings", in: shortcuts)
+                XCTAssertTrue(shortcuts.descendants(matching: .any)["mac.settings.shortcuts.search"].waitForExistence(timeout: 10))
+                shortcuts.terminate()
+            }
+        }
+    }
+
     func testCoreRoutesFitMinimumWindowInLightAndDarkAppearances() {
         let scenarios = [
             FixtureScenario("dashboard"),
@@ -317,6 +364,17 @@ final class ServerDashMacQAUITests: XCTestCase {
     }
 
     private func assertFixturePage(_ page: String, in app: XCUIApplication) {
+        if page == "sftp" {
+            XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.table"].waitForExistence(timeout: 10))
+            return
+        }
+        if page == "settings" {
+            let terminalCategory = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", "终端"))
+                .firstMatch
+            XCTAssertTrue(terminalCategory.waitForExistence(timeout: 10))
+            return
+        }
         XCTAssertTrue(
             app.descendants(matching: .any)["macqa.page.\(page)"].waitForExistence(timeout: 10),
             "The isolated QA route \(page) should render its native content."

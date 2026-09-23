@@ -14,6 +14,42 @@ enum FileBrowserChromeMode: Sendable {
     case inspector
 }
 
+/// Responsive decisions use the browser's own width, which can be much
+/// smaller than the window when the terminal inspector is open.
+struct SFTPBrowserLayout: Equatable {
+    let compactActions: Bool
+    let showsSecondaryColumns: Bool
+
+    init(width: CGFloat, chromeMode: FileBrowserChromeMode) {
+        let narrow = width < MacWorkspaceMetrics.compactWidth
+        compactActions = chromeMode == .inspector || narrow
+        showsSecondaryColumns = chromeMode == .full && !narrow
+    }
+
+    func tableColumns(from existing: TableColumnCustomization<RemoteFileItem>) -> TableColumnCustomization<RemoteFileItem> {
+        var columns = existing
+        columns[visibility: "permissions"] = showsSecondaryColumns ? .visible : .hidden
+        columns[visibility: "owner"] = showsSecondaryColumns ? .visible : .hidden
+        return columns
+    }
+}
+
+enum SFTPDialogInput {
+    static func permissionMode(_ input: String) -> UInt16? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.count <= 4,
+              value.utf8.allSatisfy({ (48...55).contains($0) }) else { return nil }
+        return UInt16(value, radix: 8)
+    }
+
+    static func archiveName(_ input: String) -> String? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value != ".", value != "..",
+              !value.contains("/"), !value.contains("\0") else { return nil }
+        return value
+    }
+}
+
 private enum InspectorBrowserPopover: String, Identifiable {
     case path
     case search
@@ -28,9 +64,11 @@ struct SFTPBrowserView: View {
     @ObservedObject private var editor = RemoteEditorStore.shared
     @State private var showingPermissions = false
     @State private var permissions = "644"
+    @State private var permissionsError: String?
     @State private var recursivePermissions = false
     @State private var showingArchive = false
     @State private var archiveName = "archive"
+    @State private var archiveError: String?
     @State private var archiveFormat = RemoteArchiveFormat.tarGzip
     @State private var showingPasteConflict = false
     @State private var showingEditor = false
@@ -38,6 +76,9 @@ struct SFTPBrowserView: View {
     @State private var showingLocalCopies = false
     @State private var showSyncSuggestion = true
     @State private var inspectorPopover: InspectorBrowserPopover?
+    @State private var tableColumnCustomization = TableColumnCustomization<RemoteFileItem>()
+    @FocusState private var permissionsFocused: Bool
+    @FocusState private var archiveNameFocused: Bool
 
     init(controller: MacSFTPController, chromeMode: FileBrowserChromeMode = .full) {
         _controller = ObservedObject(wrappedValue: controller)
@@ -49,50 +90,60 @@ struct SFTPBrowserView: View {
         chromeMode = compact ? .inspector : .full
     }
 
-    private var compact: Bool { chromeMode == .inspector }
-
     var body: some View {
-        VStack(spacing: 0) {
-            browserToolbar
-            Divider()
-            if chromeMode == .full && showSyncSuggestion && DesktopFilePreferences.promptDirectorySync && controller.hasLoadedDirectory {
-                HStack {
-                    Button("配置目录同步", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
-                    Spacer()
-                    Button { showSyncSuggestion = false } label: { Image(systemName: "xmark") }.help("隐藏本次提示")
-                }.font(.caption).buttonStyle(.borderless).padding(8).background(Color.accentColor.opacity(0.06))
-            }
-            if let failure = controller.directoryError {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("无法读取目录").font(.callout.bold())
-                        Text(failure).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        GeometryReader { geometry in
+            let layout = SFTPBrowserLayout(width: geometry.size.width, chromeMode: chromeMode)
+            VStack(spacing: 0) {
+                browserToolbar(layout: layout)
+                Divider()
+                if chromeMode == .full && showSyncSuggestion && DesktopFilePreferences.promptDirectorySync && controller.hasLoadedDirectory {
+                    HStack {
+                        Button("配置目录同步", systemImage: "arrow.triangle.2.circlepath") { showingSync = true }
+                        Spacer()
+                        Button { showSyncSuggestion = false } label: { Image(systemName: "xmark") }.help("隐藏本次提示")
+                    }.font(.caption).buttonStyle(.borderless).padding(8).background(Color.accentColor.opacity(0.06))
+                }
+                if let failure = controller.directoryError {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("无法读取目录").font(.callout.bold())
+                            Text(failure).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                        Spacer(minLength: 8)
+                        Button("重试") { Task { await controller.retryDirectory() } }
+                            .disabled(controller.busyMessage != nil)
                     }
-                    Spacer(minLength: 8)
-                    Button("重试") { Task { await controller.retryDirectory() } }
-                        .disabled(controller.busyMessage != nil)
-                }.padding(12).background(Color.orange.opacity(0.07))
-            }
-            // Keep the native table mounted during refreshes, empty results and errors.
-            // Stable rows retain the scroll view and its selection/scroll position.
-            fileTable.overlay {
-                if controller.visibleItems.isEmpty, controller.busyMessage == nil, controller.directoryError == nil {
-                    ContentUnavailableView {
-                        Label(controller.search.isEmpty ? (controller.hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录") : "没有匹配文件", systemImage: "folder")
-                    } description: {
-                        Text(controller.search.isEmpty ? "上传文件或创建项目；隐藏文件可在工具栏显示。" : "尝试其他关键词，或显示隐藏文件。")
-                    } actions: {
-                        Button("刷新") { Task { await controller.loadDirectory(controller.currentPath) } }
+                    .padding(12).background(Color.orange.opacity(0.07))
+                }
+                // Keep the native table mounted during refreshes, empty results and errors.
+                // Stable rows retain the scroll view and its selection/scroll position.
+                fileTable(layout: layout).overlay {
+                    if controller.visibleItems.isEmpty, controller.busyMessage == nil, controller.directoryError == nil {
+                        ContentUnavailableView {
+                            Label(controller.search.isEmpty ? (controller.hasLoadedDirectory ? "此目录为空" : "尚未读取远程目录") : "没有匹配文件", systemImage: "folder")
+                        } description: {
+                            Text(controller.search.isEmpty ? "上传文件或创建项目；隐藏文件可在工具栏显示。" : "尝试其他关键词，或显示隐藏文件。")
+                        } actions: {
+                            Button("刷新") { Task { await controller.loadDirectory(controller.currentPath) } }
+                        }
                     }
                 }
+                Divider()
+                statusBar
             }
-            Divider()
-            statusBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.appGround)
-        .onAppear { controller.beginIfNeeded(); if let access = controller.fileAccess { editor.register(access); DirectorySyncStore.shared.register(access) } }
+        .onAppear {
+            controller.beginIfNeeded()
+            // QA fixtures use an in-memory controller and never register the
+            // background directory-sync scheduler or a remote edit access.
+            if !MacUIFixture.isEnabled, let access = controller.fileAccess {
+                editor.register(access)
+                DirectorySyncStore.shared.register(access)
+            }
+        }
         .popover(item: $inspectorPopover) { item in
             inspectorPopoverContent(item)
         }
@@ -137,61 +188,68 @@ struct SFTPBrowserView: View {
         .sheet(isPresented: $showingEditor) { RemoteEditorView() }
         .sheet(isPresented: $showingLocalCopies) { LocalFileCopiesView(serverID:controller.server.id) }
         .sheet(isPresented: $showingSync) { if let access = controller.fileAccess { DirectorySyncView(access: access, remotePath: controller.currentPath) } }
-        .sheet(isPresented: $showingPermissions) {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("修改权限", systemImage: "lock.shield").font(.title2.bold())
-                Text("已选择 \(controller.selectedItems.count) 个项目。符号链接不会被跟随。")
-                TextField("八进制权限，例如 644 或 755", text: $permissions).textFieldStyle(.roundedBorder)
-                Toggle("递归应用到文件夹内的文件和子文件夹", isOn: $recursivePermissions)
-                Text("读取 r = 4，写入 w = 2，执行 x = 1；依次为所有者、组、其他用户。").font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("取消") { showingPermissions = false }; Button("应用") {
-                    if let mode = UInt16(permissions, radix: 8) { controller.changePermissions(mode, recursive: recursivePermissions); showingPermissions = false }
-                }.buttonStyle(.borderedProminent).disabled(UInt16(permissions, radix: 8).map { $0 > 0o7777 } ?? true) }
-            }.padding(24).frame(width: 510)
-        }
-        .sheet(isPresented: $showingArchive) {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("创建压缩包", systemImage: "archivebox").font(.title2.bold())
-                TextField("压缩包名称", text: $archiveName).textFieldStyle(.roundedBorder)
-                Picker("格式", selection: $archiveFormat) { ForEach(RemoteArchiveFormat.allCases) { Text($0.rawValue).tag($0) } }
-                Text("保存在当前目录，保留符号链接，不覆盖同名压缩包。").font(.caption).foregroundStyle(.secondary)
-                HStack { Spacer(); Button("取消") { showingArchive = false }; Button("压缩") { controller.archiveSelection(name: archiveName, format: archiveFormat); showingArchive = false }.buttonStyle(.borderedProminent).disabled(archiveName.isEmpty || archiveName.contains("/")) }
-            }.padding(24).frame(width: 460)
-        }
+        .sheet(isPresented: $showingPermissions) { permissionsSheet }
+        .sheet(isPresented: $showingArchive) { archiveSheet }
     }
 
-    @ViewBuilder private var browserToolbar: some View {
+    @ViewBuilder private func browserToolbar(layout: SFTPBrowserLayout) -> some View {
         if chromeMode == .inspector {
             inspectorToolbar
         } else {
-            fullToolbar
+            fullToolbar(layout: layout)
         }
     }
 
-    private var fullToolbar: some View {
+    private func fullToolbar(layout: SFTPBrowserLayout) -> some View {
         VStack(spacing: 8) {
             HStack(spacing: 6) {
                 Button { Task { await controller.loadDirectory(".") } } label: { Image(systemName: "house") }.help("主目录")
                 Button { Task { await controller.loadDirectory(RemotePath.parent(of: controller.currentPath)) } } label: { Image(systemName: "chevron.up") }.help("上级目录").disabled(controller.currentPath == "/")
                 TextField("远程路径", text: $controller.pathText).textFieldStyle(.roundedBorder).font(.callout.monospaced()).onSubmit { Task { await controller.loadDirectory(controller.pathText) } }
-                Button { Task { await controller.loadDirectory(controller.currentPath) } } label: { Image(systemName: "arrow.clockwise") }.help("刷新")
+                    .accessibilityIdentifier("sftp.browser.path")
+                Button { Task { await controller.loadDirectory(controller.currentPath) } } label: { Image(systemName: "arrow.clockwise") }
+                    .help("刷新").accessibilityLabel("刷新远程目录").accessibilityIdentifier("sftp.browser.refresh")
             }
             HStack(spacing: 8) {
                 TextField("搜索文件", text: $controller.search).textFieldStyle(.roundedBorder)
-                Toggle(isOn: $controller.showHidden) { Image(systemName: controller.showHidden ? "eye" : "eye.slash") }.toggleStyle(.button).help("显示隐藏文件")
-                Menu {
-                    Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
-                    Button("上传文件夹", systemImage: "folder.badge.plus") { controller.chooseItemsToUpload(directories: true) }
-                } label: { Image(systemName: "square.and.arrow.up") }.help("上传")
-                Button { controller.downloadSelectedItems() } label: { Image(systemName: "square.and.arrow.down") }
-                    .help("下载所选项目").accessibilityLabel("下载所选项目").disabled(controller.selectedItems.isEmpty)
-                Menu {
-                    secondaryFileActions
-                } label: { Image(systemName: "ellipsis.circle") }.help("文件操作")
+                    .accessibilityIdentifier("sftp.browser.search")
+                if layout.compactActions {
+                    Menu {
+                        Toggle("显示隐藏文件", isOn: $controller.showHidden)
+                        Divider()
+                        transferFileActions
+                        Divider()
+                        secondaryFileActions
+                    } label: { Image(systemName: "ellipsis.circle") }
+                        .help("更多文件操作")
+                        .accessibilityLabel("更多文件操作")
+                        .accessibilityIdentifier("sftp.browser.more")
+                } else {
+                    Toggle(isOn: $controller.showHidden) { Image(systemName: controller.showHidden ? "eye" : "eye.slash") }.toggleStyle(.button).help("显示隐藏文件")
+                    Menu {
+                        Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
+                        Button("上传文件夹", systemImage: "folder.badge.plus") { controller.chooseItemsToUpload(directories: true) }
+                    } label: { Image(systemName: "square.and.arrow.up") }.help("上传")
+                    Button { controller.downloadSelectedItems() } label: { Image(systemName: "square.and.arrow.down") }
+                        .help("下载所选项目").accessibilityLabel("下载所选项目").disabled(controller.selectedItems.isEmpty)
+                    Menu {
+                        secondaryFileActions
+                    } label: { Image(systemName: "ellipsis.circle") }
+                        .help("文件操作")
+                        .accessibilityLabel("更多文件操作")
+                        .accessibilityIdentifier("sftp.browser.more")
+                }
             }
         }.controlSize(.regular).buttonStyle(.borderless)
             .padding(12).background(.bar)
             .disabled(controller.busyMessage != nil && controller.transferTask == nil)
+    }
+
+    @ViewBuilder private var transferFileActions: some View {
+        Button("上传文件", systemImage: "doc.badge.plus") { controller.chooseItemsToUpload(directories: false) }
+        Button("上传文件夹", systemImage: "folder.badge.plus") { controller.chooseItemsToUpload(directories: true) }
+        Button("下载所选项目", systemImage: "square.and.arrow.down") { controller.downloadSelectedItems() }
+            .disabled(controller.selectedItems.isEmpty)
     }
 
     private var inspectorToolbar: some View {
@@ -212,6 +270,7 @@ struct SFTPBrowserView: View {
             }
             .help("刷新")
             .accessibilityLabel("刷新远程目录")
+            .accessibilityIdentifier("sftp.browser.refresh")
 
             Button {
                 inspectorPopover = .path
@@ -227,6 +286,7 @@ struct SFTPBrowserView: View {
             }
             .help("转到远程路径")
             .accessibilityLabel("当前远程路径 \(controller.currentPath)")
+            .accessibilityIdentifier("sftp.browser.path")
 
             Button {
                 inspectorPopover = .search
@@ -235,6 +295,7 @@ struct SFTPBrowserView: View {
             }
             .help(controller.search.isEmpty ? "搜索文件" : "正在筛选：\(controller.search)")
             .accessibilityLabel(controller.search.isEmpty ? "搜索文件" : "编辑文件筛选")
+            .accessibilityIdentifier("sftp.browser.search")
 
             Menu {
                 Toggle("显示隐藏文件", isOn: $controller.showHidden)
@@ -250,6 +311,7 @@ struct SFTPBrowserView: View {
             }
             .help("文件操作")
             .accessibilityLabel("更多文件操作")
+            .accessibilityIdentifier("sftp.browser.more")
         }
         .controlSize(.small)
         .buttonStyle(.borderless)
@@ -281,6 +343,7 @@ struct SFTPBrowserView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.callout.monospaced())
                     .onSubmit { openInspectorPath() }
+                    .accessibilityIdentifier("sftp.browser.path.input")
                 HStack {
                     Button("主目录") {
                         controller.pathText = "."
@@ -298,6 +361,7 @@ struct SFTPBrowserView: View {
                 Text("筛选当前目录").font(.headline)
                 TextField("搜索文件", text: $controller.search)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("sftp.browser.search.input")
                 Toggle("显示隐藏文件", isOn: $controller.showHidden)
                 HStack {
                     Button("清除") { controller.search = "" }
@@ -317,8 +381,90 @@ struct SFTPBrowserView: View {
         inspectorPopover = nil
         Task { await controller.loadDirectory(path) }
     }
-    private var fileTable: some View {
-        tableContent
+
+    private var permissionsSheet: some View {
+        MacEditorSheetScaffold(
+            title: "修改权限",
+            accessibilityID: "sftp.permissions",
+            saveTitle: "应用",
+            errorMessage: permissionsError,
+            saveDisabled: controller.selectedItems.isEmpty,
+            maxContentWidth: 480,
+            onCancel: { showingPermissions = false },
+            onSave: {
+                guard let mode = SFTPDialogInput.permissionMode(permissions) else {
+                    permissionsError = "请输入 1 至 4 位八进制权限（0–7）。"
+                    return
+                }
+                controller.changePermissions(mode, recursive: recursivePermissions)
+                showingPermissions = false
+            },
+            onValidationError: { permissionsFocused = true }
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("已选择 \(controller.selectedItems.count) 个项目。符号链接不会被跟随。")
+                    .foregroundStyle(.secondary)
+                TextField("八进制权限，例如 644 或 755", text: $permissions)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($permissionsFocused)
+                    .accessibilityIdentifier("sftp.permissions.value")
+                    .onChange(of: permissions) { _, _ in permissionsError = nil }
+                Toggle("递归应用到文件夹内的文件和子文件夹", isOn: $recursivePermissions)
+                Text("读取 r = 4，写入 w = 2，执行 x = 1；依次为所有者、组、其他用户。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minWidth: 320, idealWidth: 500, maxWidth: 560,
+               minHeight: 230, idealHeight: 320, maxHeight: 500)
+        .onAppear { permissionsFocused = true }
+    }
+
+    private var archiveSheet: some View {
+        MacEditorSheetScaffold(
+            title: "创建压缩包",
+            accessibilityID: "sftp.archive",
+            saveTitle: "压缩",
+            errorMessage: archiveError,
+            saveDisabled: controller.selectedItems.isEmpty,
+            maxContentWidth: 440,
+            onCancel: { showingArchive = false },
+            onSave: {
+                guard let name = SFTPDialogInput.archiveName(archiveName) else {
+                    archiveError = "请输入不包含路径分隔符的压缩包名称。"
+                    return
+                }
+                controller.archiveSelection(name: name, format: archiveFormat)
+                showingArchive = false
+            },
+            onValidationError: { archiveNameFocused = true }
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("已选择 \(controller.selectedItems.count) 个项目。")
+                    .foregroundStyle(.secondary)
+                TextField("压缩包名称", text: $archiveName)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($archiveNameFocused)
+                    .accessibilityIdentifier("sftp.archive.name")
+                    .onChange(of: archiveName) { _, _ in archiveError = nil }
+                Picker("格式", selection: $archiveFormat) {
+                    ForEach(RemoteArchiveFormat.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Text("保存在当前目录，保留符号链接，不覆盖同名压缩包。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minWidth: 320, idealWidth: 460, maxWidth: 520,
+               minHeight: 220, idealHeight: 300, maxHeight: 480)
+        .onAppear { archiveNameFocused = true }
+    }
+
+    private func fileTable(layout: SFTPBrowserLayout) -> some View {
+        tableContent(layout: layout)
+        .accessibilityIdentifier("sftp.browser.table")
         .contextMenu(forSelectionType: String.self) { ids in
             let items = controller.items.filter { ids.contains($0.id) }
             if let first = items.first {
@@ -328,14 +474,25 @@ struct SFTPBrowserView: View {
                 Button("复制路径", systemImage: "link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(items.map(\.path).joined(separator: "\n"), forType: .string) }
                 Button("粘贴", systemImage: "doc.on.clipboard", action: paste).disabled(clipboard.serverID != controller.server.id || clipboard.items.isEmpty)
                 Divider()
-                Button("压缩…", systemImage: "archivebox") { controller.selection = ids; archiveName = items.count == 1 ? first.name : "archive"; showingArchive = true }
+                Button("压缩…", systemImage: "archivebox") {
+                    controller.selection = ids
+                    archiveName = items.count == 1 ? first.name : "archive"
+                    archiveError = nil
+                    showingArchive = true
+                }
                 Button("编辑", systemImage: "square.and.pencil") { openEditor(items) }.disabled(items.contains { $0.kind != .file })
                 Menu("以指定编码编辑") { ForEach(RemoteTextEncoding.allCases) { encoding in Button(encoding.rawValue) { openEditor(items, encoding: encoding) } } }.disabled(items.contains { $0.kind != .file })
                 Button("用本地程序打开", systemImage: "arrow.up.forward.app") { controller.openLocalCopy(first);showingLocalCopies=true }.disabled(first.kind != .file || editor.busy)
                 Button("下载", systemImage: "square.and.arrow.down") { controller.selection = ids; controller.downloadSelectedItems() }
                 Button("重命名…", systemImage: "pencil") { controller.selection = [first.id]; controller.beginRename() }.disabled(items.count != 1)
                 Button("移动到…", systemImage: "arrow.right") { controller.selection = [first.id]; controller.promptText = controller.currentPath; controller.showingMovePrompt = true }.disabled(items.count != 1)
-                Button("修改权限…", systemImage: "lock.shield") { controller.selection = ids; permissions = first.isDirectory ? "755" : "644"; recursivePermissions = false; showingPermissions = true }
+                Button("修改权限…", systemImage: "lock.shield") {
+                    controller.selection = ids
+                    permissions = first.isDirectory ? "755" : "644"
+                    permissionsError = nil
+                    recursivePermissions = false
+                    showingPermissions = true
+                }
                 Divider()
                 Button("删除", systemImage: "trash", role: .destructive) { controller.itemPendingDeletion = first }.disabled(items.count != 1)
             }
@@ -344,27 +501,32 @@ struct SFTPBrowserView: View {
             if first.isDirectory { Task { await controller.loadDirectory(first.path) } } else { openEditor([first]) }
         }
     }
-    @ViewBuilder private var tableContent: some View {
-        if compact {
-        Table(controller.visibleItems, selection: $controller.selection) {
+    /// One Table instance survives layout changes; changing column visibility
+    /// does not discard the native scroll view or the controller's selection.
+    private func tableContent(layout: SFTPBrowserLayout) -> some View {
+        Table(controller.visibleItems, selection: $controller.selection,
+              columnCustomization: Binding(
+                get: { layout.tableColumns(from: tableColumnCustomization) },
+                set: { tableColumnCustomization = $0 }
+              )) {
             TableColumn("名称") { item in
                 Label(item.name, systemImage: item.isDirectory ? "folder" : item.kind == .symbolicLink ? "link" : "doc")
                     .foregroundStyle(item.isDirectory ? Color.accentColor : Color.primary).lineLimit(1)
-            }.width(min: 100, ideal: compact ? 180 : 280)
+            }.width(min: 100, ideal: layout.compactActions ? 180 : 280)
+                .customizationID("name")
+                .disabledCustomizationBehavior(.visibility)
             TableColumn("大小") { item in Text(item.isDirectory ? "—" : DesktopFileOperations.displaySize(item.size)).monospacedDigit().foregroundStyle(.secondary) }.width(min: 55, ideal: 75, max: 100)
-            TableColumn("修改时间") { item in Text(item.modifiedText).font(.caption).foregroundStyle(.secondary) }.width(min: 65, ideal: compact ? 90 : 125, max: 170)
-        }
-        } else {
-        Table(controller.visibleItems, selection: $controller.selection) {
-            TableColumn("名称") { item in
-                Label(item.name, systemImage: item.isDirectory ? "folder" : item.kind == .symbolicLink ? "link" : "doc")
-                    .foregroundStyle(item.isDirectory ? Color.accentColor : Color.primary).lineLimit(1)
-            }.width(min: 100, ideal: compact ? 180 : 280)
-            TableColumn("大小") { item in Text(item.isDirectory ? "—" : DesktopFileOperations.displaySize(item.size)).monospacedDigit().foregroundStyle(.secondary) }.width(min: 55, ideal: 75, max: 100)
-            TableColumn("修改时间") { item in Text(item.modifiedText).font(.caption).foregroundStyle(.secondary) }.width(min: 65, ideal: compact ? 90 : 125, max: 170)
-                TableColumn("权限") { item in Text(item.permissions).font(.caption.monospaced()).foregroundStyle(.secondary) }.width(105)
-                TableColumn("所有者") { item in Text(item.owner).font(.caption).foregroundStyle(.secondary) }.width(100)
-        }
+                .customizationID("size")
+                .disabledCustomizationBehavior(.visibility)
+            TableColumn("修改时间") { item in Text(item.modifiedText).font(.caption).foregroundStyle(.secondary) }.width(min: 65, ideal: layout.compactActions ? 90 : 125, max: 170)
+                .customizationID("modified")
+                .disabledCustomizationBehavior(.visibility)
+            TableColumn("权限") { item in Text(item.permissions).font(.caption.monospaced()).foregroundStyle(.secondary) }.width(105)
+                .customizationID("permissions")
+                .disabledCustomizationBehavior(.visibility)
+            TableColumn("所有者") { item in Text(item.owner).font(.caption).foregroundStyle(.secondary) }.width(100)
+                .customizationID("owner")
+                .disabledCustomizationBehavior(.visibility)
         }
     }
     private var statusBar: some View {

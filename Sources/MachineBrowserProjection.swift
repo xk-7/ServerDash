@@ -42,6 +42,7 @@ struct MachineBrowserProjection {
     let groupCounts: [String: Int]
     let groupNames: Set<String>
     private let descendantNames: [String: Set<String>]
+    private let groupNameByID: [UUID: String]
     private let searchableText: [String: String]
     private let sortedItems: [String: [MachineBrowserItem]]
 
@@ -57,6 +58,7 @@ struct MachineBrowserProjection {
         searchableText = text
 
         let byID = Dictionary(groups.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        groupNameByID = byID.mapValues(\.name)
         let children = Dictionary(grouping: groups.compactMap { value -> MachineBrowserGroup? in
             value.parentID == nil ? nil : value
         }, by: { $0.parentID! })
@@ -113,6 +115,106 @@ struct MachineBrowserProjection {
                   terms.allSatisfy({ searchableText[item.id, default: ""].localizedCaseInsensitiveContains($0) }) else { return nil }
             return item.id
         }
+    }
+
+    /// The dashboard uses the same catalog hierarchy as the machine browser.
+    func groupNamesIncludingDescendants(of id: UUID) -> Set<String>? {
+        guard let name = groupNameByID[id] else { return nil }
+        return descendantNames[name] ?? [name]
+    }
+}
+
+struct DashboardFilterOption: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let depth: Int
+    let count: Int
+}
+
+struct DashboardCatalogTag: Equatable {
+    let id: UUID
+    let name: String
+}
+
+/// Dashboard-only presentation of the machine catalog. IDs remain stable across renames;
+/// virtual entries cover legacy SSH records that have not acquired catalog records yet.
+struct DashboardFilterCatalog {
+    static let virtualDefaultGroupID = "virtual-default-group"
+    private static let legacyGroupPrefix = "legacy-group:"
+    private static let legacyTagPrefix = "legacy-tag:"
+
+    let groups: [DashboardFilterOption]
+    let tags: [DashboardFilterOption]
+    private let projection: MachineBrowserProjection
+
+    init(projection: MachineBrowserProjection, items: [MachineBrowserItem], tags catalogTags: [DashboardCatalogTag]) {
+        self.projection = projection
+        let catalogNames = projection.groupNames
+        let directCounts = Dictionary(grouping: items, by: \.group).mapValues(\.count)
+        var groupOptions = projection.groupRows.map {
+            DashboardFilterOption(id: $0.id.uuidString, name: $0.group.name, depth: $0.depth, count: $0.count)
+        }
+        if !catalogNames.contains("默认分组") {
+            groupOptions.insert(.init(id: Self.virtualDefaultGroupID, name: "默认分组", depth: 0,
+                                      count: directCounts["默认分组", default: 0]), at: 0)
+        }
+        for name in Set(items.map(\.group)).subtracting(catalogNames).subtracting(["默认分组"])
+            .sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+            groupOptions.append(.init(id: Self.legacyGroupPrefix + name, name: name, depth: 0,
+                                      count: directCounts[name, default: 0]))
+        }
+        groups = groupOptions
+
+        let tagCounts = items.flatMap(\.tags).reduce(into: [String: Int]()) { $0[$1, default: 0] += 1 }
+        var tagOptions = catalogTags.map {
+            DashboardFilterOption(id: $0.id.uuidString, name: $0.name, depth: 0,
+                                  count: tagCounts[$0.name, default: 0])
+        }
+        let knownTags = Set(catalogTags.map(\.name))
+        for name in Set(tagCounts.keys).subtracting(knownTags)
+            .sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+            tagOptions.append(.init(id: Self.legacyTagPrefix + name, name: name, depth: 0,
+                                    count: tagCounts[name, default: 0]))
+        }
+        tags = tagOptions
+    }
+
+    func group(id: String) -> DashboardFilterOption? { groups.first { $0.id == id } }
+    func tag(id: String) -> DashboardFilterOption? { tags.first { $0.id == id } }
+
+    func includedGroupNames(id: String) -> Set<String>? {
+        guard let option = group(id: id) else { return nil }
+        if let catalogID = UUID(uuidString: id) {
+            return projection.groupNamesIncludingDescendants(of: catalogID)
+        }
+        return [option.name]
+    }
+
+    /// A deleted UUID must clear, even if a virtual entry with its former name remains.
+    func resolvedGroupID(_ storedID: String, legacyName: String = "") -> String {
+        if !storedID.isEmpty {
+            if storedID == Self.virtualDefaultGroupID,
+               let current = groups.first(where: { $0.name == "默认分组" }) {
+                return current.id
+            }
+            if storedID.hasPrefix(Self.legacyGroupPrefix),
+               let current = groups.first(where: { $0.name == String(storedID.dropFirst(Self.legacyGroupPrefix.count)) }) {
+                return current.id
+            }
+            return group(id: storedID) == nil ? "" : storedID
+        }
+        return groups.first(where: { $0.name == legacyName })?.id ?? ""
+    }
+
+    func resolvedTagID(_ storedID: String, legacyName: String = "") -> String {
+        if !storedID.isEmpty {
+            if storedID.hasPrefix(Self.legacyTagPrefix),
+               let current = tags.first(where: { $0.name == String(storedID.dropFirst(Self.legacyTagPrefix.count)) }) {
+                return current.id
+            }
+            return tag(id: storedID) == nil ? "" : storedID
+        }
+        return tags.first(where: { $0.name == legacyName })?.id ?? ""
     }
 }
 

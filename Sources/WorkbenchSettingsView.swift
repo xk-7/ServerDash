@@ -82,22 +82,28 @@ struct SettingsView: View {
                 }
             }.formStyle(.grouped)
         case .terminal:
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    GroupBox("本地终端") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                TextField("Shell 路径（留空使用登录 Shell）", text: $localShell)
-                                Button("浏览…") { chooseShell() }
-                            }
-                            Picker("环境", selection: $localEnvironment) { Text("登录终端环境").tag("inherit"); Text("干净环境").tag("clean") }
-                            if !localShell.isEmpty && (!localShell.hasPrefix("/") || !FileManager.default.isExecutableFile(atPath: localShell)) {
-                                Text("请选择可执行文件的绝对路径。").font(.caption).foregroundStyle(Color.appError)
-                            }
-                        }.padding(10)
-                    }.padding(.horizontal, 20).padding(.top, 16)
-                    TerminalAppearanceSettingsView()
+            GeometryReader { geometry in
+                Form {
+                    Section("本地终端") {
+                        HStack {
+                            TextField("Shell 路径（留空使用登录 Shell）", text: $localShell)
+                            Button("浏览…") { chooseShell() }
+                        }
+                        Picker("环境", selection: $localEnvironment) {
+                            Text("登录终端环境").tag("inherit")
+                            Text("干净环境").tag("clean")
+                        }
+                        if !localShell.isEmpty && (!localShell.hasPrefix("/") || !FileManager.default.isExecutableFile(atPath: localShell)) {
+                            Text("请选择可执行文件的绝对路径。")
+                                .font(.caption)
+                                .foregroundStyle(Color.appError)
+                        }
+                    }
+                    Section("终端外观") {
+                        TerminalAppearanceSettingsView(availableWidth: geometry.size.width)
+                    }
                 }
+                .formStyle(.grouped)
             }
         case .monitoring:
             Form {
@@ -112,15 +118,32 @@ struct SettingsView: View {
             }.formStyle(.grouped)
         case .files: DesktopFileSettingsView()
         case .shortcuts:
-            VStack {
-                AppleSearchField(prompt: "查找快捷键", text: $shortcutSearch).padding(16)
-                List {
-                    ForEach(shortcuts.filter { shortcutSearch.isEmpty || $0.0.localizedCaseInsensitiveContains(shortcutSearch) }, id: \.0) { item in
-                        LabeledContent(item.0) { Text(item.1).font(.body.monospaced()).foregroundStyle(.secondary) }.padding(.vertical, 6)
+            Form {
+                Section("查找") {
+                    AppleSearchField(prompt: "查找快捷键", text: $shortcutSearch)
+                        .accessibilityIdentifier("mac.settings.shortcuts.search")
+                }
+                Section("快捷键") {
+                    if visibleShortcuts.isEmpty {
+                        Text("没有匹配的快捷键")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(visibleShortcuts, id: \.0) { item in
+                            LabeledContent(item.0) {
+                                Text(item.1)
+                                    .font(.body.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
-                Text("快捷键与菜单栏保持一致；macOS 保留的系统快捷键由系统处理。").font(.caption).foregroundStyle(.secondary).padding(16)
+                Section {
+                    Text("快捷键与菜单栏保持一致；macOS 保留的系统快捷键由系统处理。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .formStyle(.grouped)
         case .security:
             Form {
                 Section("SSH") {
@@ -168,6 +191,13 @@ struct SettingsView: View {
          ("关闭活跃面板", "⌃⇧W"), ("查找终端", "⌘F / ⌃F"), ("显示检查器", "⌥⌘I"),
          ("放大字号", "⌘+"), ("缩小字号", "⌘−"), ("恢复字号", "⌘0"), ("终端外观", "⇧⌘,"),
          ("保存远程文件", "⌘S"), ("设置", "⌘,")]
+    }
+    private var visibleShortcuts: [(String, String)] {
+        shortcuts.filter {
+            shortcutSearch.isEmpty ||
+                $0.0.localizedCaseInsensitiveContains(shortcutSearch) ||
+                $0.1.localizedCaseInsensitiveContains(shortcutSearch)
+        }
     }
     private func reloadTimeout() {
         timeoutText = MacSettingsValidation.timeoutText(PrivacySettings.connectTimeout)

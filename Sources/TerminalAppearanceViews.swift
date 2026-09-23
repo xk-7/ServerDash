@@ -1,9 +1,20 @@
 import AppKit
 import SwiftUI
 
+enum TerminalAppearanceSettingsLayout {
+    static let minimumSideBySideWidth: CGFloat = 840
+
+    static func isSideBySide(availableWidth: CGFloat) -> Bool {
+        availableWidth >= minimumSideBySideWidth
+    }
+}
+
 struct TerminalAppearanceSettingsView: View {
+    let availableWidth: CGFloat
+
     @ObservedObject private var store = TerminalAppearanceStore.shared
     @State private var previewDark = true
+    @State private var previewExpanded = true
 
     private var profileBinding: Binding<TerminalAppearanceProfile> {
         Binding(
@@ -13,54 +24,68 @@ struct TerminalAppearanceSettingsView: View {
     }
 
     var body: some View {
-        HSplitView {
-            ScrollView {
-                TerminalAppearanceEditor(
-                    profile: profileBinding,
-                    previewDark: $previewDark
-                )
-                .padding(AppleDesign.Spacing.lg)
-            }
-            .frame(minWidth: 430, idealWidth: 500)
-
-            VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
-                HStack {
-                    Text("终端预览")
-                        .font(.title3.weight(.bold))
-                    Spacer()
-                    Picker("预览外观", selection: $previewDark) {
-                        Text("浅色").tag(false)
-                        Text("深色").tag(true)
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+            if TerminalAppearanceSettingsLayout.isSideBySide(availableWidth: availableWidth) {
+                HStack(alignment: .top, spacing: AppleDesign.Spacing.lg) {
+                    editor
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                        Text("终端预览")
+                            .font(.headline)
+                        previewContents
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 150)
+                    .frame(width: 350, alignment: .topLeading)
                 }
-                TerminalAppearancePreview(
-                    profile: store.profile,
-                    dark: previewDark
-                )
-                let theme = store.theme(dark: previewDark)
-                if theme.contrastRatio < 4.5 {
-                    Label(
-                        "前景与背景对比度仅 \(DisplayFormat.decimal(theme.contrastRatio, fractionLength: 1)):1，长时间阅读可能较困难。",
-                        systemImage: "exclamationmark.triangle"
-                    )
+            } else {
+                editor
+                DisclosureGroup(isExpanded: $previewExpanded) {
+                    previewContents
+                        .padding(.top, AppleDesign.Spacing.sm)
+                } label: {
+                    Label("终端预览", systemImage: "eye")
+                }
+                .accessibilityIdentifier("mac.settings.terminal.previewDisclosure")
+            }
+            HStack {
+                Text("全局设置只应用于之后新建的终端。")
                     .font(.caption)
-                    .foregroundStyle(Color.appWarning)
-                }
+                    .foregroundStyle(.secondary)
                 Spacer()
-                HStack {
-                    Text("全局设置只应用于之后新建的终端。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("恢复默认", role: .destructive) {
-                        store.reset()
-                    }
+                Button("恢复默认", role: .destructive) {
+                    store.reset()
                 }
             }
-            .padding(AppleDesign.Spacing.lg)
-            .frame(minWidth: 390, idealWidth: 460)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var editor: some View {
+        TerminalAppearanceEditor(
+            profile: profileBinding,
+            previewDark: $previewDark,
+            inForm: true
+        )
+        .accessibilityIdentifier("mac.settings.terminal.editor")
+    }
+
+    private var previewContents: some View {
+        VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+            Picker("预览外观", selection: $previewDark) {
+                Text("浅色").tag(false)
+                Text("深色").tag(true)
+            }
+            .pickerStyle(.segmented)
+            TerminalAppearancePreview(profile: store.profile, dark: previewDark)
+                .accessibilityIdentifier("mac.settings.terminal.preview")
+            let theme = store.theme(dark: previewDark)
+            if theme.contrastRatio < 4.5 {
+                Label(
+                    "前景与背景对比度仅 \(DisplayFormat.decimal(theme.contrastRatio, fractionLength: 1)):1，长时间阅读可能较困难。",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(Color.appWarning)
+            }
         }
     }
 }
@@ -158,6 +183,7 @@ struct TerminalSessionAppearanceView: View {
 private struct TerminalAppearanceEditor: View {
     @Binding var profile: TerminalAppearanceProfile
     @Binding var previewDark: Bool
+    var inForm = false
 
     @State private var themeSearch = ""
     @State private var fontSearch = ""
@@ -303,17 +329,21 @@ private struct TerminalAppearanceEditor: View {
         }
     }
 
-    private func settingsSection<Content: View>(
+    @ViewBuilder private func settingsSection<Content: View>(
         _ title: String,
         symbol: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
+        let section = VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             Label(title, systemImage: symbol)
                 .font(.headline)
             content()
         }
-        .applePanel(padding: AppleDesign.Spacing.md, radius: AppleDesign.Radius.card)
+        if inForm {
+            section.padding(.vertical, AppleDesign.Spacing.sm)
+        } else {
+            section.applePanel(padding: AppleDesign.Spacing.md, radius: AppleDesign.Radius.card)
+        }
     }
 }
 
