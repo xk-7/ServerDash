@@ -41,6 +41,37 @@ final class ServerDashMacQAUITests: XCTestCase {
         )
     }
 
+    func testMachineSelectionSurvivesNativeSidebarNavigation() {
+        let app = launch(
+            page: "machines", width: 1440, height: 900,
+            extraArguments: ["--fixture-machine-view", "list"]
+        )
+        defer { app.terminate() }
+        let table = app.descendants(matching: .any)["machines.browser.table"]
+        let summary = app.descendants(matching: .any)["machines.selection.summary"]
+        XCTAssertTrue(table.waitForExistence(timeout: 10))
+        let firstHost = table.descendants(matching: .tableRow)
+            .matching(NSPredicate(format: "label CONTAINS %@", "192.0.2.10:22"))
+            .firstMatch
+        XCTAssertTrue(firstHost.waitForExistence(timeout: 5))
+        firstHost.click()
+        XCTAssertTrue(firstHost.isSelected)
+        XCTAssertTrue(waitForLabel("已选 1 台", on: summary, timeout: 5))
+
+        let dashboard = app.descendants(matching: .any)["sidebar.dashboard"]
+        XCTAssertTrue(dashboard.waitForExistence(timeout: 5))
+        dashboard.click()
+        XCTAssertTrue(app.buttons["dashboard.refresh.all"].waitForExistence(timeout: 5))
+
+        let machines = app.descendants(matching: .any)["sidebar.machines"]
+        XCTAssertTrue(machines.waitForExistence(timeout: 5))
+        machines.click()
+        XCTAssertTrue(table.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstHost.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstHost.isSelected, "The same native Table row must remain selected after a sidebar round trip.")
+        XCTAssertTrue(waitForLabel("已选 1 台", on: summary, timeout: 5))
+    }
+
     func testSFTPRouteMountsOfflineBrowserAtCompactAndRegularWidths() {
         for theme in ["light", "dark"] {
             for width in [900, 1440] {
@@ -58,6 +89,41 @@ final class ServerDashMacQAUITests: XCTestCase {
                 app.terminate()
             }
         }
+    }
+
+    func testSFTPSelectionAndScrollAnchorSurviveRealWindowResize() {
+        let app = launch(
+            page: "sftp", width: 1440, height: 900,
+            extraArguments: [
+                "--fixture-sftp-select-index", "15",
+                "--fixture-resize-width", "900",
+                "--fixture-resize-height", "620",
+            ]
+        )
+        defer { app.terminate() }
+        let browserState = app.descendants(matching: .any)["macqa.sftp.browserState"]
+        XCTAssertTrue(browserState.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForWindowWidth(below: 1_000, in: app, timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.table"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.path"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.search"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["sftp.browser.more"].exists)
+        let value = browserState.value as? String ?? ""
+        let initialSelection = fixtureState("初始已选", from: value)
+        let currentSelection = fixtureState("当前已选", from: value)
+        let initialAnchor = fixtureState("初始滚动锚点", from: value)
+        let currentAnchor = fixtureState("当前滚动锚点", from: value)
+        XCTAssertEqual(initialSelection, "应用配置-15.txt", "The fixture must select the intended row: \(value)")
+        XCTAssertEqual(currentSelection, initialSelection, "Resizing must preserve the selected file: \(value)")
+        XCTAssertNotNil(initialAnchor)
+        XCTAssertNotEqual(initialAnchor, "无")
+        XCTAssertEqual(currentAnchor, initialAnchor, "Resizing must preserve the same row anchor: \(value)")
+        let selectedRow = app.staticTexts["应用配置-15.txt"].firstMatch
+        XCTAssertTrue(selectedRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            waitForHittable(selectedRow, timeout: 5),
+            "The selected row must remain visible in the native table after the window shrinks."
+        )
     }
 
     func testTerminalAndShortcutSettingsUseResponsiveNativeForms() {
@@ -85,6 +151,51 @@ final class ServerDashMacQAUITests: XCTestCase {
                 XCTAssertTrue(shortcuts.descendants(matching: .any)["mac.settings.shortcuts.search"].waitForExistence(timeout: 10))
                 shortcuts.terminate()
             }
+        }
+    }
+
+    func testTerminalSettingsPreviewAndShellDraftValidationAtMinimumWindow() {
+        let app = launch(page: "settings", extraArguments: ["--fixture-settings-page", "terminal"])
+        defer { app.terminate() }
+        let disclosure = app.descendants(matching: .any)["mac.settings.terminal.previewDisclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        disclosure.click()
+        XCTAssertTrue(waitForNonExistence(app.descendants(matching: .any)["mac.settings.terminal.preview"]))
+        disclosure.click()
+        XCTAssertTrue(app.descendants(matching: .any)["mac.settings.terminal.preview"].waitForExistence(timeout: 5))
+
+        let path = app.textFields["mac.settings.terminal.shellPath"]
+        XCTAssertTrue(path.waitForExistence(timeout: 5))
+        path.click()
+        path.typeText("relative/shell")
+        XCTAssertFalse(app.buttons["mac.settings.terminal.shellSave"].isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["mac.settings.terminal.shellError"].waitForExistence(timeout: 5))
+        app.buttons["mac.settings.terminal.shellCancel"].click()
+        XCTAssertFalse((path.value as? String ?? "").contains("relative/shell"), "Cancel must restore the effective Shell path.")
+    }
+
+    func testAllSettingsCategoriesOpenFromIsolatedLaunchArguments() {
+        let categories: [(id: String, expectedContent: String)] = [
+            ("general", "显示模式"),
+            ("terminal", "Shell 路径"),
+            ("monitoring", "自动刷新"),
+            ("files", "默认下载目录"),
+            ("shortcuts", "查找快捷键"),
+            ("security", "主机密钥验证"),
+            ("sync", "启用配置同步"),
+            ("recording", "选择目录"),
+            ("ai", "提供商"),
+        ]
+        for category in categories {
+            let app = launch(page: "settings", extraArguments: ["--fixture-settings-page", category.id])
+            assertFixturePage("settings", in: app)
+            XCTAssertTrue(
+                app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label CONTAINS %@", category.expectedContent))
+                    .firstMatch.waitForExistence(timeout: 5),
+                "Settings category \(category.id) should render its own native form content."
+            )
+            app.terminate()
         }
     }
 
@@ -321,6 +432,36 @@ final class ServerDashMacQAUITests: XCTestCase {
         )
     }
 
+    func testRemoteEditorLongTabsAndSearchFeedback() {
+        let app = launch(page: "editor", extraArguments: ["--fixture-editor-documents", "5"])
+        defer { app.terminate() }
+        assertSheet(
+            "mac.remote-editor",
+            titleIdentifier: "mac.remote-editor.title",
+            actionIdentifier: "mac.remote-editor.done",
+            in: app
+        )
+        let tabs = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "mac.remote-editor.tab."))
+        XCTAssertEqual(tabs.count, 5)
+        let selectedTab = tabs.matching(NSPredicate(format: "value == %@", "已选择")).firstMatch
+        XCTAssertTrue(selectedTab.exists)
+        XCTAssertTrue(selectedTab.label.contains("多标签工作区-第05份"), "The full long document name should remain available to accessibility.")
+        XCTAssertTrue(waitForHittable(selectedTab, timeout: 5), "The selected long document tab should scroll into view.")
+
+        app.typeKey("f", modifierFlags: .command)
+        let search = app.textFields["mac.remote-editor.search.field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.typeText("monitoring")
+        let feedback = app.descendants(matching: .any)["mac.remote-editor.search.result"]
+        XCTAssertTrue(feedback.waitForExistence(timeout: 5))
+        XCTAssertTrue((feedback.label).contains("处"), "A matching query should show its position or count.")
+        search.click()
+        search.typeKey("a", modifierFlags: .command)
+        search.typeText("missing-qa-token")
+        XCTAssertTrue(waitForLabel("无匹配", on: feedback, timeout: 5))
+    }
+
     func testTerminalInspectorKeyboardShortcutTogglesInspector() {
         let app = launch(page: "terminal", extraArguments: ["--fixture-panes", "1"])
         defer { app.terminate() }
@@ -390,6 +531,39 @@ final class ServerDashMacQAUITests: XCTestCase {
     private func waitForNonExistence(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
         let expectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func waitForWindowWidth(below width: CGFloat, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if app.windows.firstMatch.frame.width < width { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
+    }
+
+    private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.isHittable { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return false
+    }
+
+    private func fixtureState(_ key: String, from rawValue: String) -> String? {
+        let prefix = "\(key)："
+        return rawValue.split(separator: "；")
+            .first(where: { $0.hasPrefix(prefix) })
+            .map { String($0.dropFirst(prefix.count)) }
+    }
+
+    private func waitForLabel(_ value: String, on element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", value),
             object: element
         )
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed

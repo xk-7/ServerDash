@@ -27,8 +27,10 @@ struct AppSidebar: View {
             List(selection: selectionBinding) {
                 Section("工作区") {
                     Label("仪表盘", systemImage: "gauge.with.dots.needle.50percent")
+                        .accessibilityIdentifier("sidebar.dashboard")
                         .tag(SidebarDestination.dashboard)
                     Label("机器", systemImage: "server.rack")
+                        .accessibilityIdentifier("sidebar.machines")
                         .tag(SidebarDestination.machines)
                     Label("会话", systemImage: "rectangle.stack")
                         .badge(terminalCount)
@@ -141,6 +143,9 @@ struct ServerBrowserControls: View {
                     Picker("排序", selection: $sortRawValue) {
                         ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) }
                     }
+                    if sortRawValue != ServerBrowserSort.name.rawValue {
+                        Button("恢复默认排序") { sortRawValue = ServerBrowserSort.name.rawValue }
+                    }
                 } label: {
                     Image(systemName: "arrow.up.arrow.down")
                 }
@@ -161,7 +166,7 @@ struct ServerBrowserControls: View {
                         .padding(.vertical, AppleDesign.Spacing.xxs)
                     }
                     if !tag.isEmpty || !group.isEmpty || !search.isEmpty || monitoringRawValue != "all" {
-                        Button("重置") { group = ""; tag = ""; search = ""; monitoringRawValue = "all" }
+                        Button("清除筛选") { group = ""; tag = ""; search = ""; monitoringRawValue = "all" }
                             .buttonStyle(.borderless)
                             .help("清除全部筛选")
                     }

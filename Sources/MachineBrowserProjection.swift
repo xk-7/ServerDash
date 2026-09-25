@@ -136,8 +136,8 @@ struct DashboardCatalogTag: Equatable {
     let name: String
 }
 
-/// Dashboard-only presentation of the machine catalog. IDs remain stable across renames;
-/// virtual entries cover legacy SSH records that have not acquired catalog records yet.
+/// Shared dashboard and machine-browser catalog. IDs remain stable across renames;
+/// virtual entries cover legacy records that have not acquired catalog records yet.
 struct DashboardFilterCatalog {
     static let virtualDefaultGroupID = "virtual-default-group"
     private static let legacyGroupPrefix = "legacy-group:"
@@ -215,6 +215,37 @@ struct DashboardFilterCatalog {
             return tag(id: storedID) == nil ? "" : storedID
         }
         return tags.first(where: { $0.name == legacyName })?.id ?? ""
+    }
+}
+
+/// The machine page stores directory IDs in SceneStorage while keeping search,
+/// protocol and sorting independent. Clearing filters must never change the sort.
+struct MachineBrowserFilterState: Equatable {
+    var search = ""
+    var groupID = ""
+    var tagID = ""
+    var kind = "all"
+    var monitoring = "all"
+    var sort = "name"
+
+    var hasFilters: Bool {
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !groupID.isEmpty || !tagID.isEmpty || kind != "all" || monitoring != "all"
+    }
+
+    func query(catalog: DashboardFilterCatalog) -> MachineBrowserQuery {
+        MachineBrowserQuery(search: search,
+                            group: catalog.group(id: groupID)?.name ?? "",
+                            tag: catalog.tag(id: tagID)?.name ?? "",
+                            kind: kind, monitoring: monitoring, sort: sort)
+    }
+
+    mutating func clearFilters() {
+        search = ""
+        groupID = ""
+        tagID = ""
+        kind = "all"
+        monitoring = "all"
     }
 }
 

@@ -114,6 +114,7 @@ struct ContentView: View {
     }
     @State private var dashboardScrollAnchor: UUID?
     @State private var machineScrollAnchor: UUID?
+    @State private var machineSelection = Set<String>()
 
     private var sidebarDestination: SidebarDestination {
         route.sidebarDestination
@@ -354,6 +355,7 @@ struct ContentView: View {
                     onSelectRDP: { route = .rdp($0.id) },
                     searchText: $searchText,
                     scrollAnchor: $machineScrollAnchor,
+                    selection: $machineSelection,
                     onSelect: { server in
                         openServerDetail(
                             server,

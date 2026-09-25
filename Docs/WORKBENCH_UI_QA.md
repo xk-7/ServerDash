@@ -54,7 +54,7 @@ Debug 隔离入口使用独立的 `ServerDashMacQA` 应用 target 和 `ServerDas
 
 `ServerDashMacQAUITests` 使用真实应用窗口验证仪表盘、机器页和终端路由，并固定覆盖 900×620 最小窗口。可用 `xcodebuild -project ServerDash.xcodeproj -scheme ServerDashMacQA -destination 'platform=macOS' test` 运行；Scheme 与生产构建一样在构建前校验 RDP 依赖。
 
-本轮 `.macqa` 路由还覆盖设置、AI、远程编辑器、导入／导出、SSH/RDP 等连接编辑器以及空白和错误状态；代表性启动用例覆盖 900×620 与 1440×900、浅色与深色参数。`ServerDashMacQA` 和 UI 测试的 `build-for-testing` 已通过，构建产物的 Bundle ID 已核对为 `com.serverdash.app.macqa`。本机执行 XCTest UI runtime 时，测试 Runner 在启用 automation mode 阶段等待 60 秒后超时；该宿主未授予所需的 XCTest/TCC 自动化能力，因此本轮没有把 XCUI runtime 标记为通过，也没有修改系统隐私权限。结果包位于 `/tmp/serverdash-macqa-derived/Logs/Test/`，待具备自动化权限的验收机复跑。
+本轮 `.macqa` 路由还覆盖设置、AI、远程编辑器、导入／导出、SSH/RDP 等连接编辑器以及空白和错误状态；代表性启动用例覆盖 900×620 与 1440×900、浅色与深色参数。`ServerDashMacQA` 和 UI 测试的 `build-for-testing` 已通过，构建产物的 Bundle ID 已核对为 `com.serverdash.app.macqa`。本机执行 XCTest UI runtime 时，测试 Runner 在启用 automation mode 阶段等待 60 秒后超时；当时没有收集到足以判定 TCC 或其他宿主原因的证据，因此本轮没有把 XCUI runtime 标记为通过，也没有修改系统隐私权限。结果包位于 `/tmp/serverdash-macqa-derived/Logs/Test/`，需在可正常启动 UI Runner 的验收机复跑。
 
 通过真实运行的应用窗口检查了 900×620 浅色、1440×900 深色及 1920×1080 浅色布局。900 宽度下分组栏自动收起，分组与标签作为筛选菜单显示，工具栏收进单一溢出菜单且显示／隐藏分组按钮仍可达；1440 宽度下分组层级、计数、完整工具栏和三列紧凑卡片同时可见。长中文主机名、在线、连接中、失败、离线、待检测及未知延迟状态均由真实 SwiftUI/AppKit 窗口显示。1920×1080 场景挂载 16 个持久 SSH 面板和可调右侧检查器；辅助功能树读取到 16 个连接状态、15 个分隔线，以及综合、CPU、GPU、内存、磁盘、网络、文件、AI、片段九类检查器入口。这里确认了控件标签可被辅助功能 API 读取，但没有运行 VoiceOver 实际朗读，因此 VoiceOver 仍保留为人工验收项。
 
@@ -124,7 +124,7 @@ Debug 隔离入口使用独立的 `ServerDashMacQA` 应用 target 和 `ServerDas
 
 ### 保留验收项
 
-- 当前宿主的 XCTest UI runtime 仍在启用 automation mode 时受 TCC 超时阻断，因此只标记 UI 测试 `build-for-testing` 通过，不标记完整 XCUI 矩阵通过，也没有修改系统隐私权限。
+- 当前宿主的 XCTest UI runtime 在启用 automation mode 时超时；未确认是 TCC、Runner 签名还是其他启动故障。因此只标记 UI 测试 `build-for-testing` 通过，不标记完整 XCUI 矩阵通过，也没有修改系统隐私权限。
 - 实际 VoiceOver 朗读、完整键盘遍历、实体串口、实体 iPhone/iPad 及真实 SSH、VNC、RDP、WebDAV 服务互通尚未执行。
 
 GitHub [`Apple-only main protection` 规则集](https://github.com/xk-7/ServerDash/rules/23774515)已于 2026-09-23 通过只读 API 回读：状态为 `active`，目标为默认分支，要求 PR 和严格的 `Apple main scope / Validate Apple-only tree` 必需检查，只允许普通 merge，禁止强推与删除，`bypass_actors` 为空。
@@ -190,3 +190,26 @@ GitHub [`Apple-only main protection` 规则集](https://github.com/xk-7/ServerDa
 - [ ] XCUI 运行时矩阵。测试目标已在严格并发门禁中成功编译，但本机 `test-without-building` 在测试进程建立连接前被 signal kill，结果包显示 `passedTests: 0` 和 “Early unexpected exit, operation never finished bootstrapping”。结果包为 `.build/ui-consistency-results/macqa-targeted.xcresult`；原因尚未确认，不能标记 XCUI 运行时通过。
 
 实际 VoiceOver 朗读、实体串口、实体 iPhone/iPad，以及真实 SSH、VNC、RDP、WebDAV 服务互通尚未在本轮执行，继续保留为设备验收项。
+
+## 2026-09-25 macOS 核心页面密度与交互完善验收
+
+本轮继续使用原生非玻璃外观，版本保持 1.0.4（Build 9）。以下项目只有在对应构建、测试或真实窗口检查完成后才能勾选。
+
+### 隔离 QA 与故障诊断
+
+- [x] QA 五文档长中文标签场景中，第五个选中标签自动滚入可见区；900×620 窗口内搜索 `server` 显示“1 / 2 处”，不存在的词显示“无匹配”。25 项 SFTP 夹具从 900×620 放大至 1440×900 再缩回，已选“应用配置-15.txt”和滚动锚点保持。
+- [x] 签名 QA 应用中的 1,000 主机夹具实际显示 1,003 台（含三个额外协议示例）。1440×900 原生表格滚动三页后选中 `fixture@192.0.2.49:22`，经真实侧栏“机器→仪表盘→机器”往返，辅助功能树仍报告“已选 1 台”、同一行为 selected，滚动条仍在约 0.05549；缩至 900×620 后选择保持，首行仍在附近的 `.40` 主机。选择状态已由应用级内容视图持有，不依赖重新创建的机器页。
+- [x] 25 项 SFTP 浏览器的控制器由 QA 根视图持有；选中“应用配置-15.txt”并滚动后，经 SFTP→设置→SFTP 路由重挂，辅助功能树仍报告相同选中项与滚动锚点。原生表格列配置及锚点由浏览控制器持有，原位缩放和重挂均不触发远端连接。
+- [ ] 使用真实 `ServerDashMacQA` 窗口检查仪表盘、机器网格/列表、终端检查器、SFTP、编辑器及九个设置分类：900×620、1440×900 的浅色和深色，以及 1920×1080 宽屏。记录长中英文、空/加载/失败状态、键盘焦点和辅助功能树中的标签；实际 VoiceOver 朗读需另行验收。
+- [x] 已在真实 `.macqa` 窗口完成部分逐项检查：900×620 浅色/深色仪表盘的总览、全宽搜索、筛选菜单、首行卡片和底部终端/失败重试操作均可见；同尺寸深色机器网格的搜索、筛选、长名称提示与首行快速连接可见。1440×900 浅色/深色仪表盘，以及深色机器网格/列表显示完整；机器列表为单一原生 `Table`，辅助功能树提供列头与行选择。900×620 浅色 SFTP 路径与搜索始终可见，权限/所有者列已隐藏，文件行可以选择；编辑器输入无结果查询后出现“搜索结果：无匹配”。这些是实际窗口截图与 AX 树观察，不代表尚未逐项检查的页面/尺寸通过。
+- [x] 设置页九个分类均在真实 QA 应用的 900×620、1440×900 浅色与深色组合中打开并读取辅助功能树；各分类分组标题和主要控件可达。另目视检查 900×620 深色终端设置的分组表单和上下排列，以及 1440×900 浅色终端设置的左右编辑/预览，均未见裁切。无效本地 Shell 草稿显示原位错误，保存按钮现只在路径有效且草稿有变更时启用；取消恢复有效配置。实际 VoiceOver 朗读和完整键盘遍历仍未执行。
+- [x] 最终增量签名 QA 构建 `/tmp/serverdash-mac-ui-density-qa-shell-final.log` 通过，App 与 Runner 均通过 `codesign --verify --deep --strict`。真实终端设置窗口输入 `/definitely/missing/shell` 后，辅助功能树显示原位错误且“保存”为 disabled；改为 `/bin/sh` 后“保存”可用；点击“取消”后路径恢复为空，“保存”再次禁用。测试过程未提交草稿或改动有效 Shell 配置。
+- [x] 以 ad-hoc 签名的独立 Debug 构建运行单个 XCUI smoke test，并核对 QA App 与 Runner 的 `codesign --verify --deep --strict`。Runner PID 91000 已启动，测试方法执行前在 `enabling automation mode` 等待 60.04 秒后超时（22:29:20.636–22:30:20.675）；结果包 `.build/macqa-signed-smoke.xcresult` 为 `passedTests: 0`。`testmanagerd.log` 记录了对 Runner 的授权请求及 `result:error 1: (null)`，限定进程的 `tccd` 日志未出现明确拒绝；证据不足以判定 TCC、签名或宿主服务哪一项是根因。先前 2026-09-23 的 bootstrap 前 signal kill 是不同观察结果。本机 XCUI runtime 继续标为**未通过**，未修改系统隐私权限，也未执行其余 XCUI 断言。
+- [x] 10,000 项 SFTP 真实窗口暴露数据基准未覆盖的 UI 卡顿：清除搜索曾超过 20 秒，进程采样显示主线程在原生表格自动行高计算中反复创建 SwiftUI 单元格。SFTP 表格单独采用 30pt 固定行高后，同一签名 QA 窗口搜索末项耗时 1.459 秒、清除搜索 1.750 秒、滚动三页 1.705 秒（均包含 CUA 操作及辅助功能树读取）；25 项 900×620 浅色和深色截图确认行高、文本与选中态可读。原始卡顿采样保留在 `/tmp/serverdash-sftp-10000-hang.sample.txt`；共享表格桥默认不固定行高，机器列表未受影响。
+
+### 回归与构建待填
+
+- [x] 最终源码的严格并发 `build-for-testing` 与第一方零告警检查通过；`test-without-building` 运行 **497 项 macOS 测试，497 项通过、0 失败**。结果包 `.build/final-macos-tests-20260925-frozen-v2.xcresult`，日志 `/tmp/serverdash-mac-ui-density-strict-build-final-frozen-v2.log` 和 `/tmp/serverdash-mac-ui-density-macos-tests-final-frozen-v2.log`。
+- [x] 通用 Mac Release 构建通过，`ServerDash` 与 RDP archive 均为 `x86_64 arm64`；`Scripts/verify-ci-release.sh` 的架构及动态链接路径检查通过。iOS Simulator Release 为 `iPhoneSimulator` 平台、`x86_64 arm64`；无签名 Device Release 为 `iPhoneOS` 平台、`arm64`，签名检查确认未签名。日志分别为 `/tmp/serverdash-mac-ui-density-macos-release-final-frozen-v2.log`、`/tmp/serverdash-mac-ui-density-ios-simulator-release-final-frozen-v2.log` 和 `/tmp/serverdash-mac-ui-density-ios-device-release-final-frozen-v2.log`。三项构建均为第一方 0 告警、0 错误；Mac 的 1 条警告仅为无 AppIntents 依赖时跳过元数据提取，移动端无告警。
+- [x] 隔离内存基准：1,000 主机、48 分组、6 次机器页查询，旧逐行层级/排序计算占主线程 1752.366 ms，新投影含建立成本为 38.810 ms，缓存的 100 次状态更新为 0.085 ms；同一夹具的结果语义相等。仪表盘投影建立 16.641 ms、5 次查询 40.743 ms。10,000 项 SFTP 列表建立 14.704 ms、显示隐藏文件 11.113 ms、再次隐藏 11.023 ms、搜索 22.450 ms、清除搜索 10.794 ms，合计 70.084 ms；均在主线程执行，选择清理断言通过。数据源分别为系统临时目录的 `serverdash-mac-browser-benchmark.json`、`serverdash-dashboard-filter-benchmark.json` 和 `/tmp/serverdash-sftp-list-benchmark.json`。这些数字不包含 SwiftUI 绘制、窗口滚动或网络；真实窗口交互另行记录，不与旧口径直接同比。
+- [x] `Scripts/test-apple-main-scope.sh` 17/17 通过；`Scripts/macos-dev.sh generate-check` 确认分支基线、1.0.4（Build 9）、生成工程与 RDP 缓存有效，并报告 0 条开发检查告警。

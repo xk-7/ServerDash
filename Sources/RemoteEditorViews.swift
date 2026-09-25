@@ -102,6 +102,7 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
     private let draftWriter = RemoteDraftWriter()
     private var presentations: [UUID: RemoteEditorPresentation] = [:]
     @Published private(set) var textMetrics: [UUID: (lines: Int, units: Int)] = [:]
+    @Published private(set) var searchFeedback: [UUID: (query: String, value: EditorSearchFeedback)] = [:]
     @Published private(set) var flushingDrafts = false
     private let persistURL: URL?
     private let copiesURL:URL?
@@ -176,6 +177,7 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         accesses.removeAll()
         presentations.values.forEach { $0.invalidate() }
         presentations.removeAll()
+        searchFeedback.removeAll()
     }
 
     @discardableResult func shutdownAndFlush() async -> Bool {
@@ -190,6 +192,9 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
         let initialDirty = documents[index].isDirty
         presentation.onTextChange = { [weak self] text in self?.updateText(text, id: id) }
         presentation.onMetricsChange = { [weak self] lines, units in self?.textMetrics[id] = (lines, units) }
+        presentation.onSearchFeedbackChange = { [weak self] query, feedback in
+            self?.searchFeedback[id] = (query, feedback)
+        }
         presentations[id] = presentation
         // NSViewRepresentable construction must not publish into its current render pass.
         Task { [weak self, weak presentation] in
@@ -367,7 +372,7 @@ struct RemoteLocalCopy: Codable, Identifiable, Sendable {
     }
     func close(_ id: UUID) {
         guard !preparingForApplicationTermination,!busy else { return }
-        presentations.removeValue(forKey: id)?.invalidate(); textMetrics[id] = nil
+        presentations.removeValue(forKey: id)?.invalidate(); textMetrics[id] = nil; searchFeedback[id] = nil
         documents.removeAll { $0.id == id }
         if selectedID == id { selectedID = documents.last?.id }
         persist()
@@ -431,27 +436,50 @@ struct RemoteEditorView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 3) {
-                    ForEach(store.documents) { doc in
-                        HStack(spacing: 6) {
-                            Button { store.selectedID = doc.id } label: { Text((doc.isDirty ? "● " : "") + doc.title).lineLimit(1) }
-                            Button { if doc.isDirty { pendingClose = doc.id } else { store.close(doc.id) } } label: { Image(systemName: "xmark").font(.caption2) }
+            ScrollViewReader { tabScroll in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 3) {
+                        ForEach(store.documents) { doc in
+                            HStack(spacing: 6) {
+                                Button { store.selectedID = doc.id } label: {
+                                    Text((doc.isDirty ? "● " : "") + doc.title).lineLimit(1)
+                                        .help(doc.title)
+                                }
+                                .accessibilityIdentifier("mac.remote-editor.tab.\(doc.id.uuidString)")
+                                .accessibilityValue(store.selectedID == doc.id ? "已选择" : "未选择")
+                                Button { if doc.isDirty { pendingClose = doc.id } else { store.close(doc.id) } } label: {
+                                    Image(systemName: "xmark").font(.caption2)
+                                }
                                 .disabled(store.busy).accessibilityLabel("关闭 \(doc.title)")
-                        }.buttonStyle(.plain).padding(.horizontal,12).padding(.vertical,10)
-                            .background(store.selectedID == doc.id ? Color.accentColor.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                }.padding(5)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(store.selectedID == doc.id ? Color.accentColor.opacity(0.13) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                            .id(doc.id)
+                        }
+                    }.padding(4)
+                }
+                .onAppear {
+                    if let selectedID = store.selectedID { tabScroll.scrollTo(selectedID, anchor: .center) }
+                }
+                .onChange(of: store.selectedID) { _, selectedID in
+                    guard let selectedID else { return }
+                    withAnimation(.easeOut(duration: 0.16)) { tabScroll.scrollTo(selectedID, anchor: .center) }
+                }
             }.background(.bar)
             if let doc = store.selected {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading) { Text(doc.title).font(.headline); Text("\(doc.serverName) · \(doc.path)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                HStack(spacing: 8) {
+                    Text(doc.title).font(.callout.weight(.semibold)).lineLimit(1).help(doc.title)
+                    Text("\(doc.serverName) · \(doc.path)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .truncationMode(.middle).help(doc.path)
                     Spacer(minLength: 10)
                     if store.busy {
                         ProgressView().controlSize(.small)
                         Text(store.message).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                }.padding(12)
+                }.padding(.horizontal, 12).padding(.vertical, 8)
                 if showingSearch {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -460,6 +488,12 @@ struct RemoteEditorView: View {
                             .focused($searchFocused)
                             .onSubmit { searchStep += 1 }
                             .accessibilityIdentifier("mac.remote-editor.search.field")
+                        if !search.isEmpty, let feedback = store.searchFeedback[doc.id], feedback.query == search {
+                            Text(feedback.value.label)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .accessibilityLabel("搜索结果：\(feedback.value.label)")
+                                .accessibilityIdentifier("mac.remote-editor.search.result")
+                        }
                         Button { searchStep -= 1 } label: { Image(systemName: "chevron.up") }
                             .help("上一个匹配")
                             .disabled(search.isEmpty)

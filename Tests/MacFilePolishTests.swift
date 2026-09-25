@@ -55,8 +55,8 @@ final class MacFilePolishTests: XCTestCase {
         let columns = TableColumnCustomization<RemoteFileItem>()
         XCTAssertEqual(narrow.tableColumns(from: columns)[visibility: "permissions"], .hidden)
         XCTAssertEqual(narrow.tableColumns(from: columns)[visibility: "owner"], .hidden)
-        XCTAssertEqual(wide.tableColumns(from: columns)[visibility: "permissions"], .visible)
-        XCTAssertEqual(wide.tableColumns(from: columns)[visibility: "owner"], .visible)
+        XCTAssertEqual(wide.tableColumns(from: columns)[visibility: "permissions"], .automatic)
+        XCTAssertEqual(wide.tableColumns(from: columns)[visibility: "owner"], .automatic)
     }
     func testSFTPDialogInputsKeepExactRemoteNamesAndRejectInvalidValues() {
         XCTAssertEqual(SFTPDialogInput.permissionMode(" 0755 "), 0o755)
@@ -144,6 +144,31 @@ final class MacFilePolishTests: XCTestCase {
         text.undoManager?.undo()
         XCTAssertEqual(text.string, doc.text)
         _ = await store.shutdownAndFlush()
+    }
+    func testRemoteEditorSearchFeedbackCountsUnicodeMatchesAndReportsMisses() throws {
+        let text = "中文 apple\nAPPLE 中文\napple"
+        XCTAssertEqual(try EditorSearchFeedback.scan(text: text, query: "apple", selectedLocation: 9),
+                       .matches(current: 2, total: 3, hasMore: false))
+        XCTAssertEqual(try EditorSearchFeedback.scan(text: text, query: "missing", selectedLocation: 0), .noMatches)
+        XCTAssertEqual(try EditorSearchFeedback.scan(text: text, query: "", selectedLocation: 0), .idle)
+        XCTAssertEqual(EditorSearchFeedback.noMatches.label, "无匹配")
+    }
+    @MainActor func testRemoteEditorSearchFeedbackTracksCurrentSelectionWithoutChangingUndo() async throws {
+        let presentation = RemoteEditorPresentation(text: "one two one")
+        var result: EditorSearchFeedback?
+        presentation.onSearchFeedbackChange = { _, feedback in result = feedback }
+        presentation.update(text: "one two one", search: "one", searchStep: 0)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(result, .matches(current: 1, total: 2, hasMore: false))
+        let originalSelection = presentation.editor.selectedRange()
+        presentation.editor.setSelectedRange(NSRange(location: 8, length: 3))
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(result, .matches(current: 2, total: 2, hasMore: false))
+        XCTAssertNotEqual(originalSelection, presentation.editor.selectedRange())
+        presentation.update(text: "one two one", search: "absent", searchStep: 1)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(result, .noMatches)
+        presentation.invalidate()
     }
     @MainActor func testMarkedTextIsNotRewrittenBySearchOrExternalRefresh() {
         let presentation = RemoteEditorPresentation(text: "before")

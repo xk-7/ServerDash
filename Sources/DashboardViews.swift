@@ -47,7 +47,7 @@ struct DashboardOverviewView: View {
             let items = servers.map { server in
                 MachineBrowserItem(
                     id: server.id.uuidString, name: server.displayName, address: server.host,
-                    group: server.groupName.isEmpty ? "默认分组" : server.groupName,
+                    group: ServerBrowserQuery.effectiveGroupName(server.groupName),
                     tags: server.tags, notes: server.notes, kind: "SSH",
                     createdAt: server.createdAt, monitoringEnabled: server.enableDashboardMonitor
                 )
@@ -61,7 +61,7 @@ struct DashboardOverviewView: View {
             let query = query(catalog: catalog)
             let visibleServers = query.apply(to: servers)
             ScrollView {
-                VStack(alignment: .leading, spacing: metrics.isCompact ? AppleDesign.Spacing.md : AppleDesign.Spacing.lg) {
+                VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
                     AppleWorkspaceHeader(
                         title: "仪表盘",
                         subtitle: "服务器运行状况，一目了然。",
@@ -83,7 +83,7 @@ struct DashboardOverviewView: View {
                         DashboardFleetSummary(
                             serverCount: servers.count,
                             state: appState.fleetSummaryState,
-                            compact: metrics.isCompact
+                            metrics: metrics
                         )
 
                         if metrics.isCompact {
@@ -130,6 +130,7 @@ struct DashboardOverviewView: View {
                                     server: server,
                                     runtime: appState.runtime(for: server),
                                     refreshInterval: appState.refreshInterval,
+                                    metrics: metrics,
                                     onVisibilityChange: { visible in
                                         appState.setMonitorVisible(visible, serverID: server.id)
                                     },
@@ -217,7 +218,7 @@ struct DashboardOverviewView: View {
 private struct DashboardFleetSummary: View {
     let serverCount: Int
     @ObservedObject var state: FleetMonitoringSummaryState
-    let compact: Bool
+    let metrics: MacWorkspaceMetrics
 
     private var summary: FleetMonitoringSummary { state.value }
     private var pendingCount: Int { max(0, serverCount - summary.onlineCount - summary.issueCount) }
@@ -231,25 +232,25 @@ private struct DashboardFleetSummary: View {
                     subtitle: summary.onlineCount > 0
                         ? "在线平均 CPU \(DisplayFormat.percent(summary.averageCPU))"
                         : "等待资源采集",
-                    icon: "server.rack", tint: .primary, compact: compact
+                    icon: "server.rack", tint: .primary, metrics: metrics
                 )
-                Divider().padding(.vertical, AppleDesign.Spacing.lg)
+                Divider().padding(.vertical, metrics.cardPadding)
                 DashboardSummaryCard(
                     title: "在线",
                     value: DisplayFormat.integer(summary.onlineCount),
                     subtitle: summary.refreshingCount > 0
                         ? "\(DisplayFormat.integer(summary.refreshingCount)) 台正在刷新"
                         : (pendingCount > 0 ? "\(DisplayFormat.integer(pendingCount)) 台等待检测" : "已完成状态检测"),
-                    icon: "checkmark.circle", tint: .appLive, compact: compact
+                    icon: "checkmark.circle", tint: .appLive, metrics: metrics
                 )
-                Divider().padding(.vertical, AppleDesign.Spacing.lg)
+                Divider().padding(.vertical, metrics.cardPadding)
                 DashboardSummaryCard(
                     title: "需要关注",
                     value: DisplayFormat.integer(summary.issueCount),
                     subtitle: summary.issueCount > 0 ? "连接中断或认证异常" : "暂无已知连接异常",
                     icon: "exclamationmark.circle",
                     tint: summary.issueCount > 0 ? .appError : .secondary,
-                    compact: compact
+                    metrics: metrics
                 )
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -263,25 +264,25 @@ private struct DashboardSummaryCard: View {
     let subtitle: String
     let icon: String
     let tint: Color
-    let compact: Bool
+    let metrics: MacWorkspaceMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
+        VStack(alignment: .leading, spacing: metrics.cardContentSpacing) {
             Label(title, systemImage: icon)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(value)
-                .font((compact ? Font.title2 : .largeTitle).weight(.semibold))
+                .font((metrics.isCompact ? Font.title2 : .largeTitle).weight(.semibold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
             Text(subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(compact ? 1 : 2, reservesSpace: !compact)
+                .lineLimit(metrics.isCompact ? 1 : 2, reservesSpace: false)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(compact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.lg)
+        .padding(metrics.cardPadding)
         .accessibilityElement(children: .combine)
     }
 }
@@ -295,8 +296,8 @@ private struct DashboardCompactFilters: View {
     @Binding var monitoringRawValue: String
 
     private var activeFilterCount: Int {
-        [!group.isEmpty, !tag.isEmpty, monitoringRawValue != ServerMonitorFilter.all.rawValue,
-         sortRawValue != ServerBrowserSort.name.rawValue].filter { $0 }.count
+        [!group.isEmpty, !tag.isEmpty, monitoringRawValue != ServerMonitorFilter.all.rawValue]
+            .filter { $0 }.count
     }
 
     var body: some View {
@@ -326,13 +327,15 @@ private struct DashboardCompactFilters: View {
                     Picker("排序", selection: $sortRawValue) {
                         ForEach(ServerBrowserSort.allCases) { Text($0.title).tag($0.rawValue) }
                     }
+                    if sortRawValue != ServerBrowserSort.name.rawValue {
+                        Button("恢复默认排序") { sortRawValue = ServerBrowserSort.name.rawValue }
+                    }
                     if activeFilterCount > 0 {
                         Divider()
                         Button("清除筛选", systemImage: "xmark.circle") {
                             group = ""
                             tag = ""
                             monitoringRawValue = ServerMonitorFilter.all.rawValue
-                            sortRawValue = ServerBrowserSort.name.rawValue
                         }
                     }
                 } label: {
@@ -344,12 +347,11 @@ private struct DashboardCompactFilters: View {
                 .accessibilityIdentifier("dashboard.filters.compact")
 
                 if !search.isEmpty || activeFilterCount > 0 {
-                    Button("重置") {
+                    Button("清除筛选") {
                         search = ""
                         group = ""
                         tag = ""
                         monitoringRawValue = ServerMonitorFilter.all.rawValue
-                        sortRawValue = ServerBrowserSort.name.rawValue
                     }
                     .buttonStyle(.borderless)
                 }
@@ -363,6 +365,7 @@ private struct VPSSummaryCard: View {
     let server: ServerRecord
     @ObservedObject var runtime: ServerRuntimeState
     let refreshInterval: TimeInterval
+    let metrics: MacWorkspaceMetrics
     let onVisibilityChange: (Bool) -> Void
     let onSelect: () -> Void
     let onOpenTerminal: () -> Void
@@ -376,9 +379,9 @@ private struct VPSSummaryCard: View {
         let _ = PerformanceTrace.event(.dashboardCardBodyUpdate)
         VStack(alignment: .leading, spacing: 0) {
             Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: AppleDesign.Spacing.md) {
+                VStack(alignment: .leading, spacing: metrics.cardContentSpacing) {
                     HStack {
-                        Label(server.groupName, systemImage: "folder")
+                        Label(ServerBrowserQuery.effectiveGroupName(server.groupName), systemImage: "folder")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -427,16 +430,17 @@ private struct VPSSummaryCard: View {
                             VStack(alignment: .leading, spacing: AppleDesign.Spacing.xxs) {
                                 Text(status == .failed ? "暂时无法采集" : "等待首次资源采集")
                                     .font(.callout.weight(.medium))
-                                Text("采集完成后显示资源使用情况")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                if !metrics.isCompact {
+                                    Text("采集完成后显示资源使用情况")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             Spacer(minLength: 0)
                         }
-                        .frame(height: 88)
                     }
                 }
-                .padding(AppleDesign.Spacing.md)
+                .padding(metrics.cardPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -444,7 +448,7 @@ private struct VPSSummaryCard: View {
             .accessibilityElement(children: .combine)
             .accessibilityHint("打开服务器监控详情")
 
-            Divider().padding(.horizontal, AppleDesign.Spacing.md)
+            Divider().padding(.horizontal, metrics.cardPadding)
 
             HStack(spacing: AppleDesign.Spacing.xs) {
                 Text(footerText)
@@ -469,7 +473,7 @@ private struct VPSSummaryCard: View {
                 .help("打开 \(server.displayName) 的 SSH 终端")
                 .accessibilityLabel("打开 \(server.displayName) 的 SSH 终端")
             }
-            .padding(AppleDesign.Spacing.md)
+            .padding(metrics.cardPadding)
         }
         .applePanel(padding: 0, radius: AppleDesign.Radius.card)
         .appleInteractiveSurface()
