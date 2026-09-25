@@ -29,6 +29,41 @@ struct EditorLineIndex: Sendable {
 }
 
 struct EditorHighlight: Sendable { var range: NSRange; var style: Int }
+
+enum EditorSearchFeedback: Equatable, Sendable {
+    case idle
+    case noMatches
+    case matches(current: Int, total: Int, hasMore: Bool)
+
+    var label: String {
+        switch self {
+        case .idle: return ""
+        case .noMatches: return "无匹配"
+        case .matches(let current, let total, let hasMore):
+            let count = hasMore ? "\(total)+" : "\(total)"
+            return current > 0 ? "\(current) / \(count) 处" : "共 \(count) 处匹配"
+        }
+    }
+
+    /// Bounded, cancellable counting keeps large remote files off the UI thread.
+    static func scan(text: String, query: String, selectedLocation: Int) throws -> Self {
+        guard !query.isEmpty else { return .idle }
+        let value = text as NSString
+        var cursor = 0, count = 0, current = 0
+        while cursor < value.length {
+            if count.isMultiple(of: 128) { try Task.checkCancellation() }
+            let match = value.range(of: query, options: .caseInsensitive,
+                                    range: NSRange(location: cursor, length: value.length - cursor))
+            guard match.location != NSNotFound else { break }
+            count += 1
+            if match.location == selectedLocation { current = count }
+            cursor = max(NSMaxRange(match), cursor + 1)
+            if count == 10_000 { return .matches(current: current, total: count, hasMore: true) }
+        }
+        return count == 0 ? .noMatches : .matches(current: current, total: count, hasMore: false)
+    }
+}
+
 enum EditorSyntax {
     static let maximumLength = 200_000
     // NSRegularExpression is immutable and safe for concurrent matching.
@@ -72,9 +107,11 @@ enum EditorSyntax {
     private(set) var revision: UInt64 = 0
     var onTextChange: ((String) -> Void)?
     var onMetricsChange: ((Int, Int) -> Void)?
+    var onSearchFeedbackChange: ((String, EditorSearchFeedback) -> Void)?
     private var modelText: String
     private var pendingExternalText: String?
     private var highlightTask: Task<Void, Never>?
+    private var searchFeedbackTask: Task<Void, Never>?
     private var hasHighlights = false
     private var lastSearch = ""
     private var lastSearchStep = 0
@@ -121,7 +158,7 @@ enum EditorSyntax {
             return NSValue(range: NSRange(location: start, length: min(range.length, lineIndex.length - start)))
         }
         scroll.contentView.scroll(to: origin); scroll.reflectScrolledClipView(scroll.contentView)
-        revision &+= 1; changedMetrics(); scheduleHighlight()
+        revision &+= 1; changedMetrics(); scheduleSearchFeedback(); scheduleHighlight()
     }
     func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters), !applyingExternal else { return }
@@ -134,7 +171,11 @@ enum EditorSyntax {
         modelText = editor.string; onTextChange?(modelText)
         guard !editor.hasMarkedText() else { return }
         if let pending = pendingExternalText { pendingExternalText = nil; replaceExternalText(pending); onTextChange?(pending) }
-        applySearchIfNeeded(); scheduleHighlight()
+        applySearchIfNeeded(); scheduleSearchFeedback(); scheduleHighlight()
+    }
+    func textViewDidChangeSelection(_ notification: Notification) {
+        guard !desiredSearch.isEmpty, !editor.hasMarkedText() else { return }
+        scheduleSearchFeedback()
     }
     private func changedMetrics() {
         scroll.verticalRulerView?.needsDisplay = true
@@ -166,7 +207,7 @@ enum EditorSyntax {
         guard !editor.hasMarkedText(), lastSearch != desiredSearch || lastSearchStep != desiredSearchStep else { return }
         let changed = lastSearch != desiredSearch, backwards = desiredSearchStep < lastSearchStep
         lastSearch = desiredSearch; lastSearchStep = desiredSearchStep
-        guard !desiredSearch.isEmpty else { return }
+        guard !desiredSearch.isEmpty else { scheduleSearchFeedback(); return }
         let value = editor.string as NSString, selection = editor.selectedRange()
         let start = changed ? 0 : min(value.length, backwards ? selection.location : NSMaxRange(selection))
         let scope = backwards && !changed ? NSRange(location: 0, length: start) : NSRange(location: start, length: value.length - start)
@@ -175,8 +216,31 @@ enum EditorSyntax {
         var match = value.range(of: desiredSearch, options: options, range: scope)
         if match.location == NSNotFound { match = value.range(of: desiredSearch, options: options) }
         if match.location != NSNotFound { editor.setSelectedRange(match); editor.scrollRangeToVisible(match) }
+        scheduleSearchFeedback()
     }
-    func invalidate() { highlightTask?.cancel(); onTextChange = nil; onMetricsChange = nil }
+    private func scheduleSearchFeedback() {
+        searchFeedbackTask?.cancel()
+        guard !desiredSearch.isEmpty else { onSearchFeedbackChange?("", .idle); return }
+        let expectedRevision = revision, query = desiredSearch
+        let text = editor.string, selectedLocation = editor.selectedRange().location
+        searchFeedbackTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(80))
+                let work = Task.detached(priority: .utility) {
+                    try EditorSearchFeedback.scan(text: text, query: query, selectedLocation: selectedLocation)
+                }
+                let feedback = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+                try Task.checkCancellation()
+                guard let self, self.revision == expectedRevision,
+                      self.desiredSearch == query, !self.editor.hasMarkedText() else { return }
+                self.onSearchFeedbackChange?(query, feedback)
+            } catch { /* A newer query or edit superseded this result. */ }
+        }
+    }
+    func invalidate() {
+        highlightTask?.cancel(); searchFeedbackTask?.cancel()
+        onTextChange = nil; onMetricsChange = nil; onSearchFeedbackChange = nil
+    }
 }
 
 private final class EditorLineRuler: NSRulerView {

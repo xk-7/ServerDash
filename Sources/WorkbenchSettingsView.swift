@@ -22,9 +22,11 @@ struct SettingsView: View {
     @AppStorage("networkDisplayInBits") private var networkBits = false
     @AppStorage("hideIPInformation") private var hideIP = false
     @AppStorage(PrivacySettings.locationLookupEnabledKey) private var locationLookupEnabled = false
-    @AppStorage("workbench.localShellPath") private var localShell = ""
-    @AppStorage("workbench.localShellEnvironment") private var localEnvironment = "inherit"
     @AppStorage("mac.settings.selectedPage") private var pageID = SettingsPage.general.rawValue
+    @State private var localShellDraft = LocalShellSettingsDraft(path: "", environment: "inherit")
+    @State private var localShellError: String?
+    @State private var localShellSaved = false
+    @FocusState private var localShellFocused: Bool
     @State private var timeoutText = ""
     @State private var timeoutError: String?
     @State private var timeoutSaved = false
@@ -36,6 +38,26 @@ struct SettingsView: View {
     private var pageSelection: Binding<SettingsPage?> {
         Binding(get: { page }, set: { if let value = $0 { pageID = value.rawValue } })
     }
+    private var localShellPathBinding: Binding<String> {
+        Binding(
+            get: { localShellDraft.path },
+            set: {
+                localShellDraft.path = $0
+                localShellError = nil
+                localShellSaved = false
+            }
+        )
+    }
+    private var localShellEnvironmentBinding: Binding<String> {
+        Binding(
+            get: { localShellDraft.environment },
+            set: {
+                localShellDraft.environment = $0
+                localShellError = nil
+                localShellSaved = false
+            }
+        )
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -44,18 +66,27 @@ struct SettingsView: View {
             }.listStyle(.sidebar).navigationTitle("设置")
                 .navigationSplitViewColumnWidth(min: 155, ideal: 170, max: 210)
         } detail: {
-            VStack(alignment: .leading, spacing: 0) {
-                Label(page.title, systemImage: page.symbol)
-                    .font(.title2.weight(.semibold)).padding(20)
-                Divider()
-                detail
-                    .frame(maxWidth: page.maximumContentWidth, maxHeight: .infinity)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }.background(Color.appGround)
+            GeometryReader { geometry in
+                let metrics = MacWorkspaceMetrics(size: geometry.size)
+                VStack(alignment: .leading, spacing: 0) {
+                    Label(page.title, systemImage: page.symbol)
+                        .font(.title2.weight(.semibold))
+                        .padding(.horizontal, metrics.pagePadding)
+                        .padding(.vertical, metrics.pageHeaderPadding)
+                    Divider()
+                    detail
+                        .frame(maxWidth: page.maximumContentWidth, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+                .background(Color.appGround)
+            }
         }
         .frame(minWidth: 820, idealWidth: 1000, minHeight: 620, idealHeight: 740)
         .preferredColorScheme((AppAppearance(rawValue: appearance) ?? .system).colorScheme)
-        .onAppear { reloadTimeout() }
+        .onAppear {
+            reloadTimeout()
+            reloadLocalShell()
+        }
         .onChange(of: pageID) { _, _ in reloadTimeout() }
         .confirmationDialog("启用服务器公网位置查询？", isPresented: $confirmingLocationLookup) {
             Button("启用查询") { setLocationLookupEnabled(true) }
@@ -86,17 +117,34 @@ struct SettingsView: View {
                 Form {
                     Section("本地终端") {
                         HStack {
-                            TextField("Shell 路径（留空使用登录 Shell）", text: $localShell)
+                            TextField("Shell 路径（留空使用登录 Shell）", text: localShellPathBinding)
+                                .focused($localShellFocused)
+                                .onSubmit(saveLocalShell)
+                                .accessibilityIdentifier("mac.settings.terminal.shellPath")
                             Button("浏览…") { chooseShell() }
                         }
-                        Picker("环境", selection: $localEnvironment) {
+                        Picker("环境", selection: localShellEnvironmentBinding) {
                             Text("登录终端环境").tag("inherit")
                             Text("干净环境").tag("clean")
                         }
-                        if !localShell.isEmpty && (!localShell.hasPrefix("/") || !FileManager.default.isExecutableFile(atPath: localShell)) {
-                            Text("请选择可执行文件的绝对路径。")
+                        if localShellError != nil || MacSettingsValidation.localShellPath(localShellDraft.path) == nil {
+                            Text(localShellError ?? "请选择可执行文件的绝对路径，或留空使用登录 Shell。")
                                 .font(.caption)
                                 .foregroundStyle(Color.appError)
+                                .accessibilityIdentifier("mac.settings.terminal.shellError")
+                        } else if localShellSaved {
+                            Label("已保存", systemImage: "checkmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Spacer()
+                            Button("取消", action: reloadLocalShell)
+                                .disabled(!localShellHasChanges)
+                                .accessibilityIdentifier("mac.settings.terminal.shellCancel")
+                            Button("保存", action: saveLocalShell)
+                                .disabled(!localShellCanSave)
+                                .accessibilityIdentifier("mac.settings.terminal.shellSave")
                         }
                     }
                     Section("终端外观") {
@@ -203,6 +251,31 @@ struct SettingsView: View {
         timeoutText = MacSettingsValidation.timeoutText(PrivacySettings.connectTimeout)
         timeoutError = nil; timeoutSaved = false
     }
+    private var localShellHasChanges: Bool {
+        localShellDraft != LocalShellSettingsDraft.load()
+    }
+    private var localShellCanSave: Bool {
+        localShellHasChanges
+            && MacSettingsValidation.localShellPath(localShellDraft.path) != nil
+            && (localShellDraft.environment == "inherit" || localShellDraft.environment == "clean")
+    }
+    private func reloadLocalShell() {
+        localShellDraft = LocalShellSettingsDraft.load()
+        localShellError = nil
+        localShellSaved = false
+        localShellFocused = false
+    }
+    private func saveLocalShell() {
+        guard let saved = localShellDraft.commit() else {
+            localShellError = "请选择可执行文件的绝对路径，或留空使用登录 Shell。"
+            localShellFocused = true
+            return
+        }
+        localShellDraft = saved
+        localShellError = nil
+        localShellSaved = true
+        localShellFocused = false
+    }
     private func saveTimeout() {
         guard let seconds = MacSettingsValidation.timeout(timeoutText) else {
             timeoutError = "请输入 5–300 之间的整数秒数。"; return
@@ -217,11 +290,43 @@ struct SettingsView: View {
     }
     private func chooseShell() {
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = false; panel.directoryURL = URL(fileURLWithPath: "/bin")
-        if panel.runModal() == .OK, let url = panel.url { localShell = url.path }
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url { localShellPathBinding.wrappedValue = url.path }
+    }
+}
+
+struct LocalShellSettingsDraft: Equatable {
+    var path: String
+    var environment: String
+
+    static func load(defaults: UserDefaults = .standard) -> Self {
+        let environment = defaults.string(forKey: "workbench.localShellEnvironment") == "clean" ? "clean" : "inherit"
+        return Self(path: defaults.string(forKey: "workbench.localShellPath") ?? "", environment: environment)
+    }
+
+    /// Only an explicit, validated commit changes the configuration read by new PTY sessions.
+    @discardableResult
+    func commit(defaults: UserDefaults = .standard, fileManager: FileManager = .default) -> Self? {
+        guard let path = MacSettingsValidation.localShellPath(path, fileManager: fileManager),
+              environment == "inherit" || environment == "clean" else { return nil }
+        defaults.set(path, forKey: "workbench.localShellPath")
+        defaults.set(environment, forKey: "workbench.localShellEnvironment")
+        return Self(path: path, environment: environment)
     }
 }
 
 enum MacSettingsValidation {
+    static func localShellPath(_ text: String, fileManager: FileManager = .default) -> String? {
+        let path = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.isEmpty { return "" }
+        guard !path.contains("\0"), (path as NSString).isAbsolutePath else { return nil }
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              fileManager.isExecutableFile(atPath: path) else { return nil }
+        return path
+    }
+
     static func timeout(_ text: String) -> Int? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }),

@@ -625,6 +625,21 @@ enum TerminalInspectorPresentation: Equatable {
     var isCompact: Bool { self == .popover }
 }
 
+/// Nine 28-point icons and their gaps must fit entirely inside the inspector.
+/// A narrow sidebar uses the same accessible menu as the popover instead of
+/// silently scrolling actions out of view.
+enum TerminalInspectorNavigationLayout {
+    static let iconWidth: CGFloat = 28
+    static let iconSpacing: CGFloat = 8
+    static let minimumIconStripWidth = CGFloat(TerminalInspectorSection.allCases.count) * iconWidth
+        + CGFloat(TerminalInspectorSection.allCases.count - 1) * iconSpacing
+        + AppleDesign.Spacing.sm * 2
+
+    static func usesMenu(width: CGFloat, presentation: TerminalInspectorPresentation) -> Bool {
+        presentation.isCompact || width < minimumIconStripWidth
+    }
+}
+
 struct TerminalInspectorView: View {
     @EnvironmentObject private var appState: AppState
     let server: ServerRecord
@@ -650,62 +665,76 @@ struct TerminalInspectorView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: presentation.isCompact ? AppleDesign.Spacing.xs : AppleDesign.Spacing.sm) {
-                if presentation.isCompact {
-                    HStack(spacing: AppleDesign.Spacing.sm) {
+        GeometryReader { geometry in
+            let metrics = MacWorkspaceMetrics(size: geometry.size)
+            let compactNavigation = TerminalInspectorNavigationLayout.usesMenu(
+                width: geometry.size.width, presentation: presentation)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: compactNavigation ? AppleDesign.Spacing.xxs : AppleDesign.Spacing.xs) {
+                    if compactNavigation {
+                        HStack(spacing: AppleDesign.Spacing.sm) {
+                            Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
+                            Spacer(minLength: 0)
+                            Text(controller.serverName)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Picker("检查器内容", selection: $selectedTab) {
+                            ForEach(TerminalInspectorSection.allCases) { section in
+                                Label(section.title, systemImage: section.icon).tag(section.rawValue)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("检查器内容")
+                        .accessibilityIdentifier("terminal.inspector.sectionPicker")
+                    } else {
                         Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
-                        Spacer(minLength: 0)
                         Text(controller.serverName)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Picker("检查器内容", selection: $selectedTab) {
-                        ForEach(TerminalInspectorSection.allCases) { section in
-                            Label(section.title, systemImage: section.icon).tag(section.rawValue)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("检查器内容")
-                } else {
-                    Text("终端检查器").font(.headline).accessibilityAddTraits(.isHeader)
-                    Text(controller.serverName)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(TerminalInspectorSection.allCases) { section in
-                                Button { selectedTab = section.rawValue } label: {
-                                    Image(systemName: section.icon).frame(width: 28, height: 28)
-                                }.buttonStyle(.borderless).foregroundStyle(selectedTab == section.rawValue ? Color.accentColor : .secondary)
-                                    .help(section.title).accessibilityLabel(section.title)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: TerminalInspectorNavigationLayout.iconSpacing) {
+                                ForEach(TerminalInspectorSection.allCases) { section in
+                                    Button { selectedTab = section.rawValue } label: {
+                                        Image(systemName: section.icon)
+                                            .frame(width: TerminalInspectorNavigationLayout.iconWidth,
+                                                   height: TerminalInspectorNavigationLayout.iconWidth)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(selectedTab == section.rawValue ? Color.accentColor : .secondary)
+                                    .help(section.title)
+                                    .accessibilityLabel(section.title)
+                                    .accessibilityIdentifier("terminal.inspector.section.\(section.rawValue)")
                                     .accessibilityAddTraits(selectedTab == section.rawValue ? .isSelected : [])
+                                }
                             }
                         }
                     }
                 }
-            }
-            .padding(presentation.isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md)
-            Divider()
-            if selectedTab == "ai" {
-                AIAssistantPanel(controller: controller, isActive: isActivePane)
-            } else if selectedTab == "files" {
-                SFTPBrowserView(controller: appState.inspectorFileController(for: server), compact: true)
-                    .id(server.id)
-            } else { ScrollView {
-                VStack(alignment: .leading, spacing: presentation.isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md) {
-                    if selectedTab == "snippets" { snippetContent } else { statusContent }
+                .padding(metrics.inspectorPadding)
+                Divider()
+                if selectedTab == "ai" {
+                    AIAssistantPanel(controller: controller, isActive: isActivePane)
+                } else if selectedTab == "files" {
+                    SFTPBrowserView(controller: appState.inspectorFileController(for: server), compact: true)
+                        .id(server.id)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
+                            if selectedTab == "snippets" { snippetContent }
+                            else { statusContent(compact: metrics.isCompact) }
+                        }
+                        .padding(metrics.inspectorPadding)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                .padding(presentation.isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            }
+            .background(Color.appGround)
+            .controlSize(compactNavigation ? .small : .regular)
         }
-        .background(Color.appGround)
-        .controlSize(presentation.isCompact ? .small : .regular)
     }
 
-    @ViewBuilder private var statusContent: some View {
+    @ViewBuilder private func statusContent(compact: Bool) -> some View {
         HStack {
             Label(controller.status.title, systemImage: "terminal")
                 .foregroundStyle(controller.status.displayColor)
@@ -734,7 +763,8 @@ struct TerminalInspectorView: View {
             }
             if let error = state.error { Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
             CompactMonitorContent(snapshot: snapshot, history: state.history,
-                section: TerminalInspectorSection(rawValue: selectedTab) ?? .status)
+                section: TerminalInspectorSection(rawValue: selectedTab) ?? .status,
+                compact: compact)
             TimelineView(.periodic(from: .now, by: 5)) { context in
                 VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
                     if !server.enableDashboardMonitor {

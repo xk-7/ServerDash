@@ -41,12 +41,24 @@ final class MacSettingsPolishTests: XCTestCase {
         XCTAssertTrue(invalid.isCompact)
         XCTAssertEqual(invalid.pagePadding, AppleDesign.Spacing.md)
         XCTAssertEqual(invalid.gridMinimumWidth, 244)
+        XCTAssertEqual(invalid.sectionSpacing, AppleDesign.Spacing.sm)
+        XCTAssertEqual(invalid.cardPadding, AppleDesign.Spacing.sm)
+        XCTAssertEqual(invalid.cardContentSpacing, AppleDesign.Spacing.xs)
+        XCTAssertEqual(invalid.tableRowPadding, 2)
+        XCTAssertEqual(invalid.inspectorPadding, AppleDesign.Spacing.xs)
+        XCTAssertEqual(invalid.pageHeaderPadding, AppleDesign.Spacing.sm)
 
         let regular = MacWorkspaceMetrics(width: 900, height: 720)
         XCTAssertFalse(regular.isCompact)
         XCTAssertFalse(regular.isWide)
         XCTAssertEqual(regular.pagePadding, AppleDesign.Spacing.lg)
         XCTAssertEqual(regular.gridMinimumWidth, 280)
+        XCTAssertEqual(regular.sectionSpacing, AppleDesign.Spacing.md)
+        XCTAssertEqual(regular.cardPadding, AppleDesign.Spacing.md)
+        XCTAssertEqual(regular.cardContentSpacing, AppleDesign.Spacing.sm)
+        XCTAssertEqual(regular.tableRowPadding, AppleDesign.Spacing.xxs)
+        XCTAssertEqual(regular.inspectorPadding, AppleDesign.Spacing.sm)
+        XCTAssertEqual(regular.pageHeaderPadding, AppleDesign.Spacing.md)
     }
 
     func testConnectionEditorReturnKeepsSaveAndConnectAsTheDefaultAction() {

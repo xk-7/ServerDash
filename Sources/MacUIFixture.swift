@@ -48,6 +48,90 @@ enum MacUIFixturePage: String, CaseIterable {
     }
 }
 
+private extension Notification.Name {
+    static let macQAControlRoute = Notification.Name("ServerDash.MacQA.controlRoute")
+}
+
+/// SwiftUI owns the menu bar, so the QA menu is declared in ServerDashApp's
+/// `.commands` builder. Installing NSMenuItem after window appearance would be
+/// overwritten by the next SwiftUI menu rebuild.
+struct MacUIFixtureCommands: Commands {
+    var body: some Commands {
+        CommandMenu("QA 控制") {
+            Menu("切换页面") {
+                Button("仪表盘") { MacQAControlActions.perform("page.dashboard") }
+                Button("机器") { MacQAControlActions.perform("page.machines") }
+                Button("终端") { MacQAControlActions.perform("page.terminal") }
+                Button("SFTP 浏览器") { MacQAControlActions.perform("page.sftp") }
+                Button("远程编辑器") { MacQAControlActions.perform("page.editor") }
+                Button("设置") { MacQAControlActions.perform("page.settings") }
+                Button("空状态") { MacQAControlActions.perform("page.empty") }
+                Button("错误弹窗") { MacQAControlActions.perform("page.error") }
+            }
+            Menu("窗口尺寸") {
+                Button("900×620") { MacQAControlActions.perform("window.900x620") }
+                Button("1440×900") { MacQAControlActions.perform("window.1440x900") }
+                Button("1920×1080") { MacQAControlActions.perform("window.1920x1080") }
+            }
+            Menu("控件外观") {
+                Button("浅色") { MacQAControlActions.perform("theme.light") }
+                Button("深色") { MacQAControlActions.perform("theme.dark") }
+            }
+            Divider()
+            Menu("大数据夹具") {
+                Button("以 1,000 主机列表重开 QA 应用") { MacQAControlActions.perform("data.machines1000") }
+                Button("以 10,000 文件浏览器重开 QA 应用") { MacQAControlActions.perform("data.sftp10000") }
+            }
+        }
+    }
+}
+
+@MainActor
+private enum MacQAControlActions {
+    static func perform(_ action: String) {
+        guard MacUIFixture.isEnabled else { return }
+        if action.hasPrefix("page.") {
+            NotificationCenter.default.post(name: .macQAControlRoute, object: String(action.dropFirst("page.".count)))
+        } else if action.hasPrefix("window.") {
+            let size: NSSize = switch action {
+            case "window.900x620": NSSize(width: 900, height: 620)
+            case "window.1440x900": NSSize(width: 1_440, height: 900)
+            default: NSSize(width: 1_920, height: 1_080)
+            }
+            (NSApp.windows.first { $0.title == "ServerDash · 隔离验收" } ?? NSApp.keyWindow)?.setContentSize(size)
+        } else if action.hasPrefix("theme.") {
+            UserDefaults.standard.set(String(action.dropFirst("theme.".count)), forKey: "appAppearance")
+        } else if action == "data.machines1000" || action == "data.sftp10000" {
+            reopenWithLargeFixture(action)
+        }
+    }
+
+    private static func reopenWithLargeFixture(_ action: String) {
+        guard let executable = Bundle.main.executableURL else { return }
+        let size = NSApp.windows.first { $0.title == "ServerDash · 隔离验收" }?.contentView?.bounds.size
+            ?? NSSize(width: 1_440, height: 900)
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = [
+            "--fixture-page", action == "data.machines1000" ? "machines" : "sftp",
+            "--fixture-width", String(Int(size.width)),
+            "--fixture-height", String(Int(size.height)),
+            "--fixture-theme", UserDefaults.standard.string(forKey: "appAppearance") ?? "light",
+        ] + (action == "data.machines1000"
+             ? ["--fixture-machine-view", "list", "--fixture-machine-count", "1000"]
+             : ["--fixture-sftp-file-count", "10000"])
+        do {
+            try process.run()
+            NSApp.terminate(nil)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法重开隔离 QA 应用"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+}
+
 /// Used only by the separately compiled QA application target. Runtime arguments
 /// cannot enable fixtures in the production application, including Debug builds.
 enum MacUIFixture {
@@ -152,7 +236,9 @@ enum MacUIFixture {
         context.insert(MachineTagRecord(name: "生产", colorName: "red"))
         context.insert(MachineTagRecord(name: "开发", colorName: "blue"))
         context.insert(MachineTagRecord(name: "暂无主机的标签", colorName: "gray"))
-        let count = argument("--fixture-hosts").flatMap(Int.init).map { min(1000, max(0, $0)) }
+        // Explicit benchmark size is QA-only; ordinary screenshots keep eight SSH hosts.
+        let count = (argument("--fixture-machine-count") ?? argument("--fixture-hosts"))
+            .flatMap(Int.init).map { min(1_000, max(0, $0)) }
             ?? (page == .empty ? 0 : 8)
         var servers: [ServerRecord] = []
         for i in 0..<count {
@@ -215,8 +301,14 @@ enum MacUIFixture {
     }
 
     @MainActor static func makeEditorStore() -> RemoteEditorStore {
+        let editorDirectory = root.appendingPathComponent("Editor", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: editorDirectory, withIntermediateDirectories: true)
+        } catch {
+            preconditionFailure("Unable to prepare the isolated editor fixture: \(error)")
+        }
         let store = RemoteEditorStore(
-            persistURL: root.appendingPathComponent("Editor/documents.json"),
+            persistURL: editorDirectory.appendingPathComponent("documents.json"),
             restore: false
         )
         let text = """
@@ -227,26 +319,31 @@ enum MacUIFixture {
           monitoring: true
         """
         let data = Data(text.utf8)
-        let draft = RemoteEditorDraft(
-            serverID: UUID(),
-            serverName: "上海生产环境核心数据库",
-            path: "/etc/serverdash/example.yml",
-            text: text,
-            encoding: .utf8,
-            hasBOM: false,
-            original: data,
-            revision: RemoteFileRevision(
-                size: Int64(data.count),
-                modifiedNS: 1,
-                inode: 1,
-                mode: 0o640,
-                uid: 0,
-                gid: 0,
-                sha256: DesktopFileOperations.digest(data)
+        let documentCount = argument("--fixture-editor-documents").flatMap(Int.init).map { min(5, max(1, $0)) } ?? 5
+        let documents = (0..<documentCount).map { index in
+            RemoteEditorDraft(
+                serverID: UUID(),
+                serverName: "上海生产环境核心数据库",
+                path: index == 0
+                    ? "/etc/serverdash/example.yml"
+                    : "/etc/serverdash/多标签工作区-第\(String(format: "%02d", index + 1))份-非常长的中文配置名称-用于检验滚动与提示.yaml",
+                text: text,
+                encoding: .utf8,
+                hasBOM: false,
+                original: data,
+                revision: RemoteFileRevision(
+                    size: Int64(data.count),
+                    modifiedNS: 1,
+                    inode: UInt64(index + 1),
+                    mode: 0o640,
+                    uid: 0,
+                    gid: 0,
+                    sha256: DesktopFileOperations.digest(data)
+                )
             )
-        )
-        store.documents = [draft]
-        store.selectedID = draft.id
+        }
+        store.documents = documents
+        store.selectedID = documents.last?.id
         return store
     }
 
@@ -291,6 +388,13 @@ enum MacUIFixture {
         window.setContentSize(NSSize(width: max(900, width), height: max(620, height)))
         window.title = "ServerDash · 隔离验收"
         window.center()
+        if let resizedWidth = argument("--fixture-resize-width").flatMap(Double.init),
+           let resizedHeight = argument("--fixture-resize-height").flatMap(Double.init) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1_200))
+                window.setContentSize(NSSize(width: max(900, resizedWidth), height: max(620, resizedHeight)))
+            }
+        }
     }
 }
 
@@ -300,12 +404,13 @@ struct MacUIFixtureRootView: View {
     @Query(sort: \ServerRecord.name) private var servers: [ServerRecord]
     @Query(sort: \SSHKeyRecord.name) private var keys: [SSHKeyRecord]
     @StateObject private var editorStore: RemoteEditorStore
+    @State private var sftpController: MacSFTPController?
 
-    private let page: MacUIFixturePage
+    @State private var page: MacUIFixturePage
 
     init() {
         let selectedPage = MacUIFixturePage(argument: MacUIFixture.argument("--fixture-page"))
-        page = selectedPage
+        _page = State(initialValue: selectedPage)
         _editorStore = StateObject(wrappedValue: MacUIFixture.makeEditorStore())
     }
 
@@ -321,7 +426,41 @@ struct MacUIFixtureRootView: View {
                 )
             )
             .accessibilityElement(children: .contain)
+            .accessibilityValue("合成 SSH 主机：\(servers.count)")
             .accessibilityIdentifier("macqa.page.\(page.rawValue)")
+            .onReceive(NotificationCenter.default.publisher(for: .macQAControlRoute)) { note in
+                guard let rawPage = note.object as? String,
+                      let selectedPage = MacUIFixturePage(rawValue: rawPage) else { return }
+                selectPage(selectedPage)
+            }
+            .onAppear(perform: prepareSFTPController)
+            .onChange(of: servers.first?.id) { _, _ in prepareSFTPController() }
+    }
+
+    private func prepareSFTPController() {
+        guard let server = servers.first,
+              sftpController?.server.id != server.id else { return }
+        sftpController = MacSFTPController(
+            server: server, appState: appState, automaticallyConnect: false)
+    }
+
+    private func selectPage(_ selectedPage: MacUIFixturePage) {
+        switch selectedPage {
+        case .dashboard: appState.route = .section(.dashboard)
+        case .machines: appState.route = .section(.machines)
+        case .terminal:
+            if appState.terminalRegistry.controllers.isEmpty, let server = servers.first {
+                let controller = appState.terminalRegistry.open(for: server, forceNew: true, startImmediately: false)
+                controller.status = .connected
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    controller.hostView.feedLocalOutput("QA 面板 · 离线夹具\r\nfixture@server:~$ ")
+                }
+            }
+            appState.route = .section(.terminal)
+        default: break
+        }
+        page = selectedPage
     }
 
     @ViewBuilder
@@ -338,7 +477,11 @@ struct MacUIFixtureRootView: View {
                     .navigationTitle("工作区")
                     .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 220)
                 } detail: {
-                    MacUIFixtureSFTPHost(server: server, appState: appState)
+                    if let sftpController, sftpController.server.id == server.id {
+                        MacUIFixtureSFTPHost(controller: sftpController)
+                    } else {
+                        ProgressView("正在准备离线文件夹")
+                    }
                 }
             } else {
                 MacUIFixtureStateView(kind: .empty)
@@ -419,14 +562,13 @@ struct MacUIFixtureRootView: View {
 /// Its controller never connects, so layout checks cannot contact a saved host.
 @MainActor
 private struct MacUIFixtureSFTPHost: View {
-    @StateObject private var controller: MacSFTPController
+    @ObservedObject var controller: MacSFTPController
 
-    init(server: ServerRecord, appState: AppState) {
-        _controller = StateObject(wrappedValue: MacSFTPController(
-            server: server,
-            appState: appState,
-            automaticallyConnect: false
-        ))
+    private var initialItem: RemoteFileItem? {
+        guard !controller.items.isEmpty else { return nil }
+        let selectedIndex = MacUIFixture.argument("--fixture-sftp-select-index")
+            .flatMap(Int.init).map { min(controller.items.count - 1, max(0, $0)) } ?? 0
+        return controller.items[selectedIndex]
     }
 
     var body: some View {
@@ -434,8 +576,14 @@ private struct MacUIFixtureSFTPHost: View {
             .onAppear {
                 guard !controller.hasLoadedDirectory else { return }
                 let path = "/srv/生产环境/包含空格与中文的长期部署路径/应用程序"
-                let items = (0..<24).map { index in
-                    let name = index == 0 ? "上海生产环境核心数据库配置文件.yaml" : String(format: "应用配置-%02d.txt", index)
+                // Keep the screenshot fixture at 25 entries, including one hidden
+                // file. The opt-in 10,000-entry route still never opens SFTP.
+                let fileCount = MacUIFixture.argument("--fixture-sftp-file-count")
+                    .flatMap(Int.init).map { min(10_000, max(25, $0)) } ?? 25
+                let items = (0..<(fileCount - 1)).map { index in
+                    let name = index == 0
+                        ? "上海生产环境核心数据库配置文件.yaml"
+                        : String(format: fileCount == 25 ? "应用配置-%02d.txt" : "应用配置-%05d.txt", index)
                     return RemoteFileItem(
                         path: path + "/" + name,
                         name: name,
@@ -457,9 +605,15 @@ private struct MacUIFixtureSFTPHost: View {
                     modifiedText: "2026-09-21"
                 )]
                 controller.applyDirectoryListing(SFTPDirectoryListing(path: path, items: items))
-                controller.selection = [items[0].id]
+                let selectedIndex = MacUIFixture.argument("--fixture-sftp-select-index")
+                    .flatMap(Int.init).map { min(items.count - 1, max(0, $0)) } ?? 0
+                controller.selection = [items[selectedIndex].id]
+                controller.scrollAnchor = items[selectedIndex].id
                 controller.statusMessage = "离线夹具 · \(items.count) 项"
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityValue("初始已选：\(initialItem?.name ?? "无")；当前已选：\(controller.selectedItem?.name ?? "无")；初始滚动锚点：\(initialItem?.id ?? "无")；当前滚动锚点：\(controller.scrollAnchor ?? "无")；文件总数：\(controller.items.count)")
+            .accessibilityIdentifier("macqa.sftp.browserState")
     }
 }
 

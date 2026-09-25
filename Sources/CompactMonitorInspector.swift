@@ -106,6 +106,7 @@ struct CompactMonitorContent: View {
     let snapshot: ServerSnapshot
     let history: [MetricPoint]
     let section: TerminalInspectorSection
+    let compact: Bool
     @AppStorage("monitor.hideSpecialFilesystems") private var special = true
     @AppStorage("monitor.hideDockerMounts") private var docker = true
     @AppStorage("monitor.hideVirtualInterfaces") private var virtual = true
@@ -115,8 +116,10 @@ struct CompactMonitorContent: View {
     private var filters: MonitoringFilters {
         .init(hideSpecialFilesystems: special, hideDockerMounts: docker, hideVirtualInterfaces: virtual, mountPoints: mounts, interfaceNames: interfaces)
     }
+    private var sectionSpacing: CGFloat { compact ? AppleDesign.Spacing.sm : 14 }
+    private var panelPadding: CGFloat { compact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: sectionSpacing) {
             switch section {
             case .cpu: cpu
             case .gpu: gpu
@@ -136,7 +139,7 @@ struct CompactMonitorContent: View {
         }
     }
     private var cpu: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: sectionSpacing) {
             usage("CPU 总负载", value: snapshot.cpuUsage, detail: "\(snapshot.coreCount) 核心 · \(snapshot.cpuModel)")
             HStack { stat("用户态", value: percent(snapshot.cpuUserPercent)); stat("内核态", value: percent(snapshot.cpuSystemPercent)); stat("IO 等待", value: percent(snapshot.cpuIOWaitPercent)) }
             HStack { stat("1M 负载", value: snapshot.load1.formatted(.number.precision(.fractionLength(2))))
@@ -146,12 +149,12 @@ struct CompactMonitorContent: View {
             }.frame(height: 130).chartYScale(domain: 0...100).accessibilityLabel("CPU 使用率历史")
             if !snapshot.cpuCores.isEmpty {
                 Text("核心详情").font(.headline)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70))], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70))], spacing: compact ? 5 : 8) {
                     ForEach(snapshot.cpuCores) { core in
                         VStack(alignment: .leading, spacing: 5) {
                             HStack { Text("#\(core.index)"); Spacer(); Text(DisplayFormat.percent(core.usage)) }
                             ProgressView(value: min(100, max(0, core.usage)), total: 100)
-                        }.font(.caption2).monospacedDigit().padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                        }.font(.caption2).monospacedDigit().padding(compact ? 6 : 8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                     }
                 }
             }
@@ -163,7 +166,7 @@ struct CompactMonitorContent: View {
             unavailable("未检测到 GPU 数据", detail: "需要远端提供可用的 NVIDIA 采集工具及访问权限。")
         } else {
             ForEach(snapshot.gpus) { gpu in
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: sectionSpacing) {
                     usage(gpu.name, value: gpu.utilization, detail: "显存 \(DisplayFormat.bytes(gpu.memoryUsedBytes)) / \(DisplayFormat.bytes(gpu.memoryTotalBytes))")
                     HStack {
                         stat("温度", value: gpu.temperatureCelsius.map { "\(Int($0)) °C" } ?? "—")
@@ -173,12 +176,12 @@ struct CompactMonitorContent: View {
                     ForEach(snapshot.gpuProcesses.filter { $0.gpuID == gpu.uuid }) { process in
                         HStack { Text("\(process.pid) · \(process.name)").lineLimit(1); Spacer(); Text(DisplayFormat.bytes(process.memoryBytes)) }.font(.caption)
                     }
-                }.applePanel()
+                }.applePanel(padding: panelPadding)
             }
         }
     }
     private var memory: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: sectionSpacing) {
             usage("内存", value: snapshot.memoryUsage, detail: "\(DisplayFormat.bytes(snapshot.memoryUsedBytes)) / \(DisplayFormat.bytes(snapshot.memoryTotalBytes))")
             HStack { stat("空闲", value: DisplayFormat.bytes(snapshot.memoryFreeBytes)); stat("缓存", value: DisplayFormat.bytes(snapshot.memoryCachedBytes)) }
             usage("Swap", value: snapshot.swapUsage, detail: "\(DisplayFormat.bytes(snapshot.swapUsedBytes)) / \(DisplayFormat.bytes(snapshot.swapTotalBytes))")
@@ -198,7 +201,7 @@ struct CompactMonitorContent: View {
                 Text(io.device).font(.headline)
                 HStack { stat("读取", value: DisplayFormat.speed(io.readBytesPerSecond)); stat("写入", value: DisplayFormat.speed(io.writeBytesPerSecond)) }
                 Text("IOPS 读 \(Int(io.readIOPS)) / 写 \(Int(io.writeIOPS))").font(.caption).foregroundStyle(.secondary)
-            }.applePanel()
+            }.applePanel(padding: panelPadding)
         }
     }
     @ViewBuilder private var network: some View {
@@ -222,7 +225,7 @@ struct CompactMonitorContent: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { Text(port.transport.uppercased()).font(.caption.bold()); Text(privacy ? "[地址]" : port.address).font(.caption.monospaced()) }
                     Text(port.process.isEmpty ? "进程信息不可用" : port.process).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(compact ? 7 : 10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
         }
         Text("网络接口").font(.headline)
@@ -230,7 +233,7 @@ struct CompactMonitorContent: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(item.name).font(.headline)
                 HStack { stat("下载", value: DisplayFormat.speed(item.downloadBytesPerSecond)); stat("上传", value: DisplayFormat.speed(item.uploadBytesPerSecond)) }
-            }.applePanel()
+            }.applePanel(padding: panelPadding)
         }
     }
     private var trafficChart: some View {
@@ -247,11 +250,11 @@ struct CompactMonitorContent: View {
                     }
                 }
             }.frame(height: 130).accessibilityLabel("上传及下载速率历史")
-        }.applePanel()
+        }.applePanel(padding: panelPadding)
     }
     private var processList: some View { processRows(snapshot.topProcesses, memory: false) }
     private func processRows(_ processes: [ProcessMetric], memory: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: compact ? 6 : 10) {
             Text(memory ? "进程内存排行" : "进程 CPU 排行").font(.headline)
             ForEach(processes.prefix(10)) { process in
                 HStack {
@@ -260,14 +263,14 @@ struct CompactMonitorContent: View {
                     Text(DisplayFormat.percent(memory ? process.memory : process.cpu)).monospacedDigit()
                 }.font(.caption)
             }
-        }.applePanel()
+        }.applePanel(padding: panelPadding)
     }
     private func usage(_ title: String, value: Double, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: compact ? 5 : 7) {
             HStack { Text(title).font(.headline).lineLimit(1); Spacer(); Text(DisplayFormat.percent(value)).font(.headline).monospacedDigit() }
             ProgressView(value: min(100, max(0, value)), total: 100)
             Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-        }.applePanel().accessibilityElement(children: .combine)
+        }.applePanel(padding: panelPadding).accessibilityElement(children: .combine)
     }
     private func stat(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 5) { Text(title).font(.caption2).foregroundStyle(.secondary); Text(value).font(.callout.bold()).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75) }
@@ -275,6 +278,6 @@ struct CompactMonitorContent: View {
     }
     private func percent(_ value: Double?) -> String { value.map(DisplayFormat.percent) ?? "—" }
     private func unavailable(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) { Text(title).font(.headline); Text(detail).font(.caption).foregroundStyle(.secondary) }.applePanel()
+        VStack(alignment: .leading, spacing: compact ? 5 : 8) { Text(title).font(.headline); Text(detail).font(.caption).foregroundStyle(.secondary) }.applePanel(padding: panelPadding)
     }
 }

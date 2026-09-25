@@ -132,6 +132,15 @@ struct MacWorkspaceMetrics: Equatable {
     var isWide: Bool { tier == .wide }
     var pagePadding: CGFloat { isCompact ? AppleDesign.Spacing.md : AppleDesign.Spacing.lg }
     var gridMinimumWidth: CGFloat { isCompact ? 244 : 280 }
+
+    // Content density follows the usable detail area. Keep primary text at its
+    // semantic size; compact windows save space through chrome and spacing.
+    var sectionSpacing: CGFloat { isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md }
+    var cardPadding: CGFloat { isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md }
+    var cardContentSpacing: CGFloat { isCompact ? AppleDesign.Spacing.xs : AppleDesign.Spacing.sm }
+    var tableRowPadding: CGFloat { isCompact ? AppleDesign.Spacing.xxs / 2 : AppleDesign.Spacing.xxs }
+    var inspectorPadding: CGFloat { isCompact ? AppleDesign.Spacing.xs : AppleDesign.Spacing.sm }
+    var pageHeaderPadding: CGFloat { isCompact ? AppleDesign.Spacing.sm : AppleDesign.Spacing.md }
 }
 
 /// Shared native sheet chrome for macOS editors.

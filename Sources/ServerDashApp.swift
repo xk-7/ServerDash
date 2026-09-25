@@ -112,6 +112,9 @@ struct ServerDashApp: App {
                 }
             }
             AIAssistantCommands()
+            if MacUIFixture.isEnabled {
+                MacUIFixtureCommands()
+            }
         }
 
         Window("AI 通用对话", id: "ai-general") {
