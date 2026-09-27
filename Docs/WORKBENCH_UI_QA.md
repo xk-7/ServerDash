@@ -1,5 +1,7 @@
 # macOS 工作台验收记录
 
+本文件按日期保留各轮证据；旧版本的通过状态不自动沿用到新改动。当前性能优化迭代的状态见末尾「2026-09-27 macOS 整体响应性能优化验收基线」及 [性能验收记录](MAC_PERFORMANCE_QA.md)。
+
 日期：2026-09-09。范围为本轮 macOS 原生工作台、共享 V5 模型、连接、文件和配置同步。界面保持 ServerDash 品牌、系统控件、语义配色与浅色/深色模式。
 
 ## 构建与测试
@@ -207,9 +209,47 @@ GitHub [`Apple-only main protection` 规则集](https://github.com/xk-7/ServerDa
 - [x] 以 ad-hoc 签名的独立 Debug 构建运行单个 XCUI smoke test，并核对 QA App 与 Runner 的 `codesign --verify --deep --strict`。Runner PID 91000 已启动，测试方法执行前在 `enabling automation mode` 等待 60.04 秒后超时（22:29:20.636–22:30:20.675）；结果包 `.build/macqa-signed-smoke.xcresult` 为 `passedTests: 0`。`testmanagerd.log` 记录了对 Runner 的授权请求及 `result:error 1: (null)`，限定进程的 `tccd` 日志未出现明确拒绝；证据不足以判定 TCC、签名或宿主服务哪一项是根因。先前 2026-09-23 的 bootstrap 前 signal kill 是不同观察结果。本机 XCUI runtime 继续标为**未通过**，未修改系统隐私权限，也未执行其余 XCUI 断言。
 - [x] 10,000 项 SFTP 真实窗口暴露数据基准未覆盖的 UI 卡顿：清除搜索曾超过 20 秒，进程采样显示主线程在原生表格自动行高计算中反复创建 SwiftUI 单元格。SFTP 表格单独采用 30pt 固定行高后，同一签名 QA 窗口搜索末项耗时 1.459 秒、清除搜索 1.750 秒、滚动三页 1.705 秒（均包含 CUA 操作及辅助功能树读取）；25 项 900×620 浅色和深色截图确认行高、文本与选中态可读。原始卡顿采样保留在 `/tmp/serverdash-sftp-10000-hang.sample.txt`；共享表格桥默认不固定行高，机器列表未受影响。
 
-### 回归与构建待填
+### 该轮回归与构建结果
 
 - [x] 最终源码的严格并发 `build-for-testing` 与第一方零告警检查通过；`test-without-building` 运行 **497 项 macOS 测试，497 项通过、0 失败**。结果包 `.build/final-macos-tests-20260925-frozen-v2.xcresult`，日志 `/tmp/serverdash-mac-ui-density-strict-build-final-frozen-v2.log` 和 `/tmp/serverdash-mac-ui-density-macos-tests-final-frozen-v2.log`。
 - [x] 通用 Mac Release 构建通过，`ServerDash` 与 RDP archive 均为 `x86_64 arm64`；`Scripts/verify-ci-release.sh` 的架构及动态链接路径检查通过。iOS Simulator Release 为 `iPhoneSimulator` 平台、`x86_64 arm64`；无签名 Device Release 为 `iPhoneOS` 平台、`arm64`，签名检查确认未签名。日志分别为 `/tmp/serverdash-mac-ui-density-macos-release-final-frozen-v2.log`、`/tmp/serverdash-mac-ui-density-ios-simulator-release-final-frozen-v2.log` 和 `/tmp/serverdash-mac-ui-density-ios-device-release-final-frozen-v2.log`。三项构建均为第一方 0 告警、0 错误；Mac 的 1 条警告仅为无 AppIntents 依赖时跳过元数据提取，移动端无告警。
 - [x] 隔离内存基准：1,000 主机、48 分组、6 次机器页查询，旧逐行层级/排序计算占主线程 1752.366 ms，新投影含建立成本为 38.810 ms，缓存的 100 次状态更新为 0.085 ms；同一夹具的结果语义相等。仪表盘投影建立 16.641 ms、5 次查询 40.743 ms。10,000 项 SFTP 列表建立 14.704 ms、显示隐藏文件 11.113 ms、再次隐藏 11.023 ms、搜索 22.450 ms、清除搜索 10.794 ms，合计 70.084 ms；均在主线程执行，选择清理断言通过。数据源分别为系统临时目录的 `serverdash-mac-browser-benchmark.json`、`serverdash-dashboard-filter-benchmark.json` 和 `/tmp/serverdash-sftp-list-benchmark.json`。这些数字不包含 SwiftUI 绘制、窗口滚动或网络；真实窗口交互另行记录，不与旧口径直接同比。
 - [x] `Scripts/test-apple-main-scope.sh` 17/17 通过；`Scripts/macos-dev.sh generate-check` 确认分支基线、1.0.4（Build 9）、生成工程与 RDP 缓存有效，并报告 0 条开发检查告警。
+
+
+## 2026-09-27 macOS 整体响应性能优化验收基线
+
+本轮使用 `codex/mac-performance-polish`，基于 `e4d6b84`，版本仍为 1.0.4（Build 9）。范围为启动查询、历史维护、仪表盘投影、SFTP 列表、编辑搜索和终端高亮；保持原生外观、监控频率、连接生命周期及现有持久化/同步/凭据/协议格式，移动端仅做兼容构建。
+
+### 已完成的自动化验证
+
+以下为 SFTP 表格桥及编辑器撤销路由修复后的结果，取代该轮先前 547 项测试的基线；日志名称不代表其余真实窗口检查已经完成。
+
+- [x] `/tmp/serverdash-performance-postfix-strict.log` 和后续 `/tmp/serverdash-performance-native-final-strict.log` 的严格并发 `build-for-testing` 通过，第一方编译告警为 **0**。此结论针对编译告警，不表示布局夹具运行时没有诊断输出。
+- [x] macOS 全量测试执行 **557 项，跳过 1 项，失败 0 项**，用时 171.181 秒。日志 `/tmp/serverdash-performance-postfix-tests.log`；结果包 `/tmp/serverdash-performance-postfix-tests.xcresult`。跳过项为需显式设置 `SERVERDASH_RUN_LARGE_BENCHMARKS=1` 的大历史基准，已在单独的完整 Release 性能运行中通过。
+- [x] 最终原生表格/编辑器相关回归选择执行 **33 项，失败 0 项**，用时 7.413 秒，见 `/tmp/serverdash-performance-native-final-regression.log`。这些属于普通 XCTest，不是 XCUI 运行通过。
+- [x] 通用 macOS Release、iOS Simulator Release 与无签名 iOS Device 兼容构建通过，日志分别为 `/tmp/serverdash-performance-postfix-macos-release.log`、`/tmp/serverdash-performance-postfix-ios-simulator.log`、`/tmp/serverdash-performance-postfix-ios-device.log`。`/tmp/serverdash-performance-postfix-release-verification.log` 确认通用架构、动态链接路径和 `LC_RPATH` 检查通过。
+- [x] `/tmp/serverdash-performance-postfix-generate-check.log` 确认生成工程、分支基线、版本及 RDP 缓存有效，开发检查告警为 0。
+- [x] 同机器、同工具链、同 Release 优化配置下完成旧算法回放与新实现的计算热点对照：完整性能测试 **31 项全部通过**，交互预热 3 次、采样 30 次，启动采样 10 次。夹具含 100/1,000 主机、10,000 文件、10,000/100,000 历史样本、1.3M/约 8 MiB 文本及 1/4/16 终端面板。各配对计算热点 P95 降幅均达到 30%；具体中位数、P95、主线程范围、内存口径及原始结果见 [性能验收记录](MAC_PERFORMANCE_QA.md)。计算结果不能替代实际窗口耗时。
+
+### SFTP 原生窗口基准及采样
+
+此前真实 `.macqa` SFTP 窗口出现行高/尺寸反馈循环：`/tmp/serverdash-performance-qa-hang.sample.txt` 于 15:20:36（+0800）记录主线程反复进入 `NSTableView.setRowHeight` 与行框更新，物理占用及峰值均为 **2.9 GB**。表格桥随后已修复。2026-09-25 的自动行高问题、对应固定行高改动及当时窗口耗时仍仅作历史证据，不能替代本轮复验。
+
+- [x] 在 1440×900、浅色、10,000 项文件的真实隔离 Release QA 窗口完成搜索/清除基准，两侧均为预热 3 次后测量 30 次。[ui-baseline.json](Performance/2026-09-27/ui-baseline.json) 保留源文件的全部 33 个原始样本，统计时排除最前 3 次；[ui-optimized.json](Performance/2026-09-27/ui-optimized.json) 的源文件已排除预热，只含 30 次。两份记录保留原始顺序、来源哈希及统一的测量范围。
+- 搜索 CUA/AX 中位数 **1066.5 → 1382.5 ms，变慢 29.6%**；P95 **1479 → 1489 ms，变慢 0.7%**。清除搜索中位数 **1997 → 5838 ms，变慢 192.3%**；P95 **6034 → 6262 ms，变慢 3.8%**。两次运行都从早期较低延迟逐步进入后段约 6 秒的清除/完整辅助功能快照阶段，新运行后段占比更高。**这组实际交互结果不支持原生界面提速的结论。** 它包含 CUA 调度与完整 AX 树读取，不能直接解释为 App 主线程或事件到画面的耗时，也不能单凭它判定稳定的主线程退化。
+- [x] `/tmp/serverdash-performance-optimized-interaction.sample.txt` 以 10 ms 间隔采样 120 秒，实际操作 epoch **1790500120584–1790500151755**（17:08:40.584–17:09:11.755 +0800）位于从 17:07:42.263 开始的采样窗口内。主线程 10,747 个样本中最大的分支为事件循环等待（8,430 个），主要活动分支为辅助功能层级调用；该次实际操作采样中**未观察到此前 rowHeight/尺寸递归循环**。这不等价于完整长任务轨迹或全部窗口矩阵通过。
+- 基线活动采样 `/tmp/serverdash-performance-baseline-active.sample.txt` 的峰值物理占用为 **184.4 MiB**，当前活动采样为 **194.3 MiB（增加 5.4%）**，当前占用为 174.5 MiB。它们是 QA App 进程采样，和性能测试的 XCTest 宿主累计峰值口径不同；不宣称内存下降。
+
+### 实际窗口与 XCUI 范围
+
+本轮重新运行了 ad-hoc 签名 QA Runner 的单项 smoke test，但 Runner 在启用 automation mode 时超时，**0 项通过、1 个初始化失败**，xcodebuild 退出码 **65**，测试操作持续 **80.882 秒（约 80.9 秒）**；测试方法没有执行。日志 `/tmp/serverdash-performance-xcui-smoke.log`、结果包 `/tmp/serverdash-performance-xcui-smoke.xcresult` 和退出码 `/tmp/serverdash-performance-xcui-smoke-exit.txt` 保留。XCUI runtime 继续标记为**未通过**；原生窗口 CUA、普通 XCTest 与构建通过分别记录，不作替代。
+
+- [x] 仪表盘、SFTP 实际窗口覆盖 900×620 / 1440×900 浅深色。刷新入口、搜索/路径焦点、长中文和表头首行可见；SFTP 宽窄切换保留已选行，无匹配筛选清除选择及锚点，深位滚动在缩放后恢复。尺寸来自 QA 原生窗口预设，系统标题栏及弹出面板可能扩大截图边界。
+- [x] 编辑器实际窗口检查 900×620 浅色、1440×900 深色、长标签、⌘F/Return/Escape、中文文本输入和真正的 ⌘Z 撤销；1.3M / 8 MiB 文档的搜索可到达超过一万计数上限的末尾匹配。
+- [x] 1/4/16 合成终端面板在 900×620 深色、1440×900 浅色之间切换仍显示相同连接面板，⌘⌥I 能打开紧凑检查器。真实控制器/进程代次、本地及串口 PTY、marked text 不被改写由回归测试验证，不由截图推断。
+- [x] Apple-only tree 检查与 17/17 门禁夹具通过；生成工程一致性通过。
+
+实际中文输入法组合输入本轮未手工验证，中文粘贴不等价于 IME 验收；marked text 回归测试通过。分支交付、PR 检查与普通合并状态以关联 PR 为准；本轮不创建标签或 Release。
+
+宿主 automation mode 超时的根因仍未确诊，不能写成已确认的 TCC 拒绝；未绕过系统隐私权限。实际 VoiceOver 朗读、实体设备与真实远端服务互通也不在本轮已完成项目中。

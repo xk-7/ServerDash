@@ -419,6 +419,7 @@ private final class WorkbenchFixtureContainerRetention {
     }
 
     func testShutdownProgressSheetAcrossWindowSizesInLightAndDark() async throws {
+        #if DEBUG
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         for dark in [false, true] {
             for size in [NSSize(width: 900, height: 620), NSSize(width: 1440, height: 900), NSSize(width: 1920, height: 1080)] {
@@ -471,6 +472,9 @@ private final class WorkbenchFixtureContainerRetention {
                 XCTAssertFalse(panel.isVisible)
             }
         }
+        #else
+        throw XCTSkip("Shutdown panel inspection is available only through the Debug-only fixture hook.")
+        #endif
     }
 
     private func fixtureApp() -> AppState {

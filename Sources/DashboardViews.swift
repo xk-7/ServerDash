@@ -21,14 +21,15 @@ struct DashboardOverviewView: View {
     let onOpenTerminal: (ServerRecord) -> Void
     let onAdd: () -> Void
 
-    private func query(catalog: DashboardFilterCatalog) -> ServerBrowserQuery {
-        ServerBrowserQuery(
+    private func query(catalog: DashboardFilterCatalog) -> MachineBrowserQuery {
+        MachineBrowserQuery(
             search: searchText,
             group: catalog.group(id: selectedGroupID)?.name ?? "",
-            includedGroupNames: catalog.includedGroupNames(id: selectedGroupID),
             tag: catalog.tag(id: selectedTagID)?.name ?? "",
-            sort: ServerBrowserSort(rawValue: sortRawValue) ?? .name,
-            monitoring: ServerMonitorFilter(rawValue: monitoringRawValue) ?? .all
+            monitoring: ServerMonitorFilter(rawValue: monitoringRawValue)?.rawValue
+                ?? ServerMonitorFilter.all.rawValue,
+            sort: ServerBrowserSort(rawValue: sortRawValue)?.rawValue
+                ?? ServerBrowserSort.name.rawValue
         )
     }
 
@@ -44,22 +45,19 @@ struct DashboardOverviewView: View {
     var body: some View {
         GeometryReader { geometry in
             let metrics = MacWorkspaceMetrics(size: geometry.size)
-            let items = servers.map { server in
-                MachineBrowserItem(
-                    id: server.id.uuidString, name: server.displayName, address: server.host,
-                    group: ServerBrowserQuery.effectiveGroupName(server.groupName),
-                    tags: server.tags, notes: server.notes, kind: "SSH",
-                    createdAt: server.createdAt, monitoringEnabled: server.enableDashboardMonitor
-                )
-            }
+            let inputs = servers.map { DashboardServerMetadataInput(server: $0) }
             let groupItems = groups.map { MachineBrowserGroup(id: $0.id, name: $0.name, parentID: $0.parentID) }
-            let projection = projectionCache.resolve(items: items, groups: groupItems)
-            let catalog = DashboardFilterCatalog(
-                projection: projection, items: items,
-                tags: tags.map { DashboardCatalogTag(id: $0.id, name: $0.name) }
+            let result = projectionCache.resolveDashboard(
+                inputs: inputs,
+                groups: groupItems,
+                tags: tags.map { DashboardCatalogTag(id: $0.id, name: $0.name) },
+                query: { self.query(catalog: $0) }
             )
-            let query = query(catalog: catalog)
-            let visibleServers = query.apply(to: servers)
+            let catalog = result.catalog
+            let resolvedQuery = result.query
+            let visibleServers = result.indices.compactMap { index in
+                servers.indices.contains(index) ? servers[index] : nil
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
                     AppleWorkspaceHeader(
@@ -106,7 +104,7 @@ struct DashboardOverviewView: View {
                             Text("服务器概览")
                                 .font(.headline)
                                 .accessibilityAddTraits(.isHeader)
-                            if query.hasFilters {
+                            if resolvedQuery.hasFilters {
                                 Text("\(DisplayFormat.integer(visibleServers.count)) / \(DisplayFormat.integer(servers.count)) 台")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
@@ -302,7 +300,7 @@ private struct DashboardCompactFilters: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.xs) {
-            AppleSearchField(prompt: "搜索名称、地址、标签或备注（空格组合）", text: $search)
+            AppleSearchField(prompt: "搜索名称、地址、用户、标签或备注（空格组合）", text: $search)
                 .frame(maxWidth: .infinity)
 
             HStack {

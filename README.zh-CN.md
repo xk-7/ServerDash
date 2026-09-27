@@ -239,6 +239,8 @@ Mac 日常构建和测试统一通过包装脚本：
 ./Scripts/macos-dev.sh test -only-testing:ServerDashTests
 ```
 
+运行 `./Scripts/benchmark-macos.sh` 可测量隔离 Release 性能夹具（100／1,000 主机、10,000 文件、历史及编辑器／终端搜索）。[性能验收记录](Docs/MAC_PERFORMANCE_QA.md)说明各项计时范围；数据计算基准不替代真实窗口交互验收。
+
 包装脚本和 Xcode 都使用共享 Scheme。不要直接运行
 `xcodebuild -target ServerDash`，因为 Target 入口会绕过负责生成本地
 XCFramework 的 Scheme pre-action；自定义命令行也必须使用 `-scheme ServerDash`。

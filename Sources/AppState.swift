@@ -767,9 +767,155 @@ enum AppShutdownCoordinator {
 }
 
 @MainActor
+private struct AppStartupConnectionCatalog {
+    private let routesByServerID: [UUID: [ConnectionRouteRecord]]?
+    private let advancedByServerID: [UUID: SSHAdvancedSettingsDraft]
+
+    init(context: ModelContext) {
+        do {
+            var grouped: [UUID: [ConnectionRouteRecord]] = [:]
+            for record in try context.fetch(FetchDescriptor<ConnectionRouteRecord>()) {
+                guard let serverID = record.serverID else { continue }
+                grouped[serverID, default: []].append(record)
+            }
+            routesByServerID = grouped
+        } catch {
+            routesByServerID = nil
+        }
+        do {
+            advancedByServerID = Dictionary(
+                try context.fetch(FetchDescriptor<SSHAdvancedSettingsRecord>()).map {
+                    ($0.serverID, $0.settings)
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
+        } catch {
+            advancedByServerID = [:]
+        }
+    }
+
+    func config(
+        for server: ServerRecord,
+        cached: ServerConnectionConfig?
+    ) -> ServerConnectionConfig {
+        var config = cached ?? server.connectionConfig
+        if let routesByServerID {
+            config.route = ConnectionConfigResolver.persistedRoute(
+                for: server.id,
+                routes: routesByServerID[server.id] ?? []
+            )
+        } else {
+            // Preserve the existing fail-closed behavior when route storage cannot be read.
+            config.route = nil
+        }
+        if let advanced = advancedByServerID[server.id] {
+            config.advancedSettings = advanced
+            config.connectTimeout = TimeInterval(advanced.connectTimeout)
+        }
+        return config
+    }
+}
+
+enum HistoryHydrationPriority: Int {
+    case background
+    case visible
+    case selected
+}
+
+struct HistoryHydrationQueue {
+    private var priorities: [UUID: HistoryHydrationPriority] = [:]
+    private var order: [UUID: Int] = [:]
+    private var inFlight: Set<UUID> = []
+    private var deferredAfterFailure: Set<UUID> = []
+    private(set) var hydrated: Set<UUID> = []
+    private var nextOrder = 0
+
+    var hasPending: Bool { !priorities.isEmpty }
+
+    mutating func enqueue(
+        serverIDs: [UUID],
+        priority: HistoryHydrationPriority
+    ) {
+        for serverID in serverIDs where
+            !hydrated.contains(serverID) && !inFlight.contains(serverID) {
+            if order[serverID] == nil {
+                order[serverID] = nextOrder
+                nextOrder += 1
+            }
+            if priorities[serverID]
+                .map({ $0.rawValue < priority.rawValue }) ?? true {
+                priorities[serverID] = priority
+            }
+        }
+    }
+
+    mutating func nextBatch(limit: Int) -> [UUID] {
+        let available = priorities.keys.filter { !inFlight.contains($0) }
+        let ready = available.filter { !deferredAfterFailure.contains($0) }
+        let retryingFailures = ready.isEmpty
+        let sorted = (retryingFailures ? available : ready)
+            .sorted { lhs, rhs in
+                if retryingFailures {
+                    return order[lhs, default: .max] < order[rhs, default: .max]
+                }
+                let leftPriority = priorities[lhs] ?? .background
+                let rightPriority = priorities[rhs] ?? .background
+                if leftPriority != rightPriority {
+                    return leftPriority.rawValue > rightPriority.rawValue
+                }
+                return order[lhs, default: .max] < order[rhs, default: .max]
+            }
+        // A failed batch is retried one host at a time. One unreadable host can
+        // then rotate behind the others instead of poisoning the same batch.
+        let batch = Array(sorted.prefix(retryingFailures ? 1 : max(1, limit)))
+        inFlight.formUnion(batch)
+        return batch
+    }
+
+    mutating func complete(_ serverIDs: [UUID], succeeded: Bool) {
+        inFlight.subtract(serverIDs)
+        if succeeded {
+            for serverID in serverIDs {
+                priorities[serverID] = nil
+                order[serverID] = nil
+                deferredAfterFailure.remove(serverID)
+            }
+            hydrated.formUnion(serverIDs)
+        } else {
+            for serverID in serverIDs where priorities[serverID] != nil {
+                deferredAfterFailure.insert(serverID)
+                order[serverID] = nextOrder
+                nextOrder += 1
+            }
+        }
+    }
+
+    mutating func remove(_ serverID: UUID) {
+        priorities[serverID] = nil
+        order[serverID] = nil
+        inFlight.remove(serverID)
+        deferredAfterFailure.remove(serverID)
+        hydrated.remove(serverID)
+    }
+
+    mutating func cancel() {
+        priorities.removeAll()
+        order.removeAll()
+        inFlight.removeAll()
+        deferredAfterFailure.removeAll()
+    }
+}
+
+@MainActor
 final class AppState: ObservableObject {
     @Published var selectedServerID: UUID? {
         didSet {
+            if let selectedServerID {
+                enqueueHistoryHydration(
+                    serverIDs: [selectedServerID],
+                    priority: .selected
+                )
+            }
             Task {
                 await monitoringCoordinator.setSelectedServerID(selectedServerID)
             }
@@ -808,10 +954,16 @@ final class AppState: ObservableObject {
     private var serverRecords: [UUID: ServerRecord] = [:]
     private var runtimeStates: [UUID: ServerRuntimeState] = [:]
     private var historyBootstrappedServerIDs: Set<UUID> = []
+    private var historyHydrationQueue = HistoryHydrationQueue()
+    private var historyHydrationTask: Task<Void, Never>?
+    private var historyHydrationFailureCount = 0
     private let trustCoordinator: HostTrustCoordinator
     private let portForwardSupervisor: PortForwardSupervisor
     private let monitoringClock: any MonitoringClock
-    private var monitoringHistory: MonitoringHistoryRepository?
+    private(set) var monitoringHistoryService: MacMonitoringHistoryService?
+    private var monitoringHistory: MonitoringHistoryRepository? {
+        monitoringHistoryService?.repository
+    }
     private let connectivityMonitor = NWPathMonitor()
     private lazy var monitoringCoordinator = MonitoringCoordinator(
         clock: monitoringClock
@@ -841,13 +993,15 @@ final class AppState: ObservableObject {
         monitoringClock: any MonitoringClock = SystemMonitoringClock(),
         portForwardSupervisor: PortForwardSupervisor = .shared,
         terminalRegistry: TerminalSessionRegistry? = nil,
-        fileServicesEnabled: Bool = true
+        fileServicesEnabled: Bool = true,
+        monitoringHistoryService: MacMonitoringHistoryService? = nil
     ) {
         self.terminalRegistry = terminalRegistry ?? TerminalSessionRegistry()
         self.fileServicesEnabled = fileServicesEnabled
         self.trustCoordinator = trustCoordinator
         self.monitoringClock = monitoringClock
         self.portForwardSupervisor = portForwardSupervisor
+        self.monitoringHistoryService = monitoringHistoryService
         let savedInterval = UserDefaults.standard.double(forKey: "refreshInterval")
         refreshInterval = savedInterval == 0 && !UserDefaults.standard.bool(forKey: "refreshIntervalConfigured")
             ? 5
@@ -863,8 +1017,12 @@ final class AppState: ObservableObject {
         connectivityMonitor.start(
             queue: DispatchQueue(label: "com.serverdash.monitoring.connectivity")
         )
-        Task {
-            await monitoringCoordinator.setLowPowerMode(
+        monitoringHistoryService?.onError = { [weak self] _ in
+            self?.reportHistoryFailure()
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.monitoringCoordinator.setLowPowerMode(
                 ProcessInfo.processInfo.isLowPowerModeEnabled
             )
         }
@@ -875,29 +1033,68 @@ final class AppState: ObservableObject {
     }
 
     func bootstrap(servers: [ServerRecord], context: ModelContext) {
+        let interval = PerformanceTrace.begin(.appBootstrap)
+        defer { PerformanceTrace.end(interval) }
+        guard !didShutdown else { return }
         if fileServicesEnabled { DirectorySyncStore.shared.configure(container: context.container) }
-        if monitoringHistory == nil {
-            monitoringHistory = MonitoringHistoryRepository(
-                context: context,
+        if monitoringHistoryService == nil {
+            monitoringHistoryService = MacMonitoringHistoryService(
+                container: context.container,
                 clock: monitoringClock
             )
+            monitoringHistoryService?.onError = { [weak self] _ in
+                self?.reportHistoryFailure()
+            }
         }
-        for server in servers where runtimeStates[server.id] == nil {
-            initializeRuntime(for: server, synchronizeMonitoring: false)
-        }
+        let connectionCatalog = AppStartupConnectionCatalog(context: context)
+        var startupGaps: [MonitoringStartupGapRequest] = []
+        var startupGapServerIDs: Set<UUID> = []
         for server in servers {
             serverRecords[server.id] = server
-            guard historyBootstrappedServerIDs.insert(server.id).inserted else { continue }
+            let config = connectionCatalog.config(
+                for: server,
+                cached: configs[server.id]
+            )
+            if runtimeStates[server.id] == nil {
+                initializeRuntime(
+                    for: server,
+                    resolvedConfig: config,
+                    synchronizeMonitoring: false
+                )
+            } else {
+                configs[server.id] = config
+            }
+            if !historyBootstrappedServerIDs.contains(server.id),
+               startupGapServerIDs.insert(server.id).inserted {
+                startupGaps.append(
+                    MonitoringStartupGapRequest(
+                        serverID: server.id,
+                        lastSuccessfulAt: server.lastSuccessfulMonitorAt,
+                        refreshInterval: refreshInterval
+                    )
+                )
+            }
+        }
+        if !startupGaps.isEmpty {
             do {
-                try monitoringHistory?.reconcileStartupGap(
-                    serverID: server.id,
-                    lastSuccessfulAt: server.lastSuccessfulMonitorAt,
-                    refreshInterval: refreshInterval,
+                try monitoringHistory?.reconcileStartupGaps(
+                    startupGaps,
                     at: monitoringClock.now()
                 )
+                historyBootstrappedServerIDs.formUnion(startupGapServerIDs)
             } catch {
                 reportHistoryFailure()
             }
+        }
+        enqueueHistoryHydration(
+            serverIDs: servers.map(\.id),
+            priority: .background
+        )
+        if let selectedServerID {
+            enqueueHistoryHydration(
+                serverIDs: [selectedServerID],
+                priority: .selected
+            )
         }
         synchronizeMonitoringSchedule()
     }
@@ -906,13 +1103,29 @@ final class AppState: ObservableObject {
         for server: ServerRecord,
         synchronizeMonitoring: Bool = true
     ) {
+        initializeRuntime(
+            for: server,
+            resolvedConfig: connectionConfig(for: server),
+            synchronizeMonitoring: synchronizeMonitoring
+        )
+        enqueueHistoryHydration(
+            serverIDs: [server.id],
+            priority: .background
+        )
+    }
+
+    private func initializeRuntime(
+        for server: ServerRecord,
+        resolvedConfig: ServerConnectionConfig,
+        synchronizeMonitoring: Bool
+    ) {
         if fileServicesEnabled {
             let fileAccess = DesktopFileAccess(server: server, appState: self)
             DirectorySyncStore.shared.register(fileAccess)
             RemoteEditorStore.shared.register(fileAccess)
         }
         serverRecords[server.id] = server
-        configs[server.id] = connectionConfig(for: server)
+        configs[server.id] = resolvedConfig
         if runtimeStates[server.id] == nil {
             runtimeStates[server.id] = ServerRuntimeState(
                 serverID: server.id,
@@ -921,6 +1134,129 @@ final class AppState: ObservableObject {
         }
         if synchronizeMonitoring {
             synchronizeMonitoringSchedule()
+        }
+    }
+
+    /*
+     Startup history is intentionally hydrated after the first frame. The old
+     implementation synchronously fetched recent points once per host here,
+     which made bootstrap time grow with both host count and history size.
+     */
+    private func initialRenderState(for server: ServerRecord) -> ServerRenderState {
+        var initial = ServerRenderState()
+        initial.lastSuccessfulMonitorAt = server.lastSuccessfulMonitorAt
+        if let data = server.capabilitiesJSON.data(using: .utf8) {
+            initial.capabilities = try? JSONDecoder().decode(
+                ServerCapabilities.self,
+                from: data
+            )
+        }
+        return initial
+    }
+
+    private func enqueueHistoryHydration(
+        serverIDs: [UUID],
+        priority: HistoryHydrationPriority
+    ) {
+        guard !didShutdown else { return }
+        historyHydrationQueue.enqueue(
+            serverIDs: serverIDs,
+            priority: priority
+        )
+        startHistoryHydrationIfNeeded()
+    }
+
+    private func startHistoryHydrationIfNeeded() {
+        guard monitoringHistory != nil,
+              historyHydrationTask == nil,
+              historyHydrationQueue.hasPending,
+              !didShutdown else { return }
+        historyHydrationTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            let shouldRestart = await self?.drainHistoryHydrationQueue() ?? false
+            guard let self else { return }
+            historyHydrationTask = nil
+            if shouldRestart {
+                startHistoryHydrationIfNeeded()
+            }
+        }
+    }
+
+    /// A failed read keeps its original priority and waits before the caller
+    /// restarts the drain, avoiding both dropped work and a persistent-store spin.
+    private func drainHistoryHydrationQueue() async -> Bool {
+        while !Task.isCancelled, !didShutdown,
+              let repository = monitoringHistory,
+              historyHydrationQueue.hasPending {
+            let batch = historyHydrationQueue.nextBatch(limit: 12)
+            guard !batch.isEmpty else { break }
+            let owners = Dictionary(
+                uniqueKeysWithValues: batch.compactMap { serverID in
+                    runtimeStates[serverID].map { (serverID, $0) }
+                }
+            )
+            let loaded: [UUID: [MetricPoint]]
+            do {
+                loaded = try repository.recentMetricPoints(
+                    serverIDs: batch,
+                    limitPerServer: 120
+                )
+                historyHydrationQueue.complete(batch, succeeded: true)
+                historyHydrationFailureCount = 0
+                if monitoringHistoryError != nil {
+                    monitoringHistoryError = nil
+                }
+            } catch {
+                historyHydrationQueue.complete(batch, succeeded: false)
+                historyHydrationFailureCount += 1
+                if historyHydrationFailureCount == 1 {
+                    reportHistoryFailure()
+                }
+                let exponent = min(historyHydrationFailureCount - 1, 5)
+                let delaySeconds = min(30, 1 << exponent)
+                do {
+                    try await Task.sleep(for: .seconds(Double(delaySeconds)))
+                } catch {
+                    return false
+                }
+                return !Task.isCancelled && !didShutdown
+            }
+            guard !Task.isCancelled, !didShutdown else { return false }
+            for serverID in batch {
+                guard let owner = owners[serverID],
+                      runtimeStates[serverID] === owner else { continue }
+                var state = owner.renderState
+                let merged = Self.mergeHistory(
+                    persisted: loaded[serverID] ?? [],
+                    current: state.history,
+                    limit: 120
+                )
+                guard merged != state.history else { continue }
+                state.history = merged
+                publish(state, for: serverID)
+            }
+            await Task.yield()
+        }
+        return !Task.isCancelled && !didShutdown
+    }
+
+    private static func mergeHistory(
+        persisted: [MetricPoint],
+        current: [MetricPoint],
+        limit: Int
+    ) -> [MetricPoint] {
+        var byDate: [Date: MetricPoint] = [:]
+        for point in persisted { byDate[point.date] = point }
+        // Live points always win when a load races with a fresh monitor sample.
+        for point in current { byDate[point.date] = point }
+        return Array(
+            byDate.values.sorted { $0.date < $1.date }.suffix(max(1, limit))
+        )
+    }
+
+    func waitForHistoryHydration() async {
+        while let task = historyHydrationTask {
+            await task.value
         }
     }
 
@@ -992,6 +1328,10 @@ final class AppState: ObservableObject {
             initial: initialRenderState(for: server)
         )
         runtimeStates[server.id] = runtime
+        enqueueHistoryHydration(
+            serverIDs: [server.id],
+            priority: .background
+        )
         return runtime
     }
 
@@ -1013,23 +1353,6 @@ final class AppState: ObservableObject {
 
     func isStale(_ server: ServerRecord) -> Bool {
         runtime(for: server).renderState.isStale(refreshInterval: refreshInterval)
-    }
-
-    private func initialRenderState(for server: ServerRecord) -> ServerRenderState {
-        var initial = ServerRenderState()
-        initial.lastSuccessfulMonitorAt = server.lastSuccessfulMonitorAt
-        do {
-            initial.history = try monitoringHistory?.recentMetricPoints(serverID: server.id) ?? []
-        } catch {
-            reportHistoryFailure()
-        }
-        if let data = server.capabilitiesJSON.data(using: .utf8) {
-            initial.capabilities = try? JSONDecoder().decode(
-                ServerCapabilities.self,
-                from: data
-            )
-        }
-        return initial
     }
 
     private func runtimeState(for serverID: UUID) -> ServerRuntimeState {
@@ -1055,6 +1378,7 @@ final class AppState: ObservableObject {
     }
 
     func applyValidatedSnapshot(_ snapshot: ServerSnapshot, to server: ServerRecord) {
+        guard !didShutdown, !Task.isCancelled else { return }
         let interval = PerformanceTrace.begin(.monitorPublish)
         defer { PerformanceTrace.end(interval) }
         var state = runtime(for: server).renderState
@@ -1319,6 +1643,8 @@ final class AppState: ObservableObject {
         }
         configs[serverID] = nil
         serverRecords[serverID] = nil
+        historyBootstrappedServerIDs.remove(serverID)
+        historyHydrationQueue.remove(serverID)
         for (id, controller) in fileControllers where controller.server.id == serverID {
             controller.close(); fileControllers[id] = nil
         }
@@ -1335,9 +1661,19 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    private func beginShutdown() -> Bool {
+    func beginShutdownStateTransition() -> Bool {
         guard !didShutdown else { return false }
         didShutdown = true
+        historyHydrationTask?.cancel()
+        historyHydrationTask = nil
+        historyHydrationQueue.cancel()
+        historyHydrationFailureCount = 0
+        return true
+    }
+
+    @discardableResult
+    private func beginShutdown() -> Bool {
+        guard beginShutdownStateTransition() else { return false }
         RemoteEditorStore.shared.commitApplicationTermination()
         AIWorkspace.shared.stopAll()
         connectivityMonitor.cancel()
@@ -1392,6 +1728,7 @@ final class AppState: ObservableObject {
         let startedAt = Date()
         let deadline = started.advanced(by: timeout)
 
+        monitoringHistoryService?.cancelImmediately()
         workbenchSessions.beginShutdown()
         var shutdownFileControllers: [ObjectIdentifier: MacSFTPController] = [:]
         for controller in inspectorFileControllers.values {
@@ -1425,6 +1762,7 @@ final class AppState: ObservableObject {
         let workbenchSessions = self.workbenchSessions
         let directorySync = DirectorySyncStore.shared
         let monitoring = monitoringCoordinator
+        let history = monitoringHistoryService
         let tunnels = portForwardSupervisor
         let operations = [
             AppShutdownOperation(component: .interactiveSessions) { deadline in
@@ -1448,7 +1786,10 @@ final class AppState: ObservableObject {
                 await directorySync.shutdownAndDrain(until: deadline) ? .completed : .timedOut
             },
             AppShutdownOperation(component: .monitoring) { deadline in
-                await monitoring.stopAndDrain(until: deadline) ? .completed : .timedOut
+                async let collectorStopped = monitoring.stopAndDrain(until: deadline)
+                let historyStopped = await history?.stopAndDrain(until: deadline) ?? true
+                let stopped = await collectorStopped
+                return stopped && historyStopped ? .completed : .timedOut
             },
             AppShutdownOperation(component: .tunnels) { deadline in
                 await tunnels.shutdownAndDrain(until: deadline)
@@ -1468,6 +1809,7 @@ final class AppState: ObservableObject {
         )
 
         let cleanupStart = clock.now
+        monitoringHistoryService?.cancelImmediately()
         KeyMaterialStore.cleanupAll()
         RouteKeyMaterialStore.cleanupAll()
         let cleanup = ShutdownComponentResult(
@@ -1513,6 +1855,7 @@ final class AppState: ObservableObject {
     }
 
     func setMonitoringSleeping(_ sleeping: Bool) {
+        guard !didShutdown else { return }
         do {
             if sleeping {
                 try monitoringHistory?.beginLifecycleGap(
@@ -1530,12 +1873,14 @@ final class AppState: ObservableObject {
         } catch {
             reportHistoryFailure()
         }
-        Task {
-            await monitoringCoordinator.setSleeping(sleeping)
+        Task { [weak self] in
+            guard let self, !self.didShutdown else { return }
+            await self.monitoringCoordinator.setSleeping(sleeping)
         }
     }
 
     func setMonitoringNetworkAvailable(_ available: Bool) {
+        guard !didShutdown else { return }
         do {
             if available {
                 try monitoringHistory?.endLifecycleGap(
@@ -1553,8 +1898,9 @@ final class AppState: ObservableObject {
         } catch {
             reportHistoryFailure()
         }
-        Task {
-            await monitoringCoordinator.setNetworkAvailable(available)
+        Task { [weak self] in
+            guard let self, !self.didShutdown else { return }
+            await self.monitoringCoordinator.setNetworkAvailable(available)
         }
     }
 
@@ -1567,6 +1913,12 @@ final class AppState: ObservableObject {
     }
 
     func setMonitorVisible(_ visible: Bool, serverID: UUID) {
+        if visible {
+            enqueueHistoryHydration(
+                serverIDs: [serverID],
+                priority: .visible
+            )
+        }
         Task {
             await monitoringCoordinator.setVisible(visible, serverID: serverID)
         }
@@ -1623,7 +1975,8 @@ final class AppState: ObservableObject {
         serverID: UUID,
         origin: MonitoringRequestOrigin
     ) async -> Bool {
-        guard let server = serverRecords[serverID],
+        guard !didShutdown, !Task.isCancelled,
+              let server = serverRecords[serverID],
               origin == .manual || server.enableDashboardMonitor else {
             return false
         }
@@ -1631,6 +1984,7 @@ final class AppState: ObservableObject {
     }
 
     private func collect(_ server: ServerRecord) async -> Bool {
+        guard !didShutdown, !Task.isCancelled else { return false }
         var startingState = runtime(for: server).renderState
         startingState.isRefreshing = true
         if startingState.status == .unknown {
@@ -1645,6 +1999,11 @@ final class AppState: ObservableObject {
                 source: .monitoring
             ) {
                 try await SSHMonitoringService.collect(config)
+            }
+            guard !didShutdown else { return false }
+            guard !Task.isCancelled else {
+                setRefreshing(false, serverID: server.id)
+                return false
             }
             if PrivacySettings.disableLocationLookup {
                 snapshot.geoLocation = nil
@@ -1683,6 +2042,7 @@ final class AppState: ObservableObject {
             eventLog.append(serverID: server.id, module: .monitoring, message: "监控采集成功")
             return true
         } catch {
+            guard !didShutdown else { return false }
             if Task.isCancelled || (error as? ConnectionError) == .cancelled {
                 setRefreshing(false, serverID: server.id)
                 return false

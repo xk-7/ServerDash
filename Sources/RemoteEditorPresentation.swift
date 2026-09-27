@@ -45,22 +45,87 @@ enum EditorSearchFeedback: Equatable, Sendable {
         }
     }
 
-    /// Bounded, cancellable counting keeps large remote files off the UI thread.
     static func scan(text: String, query: String, selectedLocation: Int) throws -> Self {
-        guard !query.isEmpty else { return .idle }
+        try EditorSearchIndex.build(text: text, query: query, revision: 0).feedback(at: selectedLocation)
+    }
+}
+
+/// Immutable document-version/query snapshot. Cursor movement is a binary search,
+/// not another document scan. A capped index never limits search navigation.
+struct EditorSearchIndex: Sendable {
+    static let maximumMatches = 10_000
+    let revision: UInt64
+    let query: String
+    let ranges: [NSRange]
+    let hasMore: Bool
+
+    static func build(text: String, query: String, revision: UInt64) throws -> Self {
+        let interval = PerformanceTrace.begin(.editorSearch)
+        defer { PerformanceTrace.end(interval) }
+        guard !query.isEmpty else { return .init(revision: revision, query: query, ranges: [], hasMore: false) }
         let value = text as NSString
-        var cursor = 0, count = 0, current = 0
+        var cursor = 0, matches: [NSRange] = []
         while cursor < value.length {
-            if count.isMultiple(of: 128) { try Task.checkCancellation() }
+            if matches.count.isMultiple(of: 128) { try Task.checkCancellation() }
             let match = value.range(of: query, options: .caseInsensitive,
                                     range: NSRange(location: cursor, length: value.length - cursor))
             guard match.location != NSNotFound else { break }
-            count += 1
-            if match.location == selectedLocation { current = count }
+            if matches.count == maximumMatches {
+                return .init(revision: revision, query: query, ranges: matches, hasMore: true)
+            }
+            matches.append(match)
             cursor = max(NSMaxRange(match), cursor + 1)
-            if count == 10_000 { return .matches(current: current, total: count, hasMore: true) }
         }
-        return count == 0 ? .noMatches : .matches(current: current, total: count, hasMore: false)
+        try Task.checkCancellation()
+        return .init(revision: revision, query: query, ranges: matches, hasMore: false)
+    }
+
+    func feedback(at location: Int) -> EditorSearchFeedback {
+        guard !query.isEmpty else { return .idle }
+        guard !ranges.isEmpty else { return .noMatches }
+        let index = lowerBound(location)
+        let current = index < ranges.count && ranges[index].location == location ? index + 1 : 0
+        return .matches(current: current, total: ranges.count, hasMore: hasMore)
+    }
+
+    /// nil means a directional background lookup is required, including the
+    /// uncached tail and backwards searches that may find overlapping matches.
+    func cachedMatch(from selection: NSRange, backwards: Bool) -> NSRange? {
+        guard !ranges.isEmpty else { return nil }
+        if backwards { return nil }
+        let selectedIndex = lowerBound(selection.location)
+        guard selection == NSRange(location: 0, length: 0)
+                || (selectedIndex < ranges.count && ranges[selectedIndex] == selection) else { return nil }
+        let index = lowerBound(NSMaxRange(selection))
+        if index < ranges.count { return ranges[index] }
+        return hasMore ? nil : ranges.first
+    }
+
+    private func lowerBound(_ location: Int) -> Int {
+        var low = 0, high = ranges.count
+        while low < high {
+            let middle = (low + high) / 2
+            if ranges[middle].location < location { low = middle + 1 } else { high = middle }
+        }
+        return low
+    }
+
+    /// Kept separate from the bounded counter: every match remains reachable.
+    /// NSString preserves the existing case-insensitive UTF-16/overlap semantics.
+    static func directionalMatch(text: String, query: String, selection: NSRange, backwards: Bool) throws -> NSRange? {
+        try Task.checkCancellation()
+        guard !query.isEmpty else { return nil }
+        let interval = PerformanceTrace.begin(.editorSearch)
+        defer { PerformanceTrace.end(interval) }
+        let value = text as NSString
+        let start = min(value.length, max(0, backwards ? selection.location : NSMaxRange(selection)))
+        let scope = backwards ? NSRange(location: 0, length: start) : NSRange(location: start, length: value.length - start)
+        var options: NSString.CompareOptions = [.caseInsensitive]
+        if backwards { options.insert(.backwards) }
+        var result = value.range(of: query, options: options, range: scope)
+        if result.location == NSNotFound { result = value.range(of: query, options: options) }
+        try Task.checkCancellation()
+        return result.location == NSNotFound ? nil : result
     }
 }
 
@@ -96,6 +161,27 @@ enum EditorSyntax {
     // A window-level undo manager would mix edits from different document tabs.
     private let documentUndoManager = UndoManager()
     override var undoManager: UndoManager? { documentUndoManager }
+
+    // NSTextView records edits in this manager, but does not implement undo:/redo:.
+    // Without these responders, a non-NSDocument hosting window handles the menu
+    // action using its unrelated (empty) manager and disables the native commands.
+    @objc func undo(_ sender: Any?) {
+        guard isEditable, documentUndoManager.canUndo else { return }
+        documentUndoManager.undo()
+    }
+
+    @objc func redo(_ sender: Any?) {
+        guard isEditable, documentUndoManager.canRedo else { return }
+        documentUndoManager.redo()
+    }
+
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(undo(_:)): return isEditable && documentUndoManager.canUndo
+        case #selector(redo(_:)): return isEditable && documentUndoManager.canRedo
+        default: return super.validateMenuItem(menuItem)
+        }
+    }
 }
 
 /// Owned by the draft store, so switching tabs or dismissing/reopening the sheet
@@ -112,6 +198,14 @@ enum EditorSyntax {
     private var pendingExternalText: String?
     private var highlightTask: Task<Void, Never>?
     private var searchFeedbackTask: Task<Void, Never>?
+    private var searchNavigationTask: Task<Void, Never>?
+    private var searchIndex: EditorSearchIndex?
+    private var indexingKey: SearchKey?
+    private var navigationGeneration: UInt64 = 0
+    private var initialSearchPending = false
+    private var activeNavigationStep: Int?
+    private(set) var searchIndexBuildCount = 0
+    private struct SearchKey: Equatable { let revision: UInt64; let query: String }
     private var hasHighlights = false
     private var lastSearch = ""
     private var lastSearchStep = 0
@@ -158,14 +252,17 @@ enum EditorSyntax {
             return NSValue(range: NSRange(location: start, length: min(range.length, lineIndex.length - start)))
         }
         scroll.contentView.scroll(to: origin); scroll.reflectScrolledClipView(scroll.contentView)
-        revision &+= 1; changedMetrics(); scheduleSearchFeedback(); scheduleHighlight()
+        revision &+= 1; searchNavigationTask?.cancel(); activeNavigationStep = nil; navigationGeneration &+= 1
+        changedMetrics(); scheduleSearchFeedback(); scheduleHighlight()
     }
     func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters), !applyingExternal else { return }
         let oldRange = NSRange(location: editedRange.location, length: editedRange.length - delta)
         let replacement = (textStorage.string as NSString).substring(with: editedRange)
         lineIndex.replace(oldRange, with: replacement); revision &+= 1
-        highlightTask?.cancel(); changedMetrics()
+        highlightTask?.cancel(); searchFeedbackTask?.cancel(); indexingKey = nil
+        searchNavigationTask?.cancel(); activeNavigationStep = nil; navigationGeneration &+= 1
+        changedMetrics()
     }
     func textDidChange(_ notification: Notification) {
         modelText = editor.string; onTextChange?(modelText)
@@ -175,7 +272,12 @@ enum EditorSyntax {
     }
     func textViewDidChangeSelection(_ notification: Notification) {
         guard !desiredSearch.isEmpty, !editor.hasMarkedText() else { return }
-        scheduleSearchFeedback()
+        if activeNavigationStep != nil {
+            // A user selection made while background search runs wins over its result.
+            searchNavigationTask?.cancel(); navigationGeneration &+= 1; activeNavigationStep = nil
+            initialSearchPending = false; lastSearchStep = desiredSearchStep
+        }
+        publishSearchFeedback()
     }
     private func changedMetrics() {
         scroll.verticalRulerView?.needsDisplay = true
@@ -204,41 +306,84 @@ enum EditorSyntax {
         }
     }
     private func applySearchIfNeeded() {
-        guard !editor.hasMarkedText(), lastSearch != desiredSearch || lastSearchStep != desiredSearchStep else { return }
-        let changed = lastSearch != desiredSearch, backwards = desiredSearchStep < lastSearchStep
-        lastSearch = desiredSearch; lastSearchStep = desiredSearchStep
-        guard !desiredSearch.isEmpty else { scheduleSearchFeedback(); return }
-        let value = editor.string as NSString, selection = editor.selectedRange()
-        let start = changed ? 0 : min(value.length, backwards ? selection.location : NSMaxRange(selection))
-        let scope = backwards && !changed ? NSRange(location: 0, length: start) : NSRange(location: start, length: value.length - start)
-        var options: NSString.CompareOptions = [.caseInsensitive]
-        if backwards { options.insert(.backwards) }
-        var match = value.range(of: desiredSearch, options: options, range: scope)
-        if match.location == NSNotFound { match = value.range(of: desiredSearch, options: options) }
-        if match.location != NSNotFound { editor.setSelectedRange(match); editor.scrollRangeToVisible(match) }
+        guard !editor.hasMarkedText() else { return }
+        let changed = lastSearch != desiredSearch
+        if changed {
+            searchNavigationTask?.cancel(); navigationGeneration &+= 1; activeNavigationStep = nil
+            lastSearch = desiredSearch; lastSearchStep = desiredSearchStep
+            initialSearchPending = !desiredSearch.isEmpty
+        }
         scheduleSearchFeedback()
+        guard !desiredSearch.isEmpty, initialSearchPending || lastSearchStep != desiredSearchStep,
+              activeNavigationStep != desiredSearchStep else { return }
+        searchNavigationTask?.cancel(); navigationGeneration &+= 1
+        let generation = navigationGeneration, expectedRevision = revision, query = desiredSearch
+        let step = desiredSearchStep, delta = step - lastSearchStep, initial = initialSearchPending
+        let selection = editor.selectedRange(), text = editor.string
+        let cached = searchIndex.flatMap { $0.revision == expectedRevision && $0.query == query ? $0 : nil }
+        activeNavigationStep = step
+        searchNavigationTask = Task { [weak self] in
+            do {
+                let work = Task.detached(priority: .userInitiated) {
+                    var match: NSRange? = initial
+                        ? try EditorSearchIndex.directionalMatch(text: text, query: query,
+                                                               selection: NSRange(location: 0, length: 0), backwards: false)
+                        : selection
+                    for _ in 0..<abs(delta) {
+                        try Task.checkCancellation()
+                        guard let current = match else { break }
+                        if let hit = cached?.cachedMatch(from: current, backwards: delta < 0) { match = hit }
+                        else { match = try EditorSearchIndex.directionalMatch(text: text, query: query, selection: current, backwards: delta < 0) }
+                    }
+                    return match
+                }
+                let match = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+                try Task.checkCancellation()
+                guard let self, self.navigationGeneration == generation, self.revision == expectedRevision,
+                      self.desiredSearch == query, !self.editor.hasMarkedText() else { return }
+                self.activeNavigationStep = nil; self.initialSearchPending = false; self.lastSearchStep = step
+                if let match { self.editor.setSelectedRange(match); self.editor.scrollRangeToVisible(match) }
+                self.publishSearchFeedback()
+            } catch { /* Superseded searches cannot move the cursor. */ }
+        }
+    }
+    private func publishSearchFeedback() {
+        guard !editor.hasMarkedText() else { return }
+        guard !desiredSearch.isEmpty else { onSearchFeedbackChange?("", .idle); return }
+        guard let searchIndex, searchIndex.revision == revision, searchIndex.query == desiredSearch else { return }
+        onSearchFeedbackChange?(desiredSearch, searchIndex.feedback(at: editor.selectedRange().location))
     }
     private func scheduleSearchFeedback() {
-        searchFeedbackTask?.cancel()
-        guard !desiredSearch.isEmpty else { onSearchFeedbackChange?("", .idle); return }
-        let expectedRevision = revision, query = desiredSearch
-        let text = editor.string, selectedLocation = editor.selectedRange().location
+        let key = SearchKey(revision: revision, query: desiredSearch)
+        if let searchIndex, searchIndex.revision == key.revision, searchIndex.query == key.query {
+            publishSearchFeedback(); return
+        }
+        guard indexingKey != key else { return }
+        searchFeedbackTask?.cancel(); indexingKey = nil
+        guard !key.query.isEmpty else { searchIndex = nil; onSearchFeedbackChange?("", .idle); return }
+        indexingKey = key
         searchFeedbackTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(80))
+                guard let self else { return }
+                defer { if self.indexingKey == key { self.indexingKey = nil } }
+                guard self.revision == key.revision, !self.editor.hasMarkedText() else { return }
+                let text = self.editor.string
+                self.searchIndexBuildCount += 1
                 let work = Task.detached(priority: .utility) {
-                    try EditorSearchFeedback.scan(text: text, query: query, selectedLocation: selectedLocation)
+                    try EditorSearchIndex.build(text: text, query: key.query, revision: key.revision)
                 }
-                let feedback = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+                let index = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
                 try Task.checkCancellation()
-                guard let self, self.revision == expectedRevision,
-                      self.desiredSearch == query, !self.editor.hasMarkedText() else { return }
-                self.onSearchFeedbackChange?(query, feedback)
+                guard self.revision == key.revision, self.desiredSearch == key.query, !self.editor.hasMarkedText() else { return }
+                self.searchIndex = index; self.indexingKey = nil
+                self.publishSearchFeedback()
             } catch { /* A newer query or edit superseded this result. */ }
         }
     }
     func invalidate() {
-        highlightTask?.cancel(); searchFeedbackTask?.cancel()
+        highlightTask?.cancel(); searchFeedbackTask?.cancel(); searchNavigationTask?.cancel()
+        navigationGeneration &+= 1; searchIndex = nil; indexingKey = nil
         onTextChange = nil; onMetricsChange = nil; onSearchFeedbackChange = nil
     }
 }

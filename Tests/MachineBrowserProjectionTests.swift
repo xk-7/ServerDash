@@ -18,12 +18,13 @@ final class MachineBrowserProjectionTests: XCTestCase {
 
     func testSearchCombinesFieldsAndPreservesProtocolAndMonitoringRules() {
         let items = [
-            item("1", name: "生产 API", group: "广州", tags: ["Blue"], kind: "SSH", monitoring: true),
+            item("1", name: "生产 API", username: "deploy", group: "广州", tags: ["Blue"], kind: "SSH", monitoring: true),
             item("2", name: "生产 API", group: "广州", tags: ["Blue"], kind: "RDP", monitoring: nil),
             item("3", name: "开发 API", group: "北京", tags: ["Green"], kind: "SSH", monitoring: false)
         ]
         let projection = MachineBrowserProjection(items: items, groups: [])
         XCTAssertEqual(projection.filteredIDs(.init(search: "生产 blue 广州", kind: "rdp")), ["2"])
+        XCTAssertEqual(projection.filteredIDs(.init(search: "deploy")), ["1"])
         XCTAssertEqual(projection.filteredIDs(.init(search: "API", monitoring: "enabled")), ["1"])
         XCTAssertEqual(projection.filteredIDs(.init(search: "API", monitoring: "disabled")), ["3"])
         XCTAssertEqual(projection.filteredIDs(.init(search: "9999")), ["3", "1", "2"])
@@ -46,6 +47,33 @@ final class MachineBrowserProjectionTests: XCTestCase {
         _ = cache.resolve(items: [item("1", name: "Renamed")] + Array(items.dropFirst()), groups: [])
         XCTAssertEqual(cache.buildCount, 2)
         XCTAssertEqual(cache.filteredIDs(.init(search: "Renamed")), ["1"])
+    }
+
+    func testDashboardCatalogAndFilterReuseMetadataSnapshotUntilInputsChange() {
+        let cache = MachineBrowserProjectionCache()
+        let group = MachineBrowserGroup(id: UUID(), name: "生产", parentID: nil)
+        let tag = DashboardCatalogTag(id: UUID(), name: "关键")
+        let items = [item("1", username: "deploy", group: group.name, tags: [tag.name])]
+
+        let first = cache.resolveDashboard(items: items, groups: [group], tags: [tag]) {
+            MachineBrowserQuery(search: "deploy", group: $0.group(id: group.id.uuidString)?.name ?? "")
+        }
+        let second = cache.resolveDashboard(items: items, groups: [group], tags: [tag]) {
+            MachineBrowserQuery(search: "deploy", group: $0.group(id: group.id.uuidString)?.name ?? "")
+        }
+
+        XCTAssertEqual(first.indices, [0])
+        XCTAssertEqual(second.indices, [0])
+        XCTAssertEqual(cache.buildCount, 1)
+        XCTAssertEqual(cache.catalogBuildCount, 1)
+        XCTAssertEqual(cache.filterCount, 1)
+
+        _ = cache.resolveDashboard(items: items, groups: [group], tags: [.init(id: tag.id, name: "核心")]) { _ in
+            MachineBrowserQuery()
+        }
+        XCTAssertEqual(cache.buildCount, 1)
+        XCTAssertEqual(cache.catalogBuildCount, 2)
+        XCTAssertEqual(cache.filterCount, 2)
     }
 
     func testMalformedHierarchyCannotHideGroupsOrLoop() {
@@ -128,9 +156,9 @@ final class MachineBrowserProjectionTests: XCTestCase {
         print("Machine browser benchmark: \(String(decoding: data, as: UTF8.self)); report=\(url.path)")
     }
 
-    private func item(_ id: String, name: String? = nil, group: String = "默认分组", tags: [String] = [],
+    private func item(_ id: String, name: String? = nil, username: String = "", group: String = "默认分组", tags: [String] = [],
                       kind: String = "SSH", monitoring: Bool? = true) -> MachineBrowserItem {
-        .init(id: id, name: name ?? "主机 \(id)", address: "user@host:9999", group: group,
+        .init(id: id, name: name ?? "主机 \(id)", address: "user@host:9999", username: username, group: group,
               tags: tags, notes: "中文备注", kind: kind, createdAt: Date(timeIntervalSince1970: 100), monitoringEnabled: monitoring)
     }
 

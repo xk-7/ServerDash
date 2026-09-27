@@ -27,6 +27,13 @@ private final class ShutdownProgressProbe {
     var presentations = 0
 }
 
+/// Uses the same AppKit-in-SwiftUI hierarchy as the editor sheet, with no NSDocument.
+private struct HostedRemoteEditorUndoProbe: NSViewRepresentable {
+    let presentation: RemoteEditorPresentation
+    func makeNSView(context: Context) -> NSScrollView { presentation.scroll }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {}
+}
+
 final class MacFilePolishTests: XCTestCase {
     private func item(_ path: String) -> RemoteFileItem {
         RemoteFileItem(path: path, name: (path as NSString).lastPathComponent, kind: .file, size: 10, permissions: "rw-r--r--", owner: "fixture", group: "fixture", modifiedText: "2026-09-10")
@@ -130,6 +137,10 @@ final class MacFilePolishTests: XCTestCase {
         XCTAssertNotEqual(edited, doc.text)
         XCTAssertTrue(text.undoManager?.canUndo == true)
         first.update(text: edited, search: "中文", searchStep: 0)
+        let searchDeadline = ContinuousClock.now + .seconds(5)
+        while text.selectedRange().length == 0, ContinuousClock.now < searchDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         let selected = text.selectedRange()
         XCTAssertEqual((text.string as NSString).substring(with: selected), "中文")
         let flushed = await store.flushDrafts()
@@ -145,6 +156,88 @@ final class MacFilePolishTests: XCTestCase {
         XCTAssertEqual(text.string, doc.text)
         _ = await store.shutdownAndFlush()
     }
+    @MainActor func testHostedEditorRoutesNativeUndoRedoToDocumentManager() throws {
+        let presentation = RemoteEditorPresentation(text: "server 中文")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 400),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: HostedRemoteEditorUndoProbe(presentation: presentation))
+        defer { presentation.invalidate(); window.contentView = nil; window.close() }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let editor = presentation.editor
+        XCTAssertTrue(editor.window === window)
+        XCTAssertTrue(window.makeFirstResponder(editor))
+        editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+        editor.insertText(" appended", replacementRange: editor.selectedRange())
+        let edited = editor.string
+        XCTAssertTrue(editor.undoManager?.canUndo == true)
+        XCTAssertFalse(editor.undoManager === window.undoManager)
+        XCTAssertFalse(window.undoManager?.canUndo == true)
+
+        let undo = NSMenuItem(title: "Undo", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
+        let redo = NSMenuItem(title: "Redo", action: NSSelectorFromString("redo:"), keyEquivalent: "Z")
+        XCTAssertTrue(editor.responds(to: try XCTUnwrap(undo.action)))
+        XCTAssertTrue(editor.validateMenuItem(undo))
+        XCTAssertFalse(editor.validateMenuItem(redo))
+        // Starts at the actual first responder. Previously NSWindow accepted this
+        // action, returned true and left the text unchanged using its empty manager.
+        XCTAssertTrue(try XCTUnwrap(window.firstResponder).tryToPerform(try XCTUnwrap(undo.action), with: undo))
+        XCTAssertEqual(editor.string, "server 中文")
+        XCTAssertFalse(editor.validateMenuItem(undo))
+        XCTAssertTrue(editor.validateMenuItem(redo))
+        XCTAssertTrue(try XCTUnwrap(window.firstResponder).tryToPerform(try XCTUnwrap(redo.action), with: redo))
+        XCTAssertEqual(editor.string, edited)
+    }
+
+    @MainActor func testEditorSheetUndoSurvivesSearchThemeAndDocumentRemount() async throws {
+        let first = RemoteEditorPresentation(text: "server 中文 server")
+        let second = RemoteEditorPresentation(text: "second document")
+        let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 400),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        parent.isReleasedWhenClosed = false; sheet.isReleasedWhenClosed = false
+        sheet.contentView = NSHostingView(rootView: HostedRemoteEditorUndoProbe(presentation: first))
+        parent.beginSheet(sheet, completionHandler: { _ in })
+        defer {
+            first.invalidate(); second.invalidate()
+            parent.endSheet(sheet); sheet.orderOut(nil)
+            sheet.contentView = nil; sheet.close(); parent.close()
+        }
+        sheet.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertTrue(sheet.sheetParent === parent)
+        XCTAssertTrue(first.editor.window === sheet)
+        XCTAssertTrue(sheet.makeFirstResponder(first.editor))
+        first.editor.setSelectedRange(NSRange(location: first.editor.string.utf16.count, length: 0))
+        first.editor.insertText(" 中文追加", replacementRange: first.editor.selectedRange())
+        let edited = first.editor.string
+        first.update(text: edited, search: "server", searchStep: 0)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while first.editor.selectedRange().length == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual((first.editor.string as NSString).substring(with: first.editor.selectedRange()), "server")
+        first.update(text: edited, search: "server", searchStep: 1)
+        first.update(text: edited, search: "", searchStep: 1)
+        sheet.appearance = NSAppearance(named: .darkAqua)
+        sheet.contentView = NSHostingView(rootView: HostedRemoteEditorUndoProbe(presentation: second))
+        sheet.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertTrue(sheet.makeFirstResponder(second.editor))
+        second.editor.setSelectedRange(NSRange(location: second.editor.string.utf16.count, length: 0))
+        second.editor.insertText(" x", replacementRange: second.editor.selectedRange())
+        let secondEdited = second.editor.string
+        XCTAssertFalse(first.editor.undoManager === second.editor.undoManager)
+        sheet.contentView = NSHostingView(rootView: HostedRemoteEditorUndoProbe(presentation: first))
+        sheet.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertTrue(sheet.makeFirstResponder(first.editor))
+        let undo = NSMenuItem(title: "Undo", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
+        XCTAssertTrue(first.editor.validateMenuItem(undo))
+        XCTAssertTrue(try XCTUnwrap(sheet.firstResponder).tryToPerform(try XCTUnwrap(undo.action), with: undo))
+        XCTAssertEqual(first.editor.string, "server 中文 server")
+        XCTAssertEqual(second.editor.string, secondEdited)
+        XCTAssertTrue(second.editor.undoManager?.canUndo == true)
+    }
+
     func testRemoteEditorSearchFeedbackCountsUnicodeMatchesAndReportsMisses() throws {
         let text = "中文 apple\nAPPLE 中文\napple"
         XCTAssertEqual(try EditorSearchFeedback.scan(text: text, query: "apple", selectedLocation: 9),

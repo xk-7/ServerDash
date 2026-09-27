@@ -158,6 +158,40 @@ final class TerminalDisplaySearch: ObservableObject {
     func close() { text = ""; isVisible = false; search() }
 }
 
+#if os(macOS)
+/// FIFO eviction is O(1) and removes one cold line at a time, avoiding the
+/// old full-cache flush every 256 distinct lines. All access is main-actor owned.
+struct MacTerminalHighlightCache<Key: Hashable, Value> {
+    private let capacity: Int
+    private var values: [Key: Value] = [:]
+    private var order: [Key] = []
+    private var next = 0
+    var count: Int { values.count }
+    init(capacity: Int = 256) { self.capacity = max(1, capacity) }
+    subscript(key: Key) -> Value? { values[key] }
+    mutating func insert(_ value: Value, for key: Key) {
+        if values[key] != nil { values[key] = value; return }
+        if order.count == capacity {
+            values.removeValue(forKey: order[next]); order[next] = key
+            next = (next + 1) % capacity
+        } else { order.append(key) }
+        values[key] = value
+    }
+    mutating func removeAll() {
+        values.removeAll(keepingCapacity: true); order.removeAll(keepingCapacity: true); next = 0
+    }
+}
+
+private struct MacTerminalHighlightKey: Hashable {
+    // Data equality is byte-exact. String equality would conflate composed and
+    // decomposed Unicode with different UTF-16 regex-to-cell offsets.
+    let utf8: Data
+    let widths: Data
+    let rulesVersion: UInt64
+    let searchVersion: UInt64
+}
+#endif
+
 /// Display-only helpers owned by a session, alongside its persistent native terminal.
 @MainActor
 final class TerminalTools: ObservableObject {
@@ -177,13 +211,32 @@ final class TerminalTools: ObservableObject {
     private let highlightSettings: TerminalHighlightSettings
     private var rules: [TerminalHighlightRule] = []
     private var compiled: [(NSRegularExpression, CGColor)] = []
+    #if os(macOS)
+    private var cache = MacTerminalHighlightCache<MacTerminalHighlightKey, [TerminalCellHighlight]>()
+    private var rulesVersion: UInt64 = 0
+    private var searchVersion: UInt64 = 0
+    private var compiledSearchText = ""
+    private var searchExpression: NSRegularExpression?
+    private(set) var highlightColumnMapBuildCount = 0
+    private(set) var searchExpressionBuildCount = 0
+    var highlightCacheCount: Int { cache.count }
+    #else
     private var cache: [String: [TerminalCellHighlight]] = [:]
+    #endif
     private var commandStart: Position?
     init(serverID: UUID, history: CommandHistoryStore? = nil, highlightSettings: TerminalHighlightSettings? = nil) {
         self.serverID = serverID
         self.history = history ?? .shared
         self.highlightSettings = highlightSettings ?? .shared
-        displaySearch.onTextChange = { [weak self] in self?.cache.removeAll(); self?.redraw() }
+        displaySearch.onTextChange = { [weak self] in
+            guard let self else { return }
+            #if os(macOS)
+            self.updateSearchExpression()
+            #else
+            self.cache.removeAll()
+            #endif
+            self.redraw()
+        }
         searchObservation = displaySearch.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
@@ -242,6 +295,9 @@ final class TerminalTools: ObservableObject {
         let current = highlightSettings.rules
         if current != rules {
             rules = current; cache.removeAll()
+            #if os(macOS)
+            rulesVersion &+= 1
+            #endif
             compiled = current.prefix(32).filter(\.enabled).compactMap { rule -> (NSRegularExpression, CGColor)? in
                 guard rule.pattern.count <= 256, let regex = try? NSRegularExpression(pattern: rule.pattern) else { return nil }
                 let color = TerminalHighlightRule.colors[min(11, max(0, rule.color))]
@@ -253,7 +309,31 @@ final class TerminalTools: ObservableObject {
             }
         }
         var text = "", columns: [Int] = []
-        // Map UTF-16 regex offsets back to terminal cells, including emoji/CJK/wide glyphs.
+        #if os(macOS)
+        let cellCount = min(line.count, 2048)
+        var widths = Data(capacity: cellCount)
+        text.reserveCapacity(cellCount)
+        // Inspect cells directly: getData() copies the entire terminal row.
+        for column in 0..<cellCount {
+            let width = line.getWidth(index: column)
+            widths.append(UInt8(bitPattern: Int8(width)))
+            guard width != 0 else { continue }
+            let char = terminal.getCharacter(for: line[column])
+            text.append(char == "\0" ? " " : char)
+        }
+        let key = MacTerminalHighlightKey(utf8: Data(text.utf8), widths: widths,
+                                          rulesVersion: rulesVersion, searchVersion: searchVersion)
+        if let cached = cache[key] { return cached }
+        highlightColumnMapBuildCount += 1
+        columns.reserveCapacity(text.utf16.count + 1)
+        // Only misses allocate the UTF-16-to-cell map, including emoji/CJK.
+        for column in 0..<cellCount where line.getWidth(index: column) != 0 {
+            let char = terminal.getCharacter(for: line[column])
+            let length = char == "\0" ? 1 : String(char).utf16.count
+            for _ in 0..<length { columns.append(column) }
+        }
+        columns.append(cellCount)
+        #else
         for (column, data) in line.getData().prefix(2048).enumerated() {
             if line.getWidth(index: column) == 0 { continue }
             let char = terminal.getCharacter(for: data)
@@ -263,14 +343,21 @@ final class TerminalTools: ObservableObject {
         }
         columns.append(min(line.count, 2048))
         if let cached = cache[text] { return cached }
+        #endif
         var result: [TerminalCellHighlight] = [], occupied = IndexSet()
         let range = NSRange(location: 0, length: text.utf16.count)
         let deadline = Date.timeIntervalSinceReferenceDate + 0.004
         var patterns = compiled
+        #if os(macOS)
+        if let regex = searchExpression {
+            patterns.insert((regex, CGColor(red: 1, green: 0.8, blue: 0.1, alpha: 0.55)), at: 0)
+        }
+        #else
         if !searchText.isEmpty, searchText.count <= 512,
            let regex = try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: searchText), options: .caseInsensitive) {
             patterns.insert((regex, CGColor(red: 1, green: 0.8, blue: 0.1, alpha: 0.55)), at: 0)
         }
+        #endif
         for (regex, color) in patterns {
             if Date.timeIntervalSinceReferenceDate > deadline { break }
             regex.enumerateMatches(in: text, options: .reportProgress, range: range) { match, _, stop in
@@ -283,8 +370,22 @@ final class TerminalTools: ObservableObject {
                 result.append(.init(columns: start..<end, color: color))
             }
         }
+        #if os(macOS)
+        cache.insert(result, for: key)
+        #else
         if cache.count >= 256 { cache.removeAll(keepingCapacity: true) }
         cache[text] = result
+        #endif
         return result
     }
+    #if os(macOS)
+    private func updateSearchExpression() {
+        guard !compiledSearchText.utf8.elementsEqual(searchText.utf8) else { return }
+        compiledSearchText = searchText; searchVersion &+= 1; cache.removeAll()
+        searchExpression = nil
+        guard !searchText.isEmpty, searchText.count <= 512 else { return }
+        searchExpressionBuildCount += 1
+        searchExpression = try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: searchText), options: .caseInsensitive)
+    }
+    #endif
 }

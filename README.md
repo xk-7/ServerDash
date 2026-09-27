@@ -257,6 +257,8 @@ Build and test the Mac app through the wrapper:
 ./Scripts/macos-dev.sh test -only-testing:ServerDashTests
 ```
 
+Run `./Scripts/benchmark-macos.sh` for isolated Release performance fixtures (100/1,000 hosts, 10,000 files, history and editor/terminal search). See [measurement scopes and acceptance](Docs/MAC_PERFORMANCE_QA.md); these microbenchmarks do not replace native-window interaction checks.
+
 The wrapper and Xcode both use the shared scheme. A direct
 `xcodebuild -target ServerDash` invocation is unsupported because it bypasses the
 scheme pre-action that materializes the local XCFramework. Use the

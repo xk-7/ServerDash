@@ -1,0 +1,79 @@
+{
+  "measurements" : [
+    {
+      "baselineCommit" : "e4d6b84e8561be3fe0688bb38fb9685654e5ffa3",
+      "buildConfiguration" : "Release",
+      "cachedDashboardInputAndLookupMedianMilliseconds" : 0.69445837289094925,
+      "cachedDashboardInputAndLookupP95Milliseconds" : 0.7185833528637886,
+      "cachedDashboardInputsAndIndexLookup" : {
+        "checksum" : 1560,
+        "medianMilliseconds" : 0.69445837289094925,
+        "p95Milliseconds" : 0.7185833528637886
+      },
+      "checksum" : 9600,
+      "coldCatalogAndFilterMedianMilliseconds" : 0.60508341994136572,
+      "coldCatalogAndFilterP95Milliseconds" : 0.66987506579607725,
+      "comparisonScope" : "Same-process e4d6b84 body-algorithm replay and current cached body path over identical SwiftData model objects. The legacy path rebuilds fully derived item\/group\/tag values, retains its projection cache exactly as the old @State did, then rebuilds DashboardFilterCatalog and runs full ServerBrowserQuery filtering\/sorting on every body evaluation. The current path rebuilds exact raw metadata inputs, derives UUID\/name\/group\/tag values only after relevant input changes, reuses catalog\/filter results, and maps cached indices back to servers.",
+      "dashboardBodyMedianSpeedup" : 1.4633706443475591,
+      "diagnostics" : "Cold catalog\/filter uses prebuilt inputs. Five-query timing exercises current cached projection queries and is not part of the legacy\/current body ratio.",
+      "excluded" : "Geometry, SwiftUI layout, card body rendering, scrolling, and first-frame presentation are excluded. This is a dashboard metadata\/filter body-path microbenchmark.",
+      "fiveQueriesMedianMilliseconds" : 1.3970416039228439,
+      "fiveQueriesP95Milliseconds" : 1.4848333084955812,
+      "groups" : 48,
+      "hosts" : 100,
+      "iterations" : 30,
+      "legacyDashboardBodyProjectionAndFilter" : {
+        "checksum" : 1560,
+        "medianMilliseconds" : 1.0162499966099858,
+        "p95Milliseconds" : 1.1066666338592768
+      },
+      "mainThread" : true,
+      "processIdentifier" : 36519,
+      "queriesPerIteration" : 5,
+      "releaseInvocation" : "Scripts\/benchmark-macos.sh compiles and runs this comparison in Release with -O.",
+      "semanticResultsEqual" : true,
+      "warmups" : 3
+    },
+    {
+      "baselineCommit" : "e4d6b84e8561be3fe0688bb38fb9685654e5ffa3",
+      "buildConfiguration" : "Release",
+      "cachedDashboardInputAndLookupMedianMilliseconds" : 5.9619999956339598,
+      "cachedDashboardInputAndLookupP95Milliseconds" : 6.1267083510756493,
+      "cachedDashboardInputsAndIndexLookup" : {
+        "checksum" : 1800,
+        "medianMilliseconds" : 5.9619999956339598,
+        "p95Milliseconds" : 6.1267083510756493
+      },
+      "checksum" : 54840,
+      "coldCatalogAndFilterMedianMilliseconds" : 10.481041623279452,
+      "coldCatalogAndFilterP95Milliseconds" : 10.655166581273079,
+      "comparisonScope" : "Same-process e4d6b84 body-algorithm replay and current cached body path over identical SwiftData model objects. The legacy path rebuilds fully derived item\/group\/tag values, retains its projection cache exactly as the old @State did, then rebuilds DashboardFilterCatalog and runs full ServerBrowserQuery filtering\/sorting on every body evaluation. The current path rebuilds exact raw metadata inputs, derives UUID\/name\/group\/tag values only after relevant input changes, reuses catalog\/filter results, and maps cached indices back to servers.",
+      "dashboardBodyMedianSpeedup" : 1.5251733196077026,
+      "diagnostics" : "Cold catalog\/filter uses prebuilt inputs. Five-query timing exercises current cached projection queries and is not part of the legacy\/current body ratio.",
+      "excluded" : "Geometry, SwiftUI layout, card body rendering, scrolling, and first-frame presentation are excluded. This is a dashboard metadata\/filter body-path microbenchmark.",
+      "fiveQueriesMedianMilliseconds" : 13.769416604191065,
+      "fiveQueriesP95Milliseconds" : 14.043125091120601,
+      "groups" : 48,
+      "hosts" : 1000,
+      "iterations" : 30,
+      "legacyDashboardBodyProjectionAndFilter" : {
+        "checksum" : 1800,
+        "medianMilliseconds" : 9.093083324842155,
+        "p95Milliseconds" : 9.208166622556746
+      },
+      "mainThread" : true,
+      "processIdentifier" : 36519,
+      "queriesPerIteration" : 5,
+      "releaseInvocation" : "Scripts\/benchmark-macos.sh compiles and runs this comparison in Release with -O.",
+      "semanticResultsEqual" : true,
+      "warmups" : 3
+    }
+  ],
+  "testHostResourceUsage" : {
+    "peakResidentMemoryBytes" : 148078592,
+    "processIdentifier" : 36519,
+    "scope" : "Cumulative process-lifetime peak resident memory of the XCTest host, including earlier tests and fixtures in this process. Not a per-operation increment, not the QA app, and not the xcodebuild driver.",
+    "source" : "Darwin.getrusage(RUSAGE_SELF).ru_maxrss",
+    "unit" : "bytes"
+  }
+}

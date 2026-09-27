@@ -81,6 +81,12 @@ struct MacUIFixtureCommands: Commands {
             Menu("大数据夹具") {
                 Button("以 1,000 主机列表重开 QA 应用") { MacQAControlActions.perform("data.machines1000") }
                 Button("以 10,000 文件浏览器重开 QA 应用") { MacQAControlActions.perform("data.sftp10000") }
+                Button("以 1.3M 字符编辑器重开 QA 应用") { MacQAControlActions.perform("data.editor1300000") }
+                Button("以 8 MiB 编辑器重开 QA 应用") { MacQAControlActions.perform("data.editor8mib") }
+                Divider()
+                ForEach([1, 4, 16], id: \.self) { panes in
+                    Button("以 \(panes) 个终端面板重开 QA 应用") { MacQAControlActions.perform("data.terminal\(panes)") }
+                }
             }
         }
     }
@@ -101,25 +107,34 @@ private enum MacQAControlActions {
             (NSApp.windows.first { $0.title == "ServerDash · 隔离验收" } ?? NSApp.keyWindow)?.setContentSize(size)
         } else if action.hasPrefix("theme.") {
             UserDefaults.standard.set(String(action.dropFirst("theme.".count)), forKey: "appAppearance")
-        } else if action == "data.machines1000" || action == "data.sftp10000" {
+        } else if action.hasPrefix("data.") {
             reopenWithLargeFixture(action)
         }
     }
 
     private static func reopenWithLargeFixture(_ action: String) {
         guard let executable = Bundle.main.executableURL else { return }
+        let fixtureArguments: [String]
+        switch action {
+        case "data.machines1000":
+            fixtureArguments = ["--fixture-page", "machines", "--fixture-machine-view", "list", "--fixture-machine-count", "1000"]
+        case "data.sftp10000":
+            fixtureArguments = ["--fixture-page", "sftp", "--fixture-sftp-file-count", "10000"]
+        case "data.editor1300000", "data.editor8mib":
+            fixtureArguments = ["--fixture-page", "editor", "--fixture-editor-size", action == "data.editor1300000" ? "1300000" : "8mib"]
+        case "data.terminal1", "data.terminal4", "data.terminal16":
+            fixtureArguments = ["--fixture-page", "terminal", "--fixture-panes", String(action.dropFirst("data.terminal".count)), "--fixture-output-lines", "500"]
+        default: return
+        }
         let size = NSApp.windows.first { $0.title == "ServerDash · 隔离验收" }?.contentView?.bounds.size
             ?? NSSize(width: 1_440, height: 900)
         let process = Process()
         process.executableURL = executable
-        process.arguments = [
-            "--fixture-page", action == "data.machines1000" ? "machines" : "sftp",
+        process.arguments = fixtureArguments + [
             "--fixture-width", String(Int(size.width)),
             "--fixture-height", String(Int(size.height)),
             "--fixture-theme", UserDefaults.standard.string(forKey: "appAppearance") ?? "light",
-        ] + (action == "data.machines1000"
-             ? ["--fixture-machine-view", "list", "--fixture-machine-count", "1000"]
-             : ["--fixture-sftp-file-count", "10000"])
+        ]
         do {
             try process.run()
             NSApp.terminate(nil)
@@ -286,7 +301,11 @@ enum MacUIFixture {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(300))
                 for (index, controller) in controllers.enumerated() {
-                    controller.hostView.feedLocalOutput("\u{1B}[2J\u{1B}[HQA 面板 \(index + 1) · 离线夹具\r\nfixture@server:~$ ")
+                    let outputLines = argument("--fixture-output-lines").flatMap(Int.init).map { min(2_000, max(0, $0)) } ?? 0
+                    let output = (0..<outputLines).map { row in
+                        "[\(row)] 中文日志 needle cpu=12.4% memory=1024M status=success\r\n"
+                    }.joined()
+                    controller.hostView.feedLocalOutput("\u{1B}[2J\u{1B}[HQA 面板 \(index + 1) · 离线夹具\r\n" + output + "fixture@server:~$ ")
                 }
             }
         } else if page == .monitor, let server = servers.first {
@@ -311,40 +330,63 @@ enum MacUIFixture {
             persistURL: editorDirectory.appendingPathComponent("documents.json"),
             restore: false
         )
-        let text = """
-        # ServerDash 隔离编辑器夹具
-
-        server:
-          host: 192.0.2.10
-          monitoring: true
-        """
+        let largeSize = argument("--fixture-editor-size")
+        let text = editorFixtureText(size: largeSize)
         let data = Data(text.utf8)
         let documentCount = argument("--fixture-editor-documents").flatMap(Int.init).map { min(5, max(1, $0)) } ?? 5
         let documents = (0..<documentCount).map { index in
-            RemoteEditorDraft(
+            // Only the first document is large; total open data remains below
+            // the normal 10 MiB editor budget, even with five tabs.
+            let documentText = index == 0 ? text : editorFixtureText(size: nil)
+            let documentData = index == 0 ? data : Data(documentText.utf8)
+            return RemoteEditorDraft(
                 serverID: UUID(),
                 serverName: "上海生产环境核心数据库",
                 path: index == 0
                     ? "/etc/serverdash/example.yml"
                     : "/etc/serverdash/多标签工作区-第\(String(format: "%02d", index + 1))份-非常长的中文配置名称-用于检验滚动与提示.yaml",
-                text: text,
+                text: documentText,
                 encoding: .utf8,
                 hasBOM: false,
-                original: data,
+                original: documentData,
                 revision: RemoteFileRevision(
-                    size: Int64(data.count),
+                    size: Int64(documentData.count),
                     modifiedNS: 1,
                     inode: UInt64(index + 1),
                     mode: 0o640,
                     uid: 0,
                     gid: 0,
-                    sha256: DesktopFileOperations.digest(data)
+                    sha256: DesktopFileOperations.digest(documentData)
                 )
             )
         }
         store.documents = documents
-        store.selectedID = documents.last?.id
+        store.selectedID = largeSize == "1300000" || largeSize == "8mib" ? documents.first?.id : documents.last?.id
         return store
+    }
+
+    /// Closed, bounded QA sizes prevent arbitrary allocations through launch args.
+    /// ASCII padding makes the 8 MiB variant exact in UTF-8 despite its CJK header.
+    static func editorFixtureText(size: String?) -> String {
+        let prefix = """
+        # ServerDash 隔离编辑器夹具
+
+        server:
+          host: 192.0.2.10
+          monitoring: true
+
+        """
+        let target: Int
+        switch size {
+        case "1300000": target = 1_300_000
+        case "8mib": target = 8 * 1_024 * 1_024
+        default: return prefix
+        }
+        let prefixLength = size == "8mib" ? prefix.utf8.count : prefix.utf16.count
+        let row = "key: needle # synthetic editor search and scrolling fixture; no remote service\n"
+        let remaining = target - prefixLength
+        return prefix + String(repeating: row, count: remaining / row.utf8.count)
+            + String(repeating: " ", count: remaining % row.utf8.count)
     }
 
     static func makeSyntheticRecording() throws -> RecordingDocument {

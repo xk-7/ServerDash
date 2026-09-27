@@ -2244,6 +2244,8 @@ final class PerformanceInstrumentationTests: XCTestCase {
             "terminal.open",
             "terminal.interactive",
             "terminal.tab_switch",
+            "sftp.projection", "sftp.table_update", "editor.search", "history.maintenance",
+            "history.batch", "app.bootstrap", "dashboard.filter",
             "sftp.list",
             "sftp.transfer",
             "sftp.progress_publish"

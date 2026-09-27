@@ -1,0 +1,275 @@
+{
+  "configuration": "Release",
+  "warmups": 3,
+  "iterations": 30,
+  "window": "1440x900",
+  "theme": "light",
+  "items": 10000,
+  "samples": [
+    {
+      "searchMS": 1063,
+      "clearMS": 2001
+    },
+    {
+      "searchMS": 804,
+      "clearMS": 1906
+    },
+    {
+      "searchMS": 983,
+      "clearMS": 2049
+    },
+    {
+      "searchMS": 854,
+      "clearMS": 1408
+    },
+    {
+      "searchMS": 700,
+      "clearMS": 1398
+    },
+    {
+      "searchMS": 669,
+      "clearMS": 1424
+    },
+    {
+      "searchMS": 691,
+      "clearMS": 1408
+    },
+    {
+      "searchMS": 666,
+      "clearMS": 1429
+    },
+    {
+      "searchMS": 698,
+      "clearMS": 1422
+    },
+    {
+      "searchMS": 1341,
+      "clearMS": 6150
+    },
+    {
+      "searchMS": 1475,
+      "clearMS": 6234
+    },
+    {
+      "searchMS": 1361,
+      "clearMS": 6165
+    },
+    {
+      "searchMS": 1480,
+      "clearMS": 6262
+    },
+    {
+      "searchMS": 1369,
+      "clearMS": 6239
+    },
+    {
+      "searchMS": 1466,
+      "clearMS": 6062
+    },
+    {
+      "searchMS": 1441,
+      "clearMS": 6352
+    },
+    {
+      "searchMS": 1381,
+      "clearMS": 6262
+    },
+    {
+      "searchMS": 1483,
+      "clearMS": 5912
+    },
+    {
+      "searchMS": 1384,
+      "clearMS": 6113
+    },
+    {
+      "searchMS": 1489,
+      "clearMS": 6117
+    },
+    {
+      "searchMS": 1411,
+      "clearMS": 6120
+    },
+    {
+      "searchMS": 1420,
+      "clearMS": 5755
+    },
+    {
+      "searchMS": 1429,
+      "clearMS": 5709
+    },
+    {
+      "searchMS": 1420,
+      "clearMS": 5745
+    },
+    {
+      "searchMS": 1502,
+      "clearMS": 5933
+    },
+    {
+      "searchMS": 1386,
+      "clearMS": 5603
+    },
+    {
+      "searchMS": 1360,
+      "clearMS": 5758
+    },
+    {
+      "searchMS": 1391,
+      "clearMS": 5971
+    },
+    {
+      "searchMS": 1435,
+      "clearMS": 5767
+    },
+    {
+      "searchMS": 1352,
+      "clearMS": 5909
+    }
+  ],
+  "scope": "CUA setValue plus complete accessibility snapshot; includes automation pacing and AX traversal, not event-to-frame or application main-thread time. Separate profiler runs are excluded from timed samples.",
+  "rawSamples": [
+    {
+      "searchMS": 1063,
+      "clearMS": 2001
+    },
+    {
+      "searchMS": 804,
+      "clearMS": 1906
+    },
+    {
+      "searchMS": 983,
+      "clearMS": 2049
+    },
+    {
+      "searchMS": 854,
+      "clearMS": 1408
+    },
+    {
+      "searchMS": 700,
+      "clearMS": 1398
+    },
+    {
+      "searchMS": 669,
+      "clearMS": 1424
+    },
+    {
+      "searchMS": 691,
+      "clearMS": 1408
+    },
+    {
+      "searchMS": 666,
+      "clearMS": 1429
+    },
+    {
+      "searchMS": 698,
+      "clearMS": 1422
+    },
+    {
+      "searchMS": 1341,
+      "clearMS": 6150
+    },
+    {
+      "searchMS": 1475,
+      "clearMS": 6234
+    },
+    {
+      "searchMS": 1361,
+      "clearMS": 6165
+    },
+    {
+      "searchMS": 1480,
+      "clearMS": 6262
+    },
+    {
+      "searchMS": 1369,
+      "clearMS": 6239
+    },
+    {
+      "searchMS": 1466,
+      "clearMS": 6062
+    },
+    {
+      "searchMS": 1441,
+      "clearMS": 6352
+    },
+    {
+      "searchMS": 1381,
+      "clearMS": 6262
+    },
+    {
+      "searchMS": 1483,
+      "clearMS": 5912
+    },
+    {
+      "searchMS": 1384,
+      "clearMS": 6113
+    },
+    {
+      "searchMS": 1489,
+      "clearMS": 6117
+    },
+    {
+      "searchMS": 1411,
+      "clearMS": 6120
+    },
+    {
+      "searchMS": 1420,
+      "clearMS": 5755
+    },
+    {
+      "searchMS": 1429,
+      "clearMS": 5709
+    },
+    {
+      "searchMS": 1420,
+      "clearMS": 5745
+    },
+    {
+      "searchMS": 1502,
+      "clearMS": 5933
+    },
+    {
+      "searchMS": 1386,
+      "clearMS": 5603
+    },
+    {
+      "searchMS": 1360,
+      "clearMS": 5758
+    },
+    {
+      "searchMS": 1391,
+      "clearMS": 5971
+    },
+    {
+      "searchMS": 1435,
+      "clearMS": 5767
+    },
+    {
+      "searchMS": 1352,
+      "clearMS": 5909
+    }
+  ],
+  "sampleAccounting": {
+    "sourcePath": "/tmp/serverdash-performance-ui-optimized.json",
+    "sourceSHA256": "11a630ea975eb8c056d6ee7338bd218a6b3a97dd23be34792f2f875ef4aae4e6",
+    "sourceSampleCount": 30,
+    "sourceIncludesWarmups": false,
+    "warmupsBeforeMeasurement": 3,
+    "discardedSourcePrefixSamples": 0,
+    "measuredSampleCount": 30,
+    "rawSamplesScope": "Exact source samples in original order. Baseline includes its first three warmups; optimized source already excludes warmups and those warmup values were not supplied.",
+    "samplesScope": "Thirty measured samples only; warmups excluded. Summary is recomputed from this array.",
+    "p95Method": "Nearest rank: sortedSamples[ceil(0.95 * count) - 1]."
+  },
+  "summary": {
+    "search": {
+      "medianMS": 1382.5,
+      "p95MS": 1489
+    },
+    "clear": {
+      "medianMS": 5838.0,
+      "p95MS": 6262
+    }
+  }
+}
