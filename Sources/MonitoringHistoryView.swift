@@ -49,6 +49,18 @@ struct MonitoringHistoryView: View {
     @State private var isCleaning = false
     @State private var showingCleanupConfirmation = false
     @State private var maintenanceReport: MonitoringMaintenanceReport?
+    #if os(macOS)
+    @State private var fallbackHistoryService: MacMonitoringHistoryService?
+
+    @MainActor
+    private var historyService: MacMonitoringHistoryService {
+        if let service = appState.monitoringHistoryService { return service }
+        if let fallbackHistoryService { return fallbackHistoryService }
+        let service = MacMonitoringHistoryService(container: modelContext.container)
+        fallbackHistoryService = service
+        return service
+    }
+    #endif
 
     private var queryIdentity: String {
         [
@@ -342,7 +354,15 @@ struct MonitoringHistoryView: View {
         await Task.yield()
         guard !Task.isCancelled else { return }
         do {
+            #if os(macOS)
+            let service = historyService
+            let repository = service.repository
+            let summary = try await service.storageSummary()
+            #else
             let repository = MonitoringHistoryRepository(context: modelContext)
+            let summary = try repository.storageSummary()
+            #endif
+            guard !Task.isCancelled else { return }
             let now = Date()
             let dates = selectedRange.dates(
                 now: now,
@@ -356,7 +376,6 @@ struct MonitoringHistoryView: View {
                 to: dates.1,
                 pixelWidth: 900
             )
-            let summary = try repository.storageSummary()
             guard !Task.isCancelled else { return }
             series = loaded
             storageSummary = summary
@@ -373,9 +392,15 @@ struct MonitoringHistoryView: View {
         Task { @MainActor in
             await Task.yield()
             do {
+                #if os(macOS)
+                let service = historyService
+                maintenanceReport = try await service.performMaintenance()
+                storageSummary = try await service.storageSummary()
+                #else
                 let repository = MonitoringHistoryRepository(context: modelContext)
                 maintenanceReport = try repository.performMaintenance()
                 storageSummary = try repository.storageSummary()
+                #endif
                 await loadHistory()
             } catch {
                 loadError = "历史清理失败；现有数据未被标记为已清理（MON_HISTORY_CLEANUP）。"

@@ -113,7 +113,7 @@ struct ServerBrowserControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppleDesign.Spacing.sm) {
             HStack(spacing: AppleDesign.Spacing.sm) {
-                AppleSearchField(prompt: "搜索名称、地址、标签或备注（空格组合）", text: $search)
+                AppleSearchField(prompt: "搜索名称、地址、用户、标签或备注（空格组合）", text: $search)
                     .frame(maxWidth: .infinity)
                 Menu {
                     Picker("分组", selection: $group) {

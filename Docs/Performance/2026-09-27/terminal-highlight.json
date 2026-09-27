@@ -1,0 +1,56 @@
+{
+  "fixtures" : [
+    {
+      "baseline" : {
+        "maxMS" : 1.308959,
+        "medianMS" : 1.1025205,
+        "p95MS" : 1.2924169999999999
+      },
+      "cached" : {
+        "maxMS" : 0.510625,
+        "medianMS" : 0.49279149999999999,
+        "p95MS" : 0.50149999999999995
+      },
+      "linesPerPanel" : 32,
+      "panels" : 1
+    },
+    {
+      "baseline" : {
+        "maxMS" : 2.235833,
+        "medianMS" : 2.1157710000000001,
+        "p95MS" : 2.1917089999999999
+      },
+      "cached" : {
+        "maxMS" : 1.50875,
+        "medianMS" : 1.3962085000000002,
+        "p95MS" : 1.4835830000000001
+      },
+      "linesPerPanel" : 32,
+      "panels" : 4
+    },
+    {
+      "baseline" : {
+        "maxMS" : 8.7470420000000004,
+        "medianMS" : 8.5220629999999993,
+        "p95MS" : 8.7071249999999996
+      },
+      "cached" : {
+        "maxMS" : 5.7089999999999996,
+        "medianMS" : 5.5543960000000006,
+        "p95MS" : 5.6766249999999996
+      },
+      "linesPerPanel" : 32,
+      "panels" : 16
+    }
+  ],
+  "iterations" : 30,
+  "note" : "Exact prior line text\/UTF16 mapping and search regex algorithm versus real TerminalTools callback. Synthetic hot display rows; excludes PTY ingestion, rendering and GPU.",
+  "testHostResourceUsage" : {
+    "peakResidentMemoryBytes" : 659537920,
+    "processIdentifier" : 36519,
+    "scope" : "Cumulative process-lifetime peak resident memory of the XCTest host, including earlier tests and fixtures in this process. Not a per-operation increment, not the QA app, and not the xcodebuild driver.",
+    "source" : "Darwin.getrusage(RUSAGE_SELF).ru_maxrss",
+    "unit" : "bytes"
+  },
+  "warmups" : 3
+}

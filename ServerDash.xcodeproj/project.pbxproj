@@ -14,6 +14,7 @@
 		04BAD53DF3477F1A9246F999 /* TerminalSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C29A0F998D5E8D81D38A6B /* TerminalSessions.swift */; };
 		0514A7F1D10C4AAC28A9C614 /* ConnectionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C21D9F8267C415C2EA97651 /* ConnectionEngine.swift */; };
 		0539460E0924052B348BBC1E /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 74A8C9C138CB51DC85E3205D /* Carbon.framework */; };
+		05A0BB2EF947D628396B4ACF /* MacMonitoringHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BE72A449A3D460FD5A25E3 /* MacMonitoringHistoryService.swift */; };
 		098E45B02502D9790809F82C /* SFTPService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943DE456AB8EBE7128B9AF0E /* SFTPService.swift */; };
 		0AB1FC4D7A3264559999FC11 /* windows-self-signed.pem in Resources */ = {isa = PBXBuildFile; fileRef = 65817D53C671FAEC8753F42E /* windows-self-signed.pem */; };
 		0B53C768D1C73AFCE328A891 /* SessionTransferAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84C18F14529B79AC72BFE6C /* SessionTransferAdapters.swift */; };
@@ -88,6 +89,7 @@
 		496D95432BCBBD1802F67C68 /* SDRDPDrive.m in Sources */ = {isa = PBXBuildFile; fileRef = EF4EC42BA41F0214F837F806 /* SDRDPDrive.m */; };
 		4B928197CDA59A31F7B61D3D /* ResourceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DBF7489718D78F03CFD571B /* ResourceViews.swift */; };
 		4BB25D17D57E99D1400875D2 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C06E89908346AD04C27796 /* Diagnostics.swift */; };
+		4C8FAA33264045D1E75F1BEF /* MacStartupPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A915D3D61E3E5FEB47FA59FB /* MacStartupPerformanceTests.swift */; };
 		4D56CED4D65D6CEDC0725E01 /* TerminalTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2579C848F637AF5CE5FB1934 /* TerminalTools.swift */; };
 		4DB3DEDDC8D22700DB96B81C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBCD7321B546E993FC42494 /* ContentView.swift */; };
 		4E36DA5D3CD4BD6ADA9B8D67 /* MobileCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7CFE70EF86407C9418107EE /* MobileCompatibility.swift */; };
@@ -121,6 +123,7 @@
 		686048FAF0E1107926BB8883 /* SessionTransferAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84C18F14529B79AC72BFE6C /* SessionTransferAdapters.swift */; };
 		699DACAF48DBFFA5842C6073 /* WorkbenchHostCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AE64F3989D851765ADFEA2 /* WorkbenchHostCommands.swift */; };
 		6A980A3391E431415CAFD33C /* DesignGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749FAF81145A8FB9CCB01A07 /* DesignGallery.swift */; };
+		6B7D15853EEED53B335924D0 /* MacSearchPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05E1A8DE5B6AE3538880A238 /* MacSearchPerformanceTests.swift */; };
 		6BF5BC2E3762DBB17D29281E /* WorkbenchConnectionEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5774100FDD8A6084BE8B12FE /* WorkbenchConnectionEditors.swift */; };
 		6CB96BC56DAF0013B427057F /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BA641DDE28754C1E7F14AA /* Services.swift */; };
 		6CF65DB5FBFB98C526142A99 /* DesktopFileOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C665472438635099EA0E79 /* DesktopFileOperations.swift */; };
@@ -192,10 +195,12 @@
 		A06758132146DBCFCFB84B54 /* ProfessionalConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */; };
 		A06BB609BCCEEBB1387E60A6 /* ResourceModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7871DE5BA8EC6374E4825DD1 /* ResourceModelTests.swift */; };
 		A07F6B159DE6352CCAEAA475 /* WorkbenchFileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4183FFC998C043E2FD5A2412 /* WorkbenchFileModels.swift */; };
+		A0EA2F08BD437449FFE3CA6A /* MacTableScrollStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6F3B9C5A7F6CC3EB760A67 /* MacTableScrollStateTests.swift */; };
 		A1A1AE393C57BABAB8B780B2 /* WorkbenchMachinesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0858AF443B7F24997F0849B2 /* WorkbenchMachinesView.swift */; };
 		A1B5BF85E47C2C8F57A2CB8D /* SFTPBrowserPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E4C417166A2EC3A005E080A /* SFTPBrowserPresentationTests.swift */; };
 		A1B90C798827061F66FBBFB5 /* RemoteEditorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99BAB55891E4B7F4F99FC091 /* RemoteEditorPresentation.swift */; };
 		A3869BB7EE97264CDC332C07 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E675A39B0515887894D4CEDF /* Security.framework */; };
+		A6419A733A367966CAEEFE2B /* MacSFTPPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DAA7FF0474C58E5561CE093 /* MacSFTPPerformanceTests.swift */; };
 		A9914B9E052A436D3FB52216 /* WorkbenchSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11DB9D7F5DE97522DA79B858 /* WorkbenchSessions.swift */; };
 		AA0898F99F51DA03F757A37B /* TerminalToolsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED575547C74EBA0B07883934 /* TerminalToolsViews.swift */; };
 		AADDFE9AF2318C0561DD2F16 /* RecordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89EC7D51D0C23C05C379049A /* RecordingTests.swift */; };
@@ -218,6 +223,7 @@
 		C0C009A22A7A68DAEB4FEEB8 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 1DEEBAE214806EFDF86AD414 /* SwiftTerm */; };
 		C0E74D88BC523BE29BE48325 /* LICENSES.md in Resources */ = {isa = PBXBuildFile; fileRef = 52A7F90E5D1EBBC61944D38A /* LICENSES.md */; };
 		C1C46A50F62E209FA98DA17B /* WebDAVSyncView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D35ED873C125FE6E926B4D4 /* WebDAVSyncView.swift */; };
+		C202ED4AE98AD6A1B4D0134C /* MacMonitoringHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BE72A449A3D460FD5A25E3 /* MacMonitoringHistoryService.swift */; };
 		C24AEDE77ACC06F7A69835C6 /* SDRDPDirectory.m in Sources */ = {isa = PBXBuildFile; fileRef = 32FD286DF2D4AE0EA84588C1 /* SDRDPDirectory.m */; };
 		C2861374A06C9446C70C2D1D /* HTTPToSOCKSProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 864769529F4878B4FDE4DBCA /* HTTPToSOCKSProxy.swift */; };
 		C32C06B8619A39604FB58F8B /* TerminalAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */; };
@@ -232,6 +238,7 @@
 		C93D12334F58C0C1B3C0E79A /* ProfessionalConnections.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2501653CEDCCF96D8C6EE32 /* ProfessionalConnections.swift */; };
 		C95E5418CF1AC02801571D74 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 29E2FE17013CA0CE6C3D49F5 /* ZIPFoundation */; };
 		CB2C227EA367B1DF03DD3B26 /* TerminalWorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787D2A9606A44836E7747FD3 /* TerminalWorkspaceTests.swift */; };
+		CB69354B839A9F6E8EB327A5 /* MacHistoryPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7EFAF1EBBFF280DD7362E9 /* MacHistoryPerformanceTests.swift */; };
 		CC3A70F8103703C520FCB637 /* MobileSSHIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450F63708D3343F645EA1658 /* MobileSSHIntegrationTests.swift */; };
 		CC7674E94FF258B0698E192F /* RemoteConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74225E5B629E05722E511CB /* RemoteConnection.swift */; };
 		CC8C2D7C57F4D1CE973DDD3E /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7B9A7128821971D27B4E3F /* Persistence.swift */; };
@@ -253,6 +260,7 @@
 		D99D7A6BA127C07D541E62E6 /* PortForwarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69DFF908A3A8D318995EC034 /* PortForwarding.swift */; };
 		D9C13650C00BBACB6154146B /* TerminalAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB52AE7DA5E55FCCF33EDC70 /* TerminalAppearanceViews.swift */; };
 		DA03823ED55969BDB609C053 /* TerminalToolsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED575547C74EBA0B07883934 /* TerminalToolsViews.swift */; };
+		DA1DC71FEF90AA92BA3BC1D5 /* MacPerformanceResourceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96255FD96F8801E33A599669 /* MacPerformanceResourceMetrics.swift */; };
 		DBB6D50E09953077151BDDDA /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 79D6B83942E1EAC2FE02CD76 /* README.md */; };
 		DC537BF8A738012B96641B04 /* ServerLocationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A00A57B52A92EB2E95E7E2D /* ServerLocationView.swift */; };
 		DDC6150CBFAFD2B7E8325513 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = EE21A7C49B151889AE1C30CC /* ZIPFoundation */; };
@@ -331,6 +339,7 @@
 /* Begin PBXFileReference section */
 		029595E88FA8270DB9B567A7 /* MobileFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileFoundationTests.swift; sourceTree = "<group>"; };
 		044ACF9048C24197D32E1C1F /* TerminalWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspace.swift; sourceTree = "<group>"; };
+		05E1A8DE5B6AE3538880A238 /* MacSearchPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSearchPerformanceTests.swift; sourceTree = "<group>"; };
 		0858AF443B7F24997F0849B2 /* WorkbenchMachinesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchMachinesView.swift; sourceTree = "<group>"; };
 		09BE650CB059896F0CEFF8D2 /* FoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationTests.swift; sourceTree = "<group>"; };
 		0A8E20C9F7F7BF0BD5A71A63 /* LocalConfigurationTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalConfigurationTransfer.swift; sourceTree = "<group>"; };
@@ -357,6 +366,7 @@
 		393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringHistoryTests.swift; sourceTree = "<group>"; };
 		3D64E3A954F3D57AEEDF9DC6 /* MobileResourcesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileResourcesViews.swift; sourceTree = "<group>"; };
 		3D8BDC75E3882E5F221847FD /* MachineOrganizationEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachineOrganizationEditor.swift; sourceTree = "<group>"; };
+		3DAA7FF0474C58E5561CE093 /* MacSFTPPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSFTPPerformanceTests.swift; sourceTree = "<group>"; };
 		3E4C417166A2EC3A005E080A /* SFTPBrowserPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPBrowserPresentationTests.swift; sourceTree = "<group>"; };
 		3F23131103ABE88821A8A4B9 /* DashboardFilterCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFilterCatalogTests.swift; sourceTree = "<group>"; };
 		416A177BFB4C9F62AA81F9D3 /* SFTPView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPView.swift; sourceTree = "<group>"; };
@@ -416,6 +426,7 @@
 		7E4088492B04AE62E36AA30E /* TerminalWorkspaceActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceActions.swift; sourceTree = "<group>"; };
 		7F3F0D17227FBA7C1A4BED44 /* windows-machine-ca-chain.pem */ = {isa = PBXFileReference; path = "windows-machine-ca-chain.pem"; sourceTree = "<group>"; };
 		806865341DB0BF81BA8FCD8D /* ConfigurationSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationSyncTests.swift; sourceTree = "<group>"; };
+		80BE72A449A3D460FD5A25E3 /* MacMonitoringHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMonitoringHistoryService.swift; sourceTree = "<group>"; };
 		81275B3E207BA4B0BC138698 /* RecordingFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingFormat.swift; sourceTree = "<group>"; };
 		82B02CC9C16C723EF6361720 /* ConfigurationSyncCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationSyncCatalog.swift; sourceTree = "<group>"; };
 		8339FA29B95424A0876D35BF /* EditorAndSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorAndSettingsViews.swift; sourceTree = "<group>"; };
@@ -426,6 +437,7 @@
 		91EFCAB99B9533CAFDF2D9ED /* AIViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIViews.swift; sourceTree = "<group>"; };
 		943DE456AB8EBE7128B9AF0E /* SFTPService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SFTPService.swift; sourceTree = "<group>"; };
 		95241F1C72E5830D6DFCD8D8 /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
+		96255FD96F8801E33A599669 /* MacPerformanceResourceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPerformanceResourceMetrics.swift; sourceTree = "<group>"; };
 		96A03B9CC41965EBB77F02A9 /* MobileRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRuntime.swift; sourceTree = "<group>"; };
 		986E939883D94F272BACCCAD /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		986EB0B64C937DFD5B1A7C8F /* MacUIFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacUIFixture.swift; sourceTree = "<group>"; };
@@ -440,12 +452,14 @@
 		A34467018A36BFB85EE165E3 /* MacFilePolishTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFilePolishTests.swift; sourceTree = "<group>"; };
 		A6CD208C6A3AC1372C0DDEA3 /* ServerDashRDP.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ServerDashRDP.xcframework; path = .build/rdp/ServerDashRDP.xcframework; sourceTree = "<group>"; };
 		A8D631EF7AAC344FFBC9D7FA /* SessionTransferViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTransferViews.swift; sourceTree = "<group>"; };
+		A915D3D61E3E5FEB47FA59FB /* MacStartupPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStartupPerformanceTests.swift; sourceTree = "<group>"; };
 		A9327787B88863BC6CEE1DB2 /* DesktopFileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopFileSettingsView.swift; sourceTree = "<group>"; };
 		AAE7A846E41C1811B95FF217 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		ABAF8D2D559E4E9913860862 /* MonitorDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorDetailViews.swift; sourceTree = "<group>"; };
 		AC4699A6676D0A98E30AA649 /* CitadelAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CitadelAdapterTests.swift; sourceTree = "<group>"; };
 		ACBCD7321B546E993FC42494 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		ACBFF726785965F2AE20CB92 /* MobileTrustLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTrustLifecycleTests.swift; sourceTree = "<group>"; };
+		AD6F3B9C5A7F6CC3EB760A67 /* MacTableScrollStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTableScrollStateTests.swift; sourceTree = "<group>"; };
 		AD8DC41FFE496974F8ABB367 /* ProfessionalConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfessionalConnectionTests.swift; sourceTree = "<group>"; };
 		B3FD877C201A30AA5ED80CBC /* themes.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = themes.json; sourceTree = "<group>"; };
 		BB4D01D3F221186769CB54C4 /* TrustedHostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedHostsView.swift; sourceTree = "<group>"; };
@@ -466,6 +480,7 @@
 		D9DF9C03AEF36F5D8A5AC40C /* MachineBrowserProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachineBrowserProjection.swift; sourceTree = "<group>"; };
 		DA27016CD9ED76222AA17710 /* ServerDashMacQAUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerDashMacQAUITests.swift; sourceTree = "<group>"; };
 		DA4FEA0225E7354D67785595 /* RecordingPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayback.swift; sourceTree = "<group>"; };
+		DE7EFAF1EBBFF280DD7362E9 /* MacHistoryPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacHistoryPerformanceTests.swift; sourceTree = "<group>"; };
 		DF0C1C0DEB63C550C13B73C3 /* DesktopFileOperationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopFileOperationsTests.swift; sourceTree = "<group>"; };
 		E0AADE01DBF7D87730E73D03 /* TerminalWorkbenchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkbenchTests.swift; sourceTree = "<group>"; };
 		E0D26040F23F5DC88D6DF1C8 /* SwiftTerm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftTerm; path = Vendor/SwiftTerm; sourceTree = SOURCE_ROOT; };
@@ -611,6 +626,7 @@
 				0A8E20C9F7F7BF0BD5A71A63 /* LocalConfigurationTransfer.swift */,
 				D9DF9C03AEF36F5D8A5AC40C /* MachineBrowserProjection.swift */,
 				3D8BDC75E3882E5F221847FD /* MachineOrganizationEditor.swift */,
+				80BE72A449A3D460FD5A25E3 /* MacMonitoringHistoryService.swift */,
 				F8A09C4E4FA14DA9C1965241 /* MacTerminationDelegate.swift */,
 				986EB0B64C937DFD5B1A7C8F /* MacUIFixture.swift */,
 				CA3D23AC51B51EA56248DE7F /* Models.swift */,
@@ -793,7 +809,13 @@
 				A34467018A36BFB85EE165E3 /* MacFilePolishTests.swift */,
 				E55D479CA7F568EDB7F37B47 /* MachineBrowserFilterStateTests.swift */,
 				73367543AC891BB9F712A6D8 /* MachineBrowserProjectionTests.swift */,
+				DE7EFAF1EBBFF280DD7362E9 /* MacHistoryPerformanceTests.swift */,
+				96255FD96F8801E33A599669 /* MacPerformanceResourceMetrics.swift */,
+				05E1A8DE5B6AE3538880A238 /* MacSearchPerformanceTests.swift */,
 				5E40E4D9B4517CE05FFE15D3 /* MacSettingsPolishTests.swift */,
+				3DAA7FF0474C58E5561CE093 /* MacSFTPPerformanceTests.swift */,
+				A915D3D61E3E5FEB47FA59FB /* MacStartupPerformanceTests.swift */,
+				AD6F3B9C5A7F6CC3EB760A67 /* MacTableScrollStateTests.swift */,
 				393E99B93E995510CB7E74A2 /* MonitoringHistoryTests.swift */,
 				198118C810D8EA5F9DA00700 /* MonitoringResponseParserTests.swift */,
 				429FD61E1936AAB5EC5860C9 /* MonitorLayoutStoreTests.swift */,
@@ -1105,6 +1127,7 @@
 				98975C1A363FED85E59FA30A /* EditorAndSettingsViews.swift in Sources */,
 				2719CA76B8C890832AD341F0 /* HTTPToSOCKSProxy.swift in Sources */,
 				FABFB4E998224E2B3D5148E1 /* LocalConfigurationTransfer.swift in Sources */,
+				C202ED4AE98AD6A1B4D0134C /* MacMonitoringHistoryService.swift in Sources */,
 				B5FA7F9AA74F71863E0B0E09 /* MacTerminationDelegate.swift in Sources */,
 				E10EC7AF9E4E1D424DE243A2 /* MacUIFixture.swift in Sources */,
 				5C36C66125ACA14308E667ED /* MachineBrowserProjection.swift in Sources */,
@@ -1213,6 +1236,7 @@
 				96C26643702E28026D606D83 /* EditorAndSettingsViews.swift in Sources */,
 				C2861374A06C9446C70C2D1D /* HTTPToSOCKSProxy.swift in Sources */,
 				1C57F41C7E34068833BEDB74 /* LocalConfigurationTransfer.swift in Sources */,
+				05A0BB2EF947D628396B4ACF /* MacMonitoringHistoryService.swift in Sources */,
 				CE9DEBA8681B9B50574662AD /* MacTerminationDelegate.swift in Sources */,
 				465B4F4A51D5FBC0D9AE514C /* MacUIFixture.swift in Sources */,
 				FC70F0064CE8C87D2B3A8868 /* MachineBrowserProjection.swift in Sources */,
@@ -1291,7 +1315,13 @@
 				49121B8027B6FA1B6167B5FD /* LocalConfigurationTransferTests.swift in Sources */,
 				C43C01B99FA8027A54EB58AA /* LocalShellSettingsTests.swift in Sources */,
 				F7EB65C7B695AD5DE84BC03C /* MacFilePolishTests.swift in Sources */,
+				CB69354B839A9F6E8EB327A5 /* MacHistoryPerformanceTests.swift in Sources */,
+				DA1DC71FEF90AA92BA3BC1D5 /* MacPerformanceResourceMetrics.swift in Sources */,
+				A6419A733A367966CAEEFE2B /* MacSFTPPerformanceTests.swift in Sources */,
+				6B7D15853EEED53B335924D0 /* MacSearchPerformanceTests.swift in Sources */,
 				9694861D89C0E6CF8EB8E98A /* MacSettingsPolishTests.swift in Sources */,
+				4C8FAA33264045D1E75F1BEF /* MacStartupPerformanceTests.swift in Sources */,
+				A0EA2F08BD437449FFE3CA6A /* MacTableScrollStateTests.swift in Sources */,
 				CF04C92E28611918C901CDE7 /* MachineBrowserFilterStateTests.swift in Sources */,
 				DF03B7C21B0847ABF95D266A /* MachineBrowserProjectionTests.swift in Sources */,
 				684CCF714F344DA86E6DDE0B /* MonitorLayoutStoreTests.swift in Sources */,

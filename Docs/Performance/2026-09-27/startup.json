@@ -1,0 +1,81 @@
+{
+  "measurements" : [
+    {
+      "advancedSettings" : 100,
+      "baselineCommit" : "e4d6b84e8561be3fe0688bb38fb9685654e5ffa3",
+      "batchedQuerySubsteps" : {
+        "checksum" : 4000,
+        "medianMilliseconds" : 6.6930000903084874,
+        "p95Milliseconds" : 6.9609583588317037
+      },
+      "bootstrapMedianMilliseconds" : 10.016749962233007,
+      "bootstrapMethodScope" : "Times only AppState.bootstrap after AppState construction. Includes monitoring-history service creation, batched connection catalog reads, runtime\/config creation, startup-gap reconciliation, hydration queue scheduling, and monitoring schedule synchronization.",
+      "bootstrapP95Milliseconds" : 10.18558326177299,
+      "buildConfiguration" : "Release",
+      "currentAppStateBootstrapMethod" : {
+        "checksum" : 1000,
+        "medianMilliseconds" : 10.016749962233007,
+        "p95Milliseconds" : 10.18558326177299
+      },
+      "excluded" : "Fixture insertion, AppState initialization, deferred history reads after the first MainActor yield, SwiftUI launch, and first-frame rendering are excluded. This is not full application startup.",
+      "fixtureHistory" : "No samples and nil lastSuccessfulMonitorAt; startup-gap paths perform reads without inserting gaps.",
+      "hosts" : 100,
+      "iterations" : 10,
+      "legacyPerHostQuerySubsteps" : {
+        "checksum" : 4000,
+        "medianMilliseconds" : 29.703166685067117,
+        "p95Milliseconds" : 30.37537494674325
+      },
+      "mainThread" : true,
+      "processIdentifier" : 36519,
+      "queryComparisonExcluded" : "The historical baseline's synchronous recentMetricPoints read and runtime creation are excluded from this query-substep pair; it isolates only route, advanced-settings, and startup-gap work.",
+      "queryComparisonScope" : "Same-process algorithm replay over the same in-memory fixture. Legacy performs one route fetch, one advanced-settings fetch, and one startup-gap reconciliation per host. Batched performs one all-route fetch, one all-advanced-settings fetch, and one all-host startup-gap reconciliation.",
+      "querySubstepsMedianSpeedup" : 4.4379450596568075,
+      "releaseInvocation" : "Scripts\/benchmark-macos.sh compiles and runs this comparison in Release with -O.",
+      "routes" : 100,
+      "warmups" : 3
+    },
+    {
+      "advancedSettings" : 1000,
+      "baselineCommit" : "e4d6b84e8561be3fe0688bb38fb9685654e5ffa3",
+      "batchedQuerySubsteps" : {
+        "checksum" : 40000,
+        "medianMilliseconds" : 64.280916703864932,
+        "p95Milliseconds" : 65.870875027030706
+      },
+      "bootstrapMedianMilliseconds" : 147.95604161918163,
+      "bootstrapMethodScope" : "Times only AppState.bootstrap after AppState construction. Includes monitoring-history service creation, batched connection catalog reads, runtime\/config creation, startup-gap reconciliation, hydration queue scheduling, and monitoring schedule synchronization.",
+      "bootstrapP95Milliseconds" : 157.73004165384918,
+      "buildConfiguration" : "Release",
+      "currentAppStateBootstrapMethod" : {
+        "checksum" : 10000,
+        "medianMilliseconds" : 147.95604161918163,
+        "p95Milliseconds" : 157.73004165384918
+      },
+      "excluded" : "Fixture insertion, AppState initialization, deferred history reads after the first MainActor yield, SwiftUI launch, and first-frame rendering are excluded. This is not full application startup.",
+      "fixtureHistory" : "No samples and nil lastSuccessfulMonitorAt; startup-gap paths perform reads without inserting gaps.",
+      "hosts" : 1000,
+      "iterations" : 10,
+      "legacyPerHostQuerySubsteps" : {
+        "checksum" : 40000,
+        "medianMilliseconds" : 341.83862502686679,
+        "p95Milliseconds" : 343.76712492667139
+      },
+      "mainThread" : true,
+      "processIdentifier" : 36519,
+      "queryComparisonExcluded" : "The historical baseline's synchronous recentMetricPoints read and runtime creation are excluded from this query-substep pair; it isolates only route, advanced-settings, and startup-gap work.",
+      "queryComparisonScope" : "Same-process algorithm replay over the same in-memory fixture. Legacy performs one route fetch, one advanced-settings fetch, and one startup-gap reconciliation per host. Batched performs one all-route fetch, one all-advanced-settings fetch, and one all-host startup-gap reconciliation.",
+      "querySubstepsMedianSpeedup" : 5.317886591469744,
+      "releaseInvocation" : "Scripts\/benchmark-macos.sh compiles and runs this comparison in Release with -O.",
+      "routes" : 1000,
+      "warmups" : 3
+    }
+  ],
+  "testHostResourceUsage" : {
+    "peakResidentMemoryBytes" : 676184064,
+    "processIdentifier" : 36519,
+    "scope" : "Cumulative process-lifetime peak resident memory of the XCTest host, including earlier tests and fixtures in this process. Not a per-operation increment, not the QA app, and not the xcodebuild driver.",
+    "source" : "Darwin.getrusage(RUSAGE_SELF).ru_maxrss",
+    "unit" : "bytes"
+  }
+}

@@ -481,7 +481,7 @@ struct SFTPBrowserView: View {
         tableContent(layout: layout)
         .accessibilityIdentifier("sftp.browser.table")
         .contextMenu(forSelectionType: String.self) { ids in
-            let items = controller.items.filter { ids.contains($0.id) }
+            let items = controller.visibleItems(matching: ids)
             if let first = items.first {
                 if first.isDirectory { Button("打开", systemImage: "folder") { Task { await controller.loadDirectory(first.path) } } }
                 Button("复制", systemImage: "doc.on.doc") { controller.selection = ids; controller.copyFiles(cut: false) }
@@ -512,7 +512,7 @@ struct SFTPBrowserView: View {
                 Button("删除", systemImage: "trash", role: .destructive) { controller.itemPendingDeletion = first }.disabled(items.count != 1)
             }
         } primaryAction: { ids in
-            guard let first = controller.items.first(where: { ids.contains($0.id) }) else { return }
+            guard let first = controller.visibleItems(matching: ids).first else { return }
             if first.isDirectory { Task { await controller.loadDirectory(first.path) } } else { openEditor([first]) }
         }
     }
@@ -520,7 +520,8 @@ struct SFTPBrowserView: View {
     /// unmounts. Responsive hiding is only a presentation override: narrowing
     /// the table must not erase a user's wider column choices.
     private func tableContent(layout: SFTPBrowserLayout) -> some View {
-        Table(controller.visibleItems, selection: $controller.selection,
+        let _ = PerformanceTrace.event(.sftpTableUpdate)
+        return Table(controller.visibleItems, selection: $controller.selection,
               columnCustomization: Binding(
                 get: { layout.tableColumns(from: controller.tableColumnCustomization) },
                 set: { columns in
@@ -547,8 +548,12 @@ struct SFTPBrowserView: View {
                 .customizationID("owner")
                 .disabledCustomizationBehavior(.visibility)
         }
+        // Give SwiftUI the same row-height intent as the one-time native hint;
+        // neither side should keep correcting the other's layout during resize.
+        .environment(\.defaultMinListRowHeight, SFTPBrowserLayout.tableRowHeight)
         .background(MacNativeTableScrollBridge(
-            rowIDs: controller.visibleItems.map(\.id), anchor: $controller.scrollAnchor,
+            rowIDs: controller.visibleItemIDs, anchor: Binding(
+                get: { controller.scrollAnchor }, set: { controller.scrollAnchor = $0 }),
             fixedRowHeight: SFTPBrowserLayout.tableRowHeight))
     }
     private var statusBar: some View {
@@ -579,6 +584,15 @@ enum MacNativeTableScrollMetrics {
     static func hasVerticalOverflow(documentHeight: CGFloat, viewportHeight: CGFloat) -> Bool {
         documentHeight > viewportHeight + 1
     }
+
+    static func unobscuredViewport(_ viewport: NSRect, header: NSRect?) -> NSRect {
+        guard let header else { return viewport }
+        let overlap = viewport.intersection(header)
+        guard !overlap.isNull, overlap.width > 0, overlap.height > 0,
+              overlap.minY <= viewport.minY + 0.5 else { return viewport }
+        return NSRect(x: viewport.minX, y: overlap.maxY, width: viewport.width,
+                      height: max(0, viewport.maxY - overlap.maxY))
+    }
 }
 
 @MainActor enum MacNativeTableRowSizing {
@@ -589,6 +603,28 @@ enum MacNativeTableScrollMetrics {
         guard let fixedHeight else { return }
         if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
         if table.rowHeight != fixedHeight { table.rowHeight = fixedHeight }
+    }
+
+    /// SwiftUI owns its Table's sizing and can replace our initial native hint.
+    /// Apply once per table/configuration, never in response to the resulting
+    /// layout. Reasserting a different height during every representable update
+    /// makes SwiftUI and AppKit invalidate each other's layout indefinitely.
+    @MainActor final class Configuration {
+        private weak var configuredTable: NSTableView?
+        private var configuredHeight: CGFloat?
+
+        func applyIfNeeded(to table: NSTableView, fixedHeight: CGFloat?) {
+            guard configuredTable !== table || configuredHeight != fixedHeight else { return }
+            // Mark before touching AppKit: native setters may synchronously lay out.
+            configuredTable = table
+            configuredHeight = fixedHeight
+            MacNativeTableRowSizing.apply(to: table, fixedHeight: fixedHeight)
+        }
+
+        func reset() {
+            configuredTable = nil
+            configuredHeight = nil
+        }
     }
 }
 
@@ -645,6 +681,34 @@ struct MacNativeTableScrollBridge<ID: Hashable & Sendable>: NSViewRepresentable 
     }
 
     @MainActor final class Coordinator {
+        /// Kept independently of AppKit so remount, reorder and directory-reset
+        /// decisions are deterministic even when native layout arrives later.
+        struct AnchorState {
+            var pendingRestore: ID?
+            private(set) var lastObservedAnchor: ID?
+            private(set) var lastAppliedAnchor: ID?
+
+            init(pendingRestore: ID? = nil) { self.pendingRestore = pendingRestore }
+
+            /// Returns true when the native clip view must explicitly reset.
+            mutating func update(desired: ID?, rowsChanged: Bool) -> Bool {
+                guard let desired else {
+                    let reset = rowsChanged || pendingRestore != nil
+                        || lastObservedAnchor != nil || lastAppliedAnchor != nil
+                    pendingRestore = nil; lastObservedAnchor = nil; lastAppliedAnchor = nil
+                    return reset
+                }
+                if rowsChanged || (desired != lastObservedAnchor && desired != lastAppliedAnchor) {
+                    pendingRestore = desired
+                }
+                return false
+            }
+            mutating func observed(_ anchor: ID) { lastObservedAnchor = anchor }
+            mutating func restored(_ anchor: ID) {
+                lastAppliedAnchor = anchor; pendingRestore = nil
+            }
+        }
+
         weak var probe: ProbeView?
         private var rowIDs: [ID]
         private var anchor: Binding<ID?>
@@ -653,99 +717,121 @@ struct MacNativeTableScrollBridge<ID: Hashable & Sendable>: NSViewRepresentable 
         private weak var scroll: NSScrollView?
         private var boundsObserver: NSObjectProtocol?
         private var attachScheduled = false
-        private var pendingRestore: ID?
-        private var lastObservedAnchor: ID?
-        private var lastAppliedAnchor: ID?
+        private var captureScheduled = false
+        private var attachmentGeneration = 0
+        private var pendingResetToTop = false
+        private let rowSizing = MacNativeTableRowSizing.Configuration()
+        private var anchorState: AnchorState
         private var wasScrollable: Bool?
 
         init(rowIDs: [ID], anchor: Binding<ID?>, fixedRowHeight: CGFloat?) {
             self.rowIDs = rowIDs
             self.anchor = anchor
             self.fixedRowHeight = fixedRowHeight
-            pendingRestore = anchor.wrappedValue
+            anchorState = AnchorState(pendingRestore: anchor.wrappedValue)
         }
 
         func update(rowIDs: [ID], anchor: Binding<ID?>, fixedRowHeight: CGFloat?) {
+            // Record intent only. Native setters and binding writes must never
+            // run inside SwiftUI's updateNSView transaction or ProbeView.layout.
+            let rowsChanged = self.rowIDs != rowIDs
             self.rowIDs = rowIDs
             self.anchor = anchor
             self.fixedRowHeight = fixedRowHeight
-            if let table { MacNativeTableRowSizing.apply(to: table, fixedHeight: fixedRowHeight) }
             let desired = anchor.wrappedValue
-            if desired != lastObservedAnchor && desired != lastAppliedAnchor {
-                pendingRestore = desired
-                if desired == nil, let scroll {
-                    // Changing directories should begin at the top even when
-                    // SwiftUI reuses the same native table instance.
-                    scroll.contentView.scroll(to: .zero)
-                    scroll.reflectScrolledClipView(scroll.contentView)
-                    lastAppliedAnchor = nil
-                }
+            if anchorState.update(desired: desired, rowsChanged: rowsChanged) {
+                pendingResetToTop = true
+            } else if desired != nil {
+                pendingResetToTop = false
             }
             scheduleAttach()
         }
 
         func scheduleAttach() {
-            if let probe, let table, let scroll,
-               table.window === probe.window, scroll.window === probe.window,
-               table.enclosingScrollView === scroll {
-                MacNativeTableRowSizing.apply(to: table, fixedHeight: fixedRowHeight)
-                updateViewport()
-                return
-            }
             guard !attachScheduled else { return }
             attachScheduled = true
+            let generation = attachmentGeneration
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
+                guard let self, self.attachmentGeneration == generation else { return }
                 self.attachScheduled = false
                 self.attach()
             }
         }
 
         func detach() {
+            attachmentGeneration &+= 1
+            attachScheduled = false
+            captureScheduled = false
             if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
             boundsObserver = nil
             table = nil
             scroll = nil
             wasScrollable = nil
+            rowSizing.reset()
         }
 
         private func attach() {
             guard let probe, probe.window != nil else { detach(); return }
-            if let table, let scroll,
-               table.window === probe.window, scroll.window === probe.window,
-               table.enclosingScrollView === scroll {
-                MacNativeTableRowSizing.apply(to: table, fixedHeight: fixedRowHeight)
+            if let table, isCurrentAttachment() {
+                rowSizing.applyIfNeeded(to: table, fixedHeight: fixedRowHeight)
                 updateViewport()
                 return
             }
             guard let nativeTable = Self.findTable(near: probe),
                   let nativeScroll = nativeTable.enclosingScrollView else { return }
-            MacNativeTableRowSizing.apply(to: nativeTable, fixedHeight: fixedRowHeight)
             if table !== nativeTable || scroll !== nativeScroll {
                 detach()
                 table = nativeTable
                 scroll = nativeScroll
-                pendingRestore = anchor.wrappedValue
+                anchorState.pendingRestore = anchor.wrappedValue
                 nativeScroll.contentView.postsBoundsChangedNotifications = true
+                let generation = attachmentGeneration
                 boundsObserver = NotificationCenter.default.addObserver(
                     forName: NSView.boundsDidChangeNotification,
                     object: nativeScroll.contentView,
                     queue: .main
                 ) { [weak self] _ in
-                    Task { @MainActor [weak self] in self?.captureTopRow() }
+                    // AppKit posts on the main queue, including during layout.
+                    // Coalesce the deferred write and reject old table callbacks.
+                    Task { @MainActor [weak self] in
+                        guard let self, self.attachmentGeneration == generation else { return }
+                        self.scheduleCapture()
+                    }
                 }
             }
+            rowSizing.applyIfNeeded(to: nativeTable, fixedHeight: fixedRowHeight)
             updateViewport()
+        }
+
+        private func scheduleCapture() {
+            guard !captureScheduled else { return }
+            captureScheduled = true
+            let generation = attachmentGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.attachmentGeneration == generation else { return }
+                self.captureScheduled = false
+                self.captureTopRow()
+            }
         }
 
         private func updateViewport() {
             guard let scroll else { return }
+            if pendingResetToTop {
+                // Consume intent before native scrolling can trigger another layout.
+                pendingResetToTop = false
+                if let table, table.numberOfRows > 0 {
+                    scrollRowToLeadingEdge(0, table: table, scroll: scroll, horizontalOrigin: 0)
+                } else {
+                    scrollIfNeeded(to: .zero, in: scroll)
+                }
+                scheduleCapture()
+            }
             let scrollable = Self.hasVerticalOverflow(scroll)
             if wasScrollable == false, scrollable {
                 // A wide window may show every row and clamp to the top. Keep
                 // the last meaningful ID while wide, then restore it when the
                 // viewport becomes scrollable again.
-                pendingRestore = anchor.wrappedValue
+                anchorState.pendingRestore = anchor.wrappedValue
             }
             wasScrollable = scrollable
             restoreIfNeeded()
@@ -759,28 +845,81 @@ struct MacNativeTableScrollBridge<ID: Hashable & Sendable>: NSViewRepresentable 
         }
 
         private func restoreIfNeeded() {
-            guard let pendingRestore, let table, let scroll,
+            guard let pendingRestore = anchorState.pendingRestore, let table, let scroll,
                   let row = rowIDs.firstIndex(of: pendingRestore),
                   row < table.numberOfRows else { return }
-            let clip = scroll.contentView
-            let document = scroll.documentView ?? table
-            let y = table.convert(table.rect(ofRow: row), to: document).minY
-            clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
-            scroll.reflectScrolledClipView(clip)
-            lastAppliedAnchor = pendingRestore
-            self.pendingRestore = nil
-            captureTopRow()
+            anchorState.restored(pendingRestore)
+            scrollRowToLeadingEdge(row, table: table, scroll: scroll,
+                                   horizontalOrigin: scroll.contentView.bounds.minX)
+            scheduleCapture()
         }
 
-        private func captureTopRow() {
-            guard pendingRestore == nil, probe?.window != nil,
-                  let table, let scroll, Self.hasVerticalOverflow(scroll) else { return }
-            let rows = table.rows(in: table.convert(scroll.contentView.bounds, from: scroll.contentView))
+        private func scrollRowToLeadingEdge(_ row: Int, table: NSTableView,
+                                            scroll: NSScrollView, horizontalOrigin: CGFloat) {
+            let viewport = table.convert(scroll.contentView.bounds, from: scroll.contentView)
+            let unobscured = Self.unobscuredViewport(table: table, scroll: scroll)
+            let leadingObstruction = unobscured.minY - viewport.minY
+            let origin = NSPoint(x: 0, y: table.rect(ofRow: row).minY - leadingObstruction)
+            let document = scroll.documentView ?? table
+            let y = table.convert(origin, to: document).y
+            scrollIfNeeded(to: NSPoint(x: horizontalOrigin, y: y), in: scroll)
+        }
+
+        private static func unobscuredViewport(table: NSTableView, scroll: NSScrollView) -> NSRect {
+            let viewport = table.convert(scroll.contentView.bounds, from: scroll.contentView)
+            let header = table.headerView.flatMap { header -> NSRect? in
+                guard !header.isHidden, header.window === table.window else { return nil }
+                return table.convert(header.visibleRect, from: header)
+            }
+            return MacNativeTableScrollMetrics.unobscuredViewport(viewport, header: header)
+        }
+
+        private func scrollIfNeeded(to origin: NSPoint, in scroll: NSScrollView) {
+            let clip = scroll.contentView
+            let proposed = NSRect(origin: origin, size: clip.bounds.size)
+            let target = clip.constrainBoundsRect(proposed).origin
+            guard abs(clip.bounds.minX - target.x) > 0.5 ||
+                    abs(clip.bounds.minY - target.y) > 0.5 else { return }
+            clip.scroll(to: target)
+            scroll.reflectScrolledClipView(clip)
+        }
+
+        /// Deferred native observer entry point. Validate ownership and handle
+        /// resize restoration before reading a possibly clamped top row.
+        func captureTopRow() {
+            guard isCurrentAttachment(), let table, let scroll else {
+                scheduleAttach()
+                return
+            }
+            let scrollable = Self.hasVerticalOverflow(scroll)
+            if !scrollable {
+                wasScrollable = false
+                return
+            }
+            if wasScrollable == false {
+                // A clip notification can precede the probe's layout callback.
+                // Restore the retained deep row before the clamped row 0 can
+                // overwrite it. The resulting sample is queued after restoration.
+                updateViewport()
+                return
+            }
+            guard !pendingResetToTop, anchorState.pendingRestore == nil else { return }
+            let rows = table.rows(in: Self.unobscuredViewport(table: table, scroll: scroll))
             guard rows.length > 0, rowIDs.indices.contains(rows.location) else { return }
             let rowID = rowIDs[rows.location]
             guard anchor.wrappedValue != rowID else { return }
-            lastObservedAnchor = rowID
+            anchorState.observed(rowID)
             anchor.wrappedValue = rowID
+        }
+
+        private func isCurrentAttachment() -> Bool {
+            guard let probe, let window = probe.window, let table, let scroll,
+                  table.window === window, scroll.window === window,
+                  table.enclosingScrollView === scroll else { return false }
+            // SwiftUI can replace its native Table before the queued attach
+            // runs. An old clip notification must never publish through the
+            // new view's binding even while both views retain the same window.
+            return Self.findTable(near: probe) === table
         }
 
         private static func findTable(near probe: NSView) -> NSTableView? {
@@ -832,19 +971,27 @@ final class MacSFTPController: ObservableObject {
     private var transferGeneration = UUID()
     var hasActiveTransfer: Bool { transferTask != nil }
     @Published var items: [RemoteFileItem] = [] { didSet { rebuildVisibleItems() } }
-    @Published var search = "" { didSet { rebuildVisibleItems() } }
-    @Published var showHidden = false { didSet { rebuildVisibleItems() } }
+    @Published var search = "" { didSet { if search != oldValue { rebuildVisibleItems() } } }
+    @Published var showHidden = false { didSet { if showHidden != oldValue { rebuildVisibleItems() } } }
     @Published private(set) var visibleItems: [RemoteFileItem] = []
     @Published private(set) var directoryError: String?
     private var failedDirectoryPath: String?
     @Published var hasLoadedDirectory = false
     @Published var currentPath = "."
     @Published var pathText = "."
-    @Published var selection: Set<String> = []
+    @Published var selection: Set<String> = [] {
+        didSet { if selection != oldValue { selectedItems = visibleItems(matching: selection) } }
+    }
     /// Mac-only presentation state shared by full-page and inspector browsers.
     /// It is intentionally never serialized with server or sync settings.
     @Published var tableColumnCustomization = TableColumnCustomization<RemoteFileItem>()
-    @Published var scrollAnchor: String?
+    // Native scrolling must not invalidate the entire SwiftUI browser. The bridge
+    // reads this state directly when remounting or changing its viewport.
+    var scrollAnchor: String?
+    private(set) var visibleItemIDs: [String] = []
+    private var visiblePositions: [String: Int] = [:]
+    private(set) var selectedItems: [RemoteFileItem] = []
+    private(set) var listingProjectionBuildCount = 0
     @Published var busyMessage: String?
     @Published var errorMessage: String?
     @Published var statusMessage = "尚未读取远程目录"
@@ -862,19 +1009,39 @@ final class MacSFTPController: ObservableObject {
     @Published var conflictPolicy: SFTPConflictPolicy = .overwrite
 
     private func rebuildVisibleItems() {
-        visibleItems = items.filter { (showHidden || !$0.name.hasPrefix(".")) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) }
-        selection.formIntersection(visibleItems.map(\.id))
-        if let scrollAnchor, !visibleItems.contains(where: { $0.id == scrollAnchor }) {
-            self.scrollAnchor = visibleItems.first?.id
+        let interval = PerformanceTrace.begin(.sftpProjection)
+        defer { PerformanceTrace.end(interval) }
+        listingProjectionBuildCount += 1
+        var visible: [RemoteFileItem] = []
+        var ids: [String] = []
+        var positions: [String: Int] = [:]
+        visible.reserveCapacity(items.count)
+        ids.reserveCapacity(items.count)
+        positions.reserveCapacity(items.count)
+        for item in items where (showHidden || !item.name.hasPrefix(".")) &&
+            (search.isEmpty || item.name.localizedCaseInsensitiveContains(search)) {
+            if positions[item.id] == nil { positions[item.id] = visible.count }
+            visible.append(item)
+            ids.append(item.id)
+        }
+        visibleItemIDs = ids
+        visiblePositions = positions
+        if visibleItems != visible { visibleItems = visible }
+        let retainedSelection = selection.filter { positions[$0] != nil }
+        if retainedSelection != selection { selection = retainedSelection }
+        selectedItems = visibleItems(matching: selection)
+        if let scrollAnchor, positions[scrollAnchor] == nil {
+            self.scrollAnchor = ids.first
         }
     }
-    var selectedItems: [RemoteFileItem] { visibleItems.filter { selection.contains($0.id) } }
-    var fileAccess: DesktopFileAccess? { appState.map { DesktopFileAccess(server: server, appState: $0) } }
 
-    var selectedItem: RemoteFileItem? {
-        guard let id = selection.first else { return nil }
-        return visibleItems.first { $0.id == id }
+    /// Resolve only selected IDs, keeping the native table's display ordering.
+    /// Scrolling and toolbar validation never walk the complete directory.
+    func visibleItems(matching ids: Set<String>) -> [RemoteFileItem] {
+        ids.compactMap { visiblePositions[$0] }.sorted().map { visibleItems[$0] }
     }
+    var fileAccess: DesktopFileAccess? { appState.map { DesktopFileAccess(server: server, appState: $0) } }
+    var selectedItem: RemoteFileItem? { selectedItems.first }
 
     private var connectionConfig: ServerConnectionConfig { appState?.connectionConfig(for: server) ?? server.connectionConfig }
 

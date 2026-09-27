@@ -14,12 +14,16 @@ final class RecordingFormatTests: XCTestCase {
     private let delegate = RecordingTestDelegate()
     private var directory: URL!
     override func setUpWithError() throws {
+        #if DEBUG
         XCTAssertTrue(RecordingWriter.resetShutdownSealForTesting())
+        #endif
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("serverdash-recording-test-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     }
     override func tearDownWithError() throws {
+        #if DEBUG
         XCTAssertTrue(RecordingWriter.resetShutdownSealForTesting())
+        #endif
         try FileManager.default.removeItem(at: directory)
     }
     private func terminal(columns: Int = 40, rows: Int = 5) -> Terminal {
@@ -36,7 +40,8 @@ final class RecordingFormatTests: XCTestCase {
         try data.write(to: url)
         return url
     }
-    func testPendingWriteDrainUsesStableSealAndAbsoluteDeadline() async {
+    func testPendingWriteDrainUsesStableSealAndAbsoluteDeadline() async throws {
+        #if DEBUG
         let release = DispatchSemaphore(value: 0)
         let writer = RecordingWriter(
             header: .init(name: "shutdown"),
@@ -62,6 +67,9 @@ final class RecordingFormatTests: XCTestCase {
         )
         XCTAssertTrue(drained)
         XCTAssertTrue(RecordingWriter.resetShutdownSealForTesting())
+        #else
+        throw XCTSkip("Resetting the process-wide recording shutdown seal requires the Debug-only test hook.")
+        #endif
     }
     private func recording(duration: Double = 10) throws -> (URL, RecordingFrame, RecordingFrame) {
         let term = terminal(); term.feed(text: "first")
@@ -358,10 +366,12 @@ final class RecordingFormatTests: XCTestCase {
         let finished = expectation(description: "finalized")
         writer.finish(time: 12, reason: "user") { result in
             if case .failure = result { XCTFail("Failed writer") }
+            #if DEBUG
             XCTAssertTrue(
                 RecordingWriter.resetShutdownSealForTesting(),
                 "A finish callback must run only after the process-wide pending-write group has drained"
             )
+            #endif
             finished.fulfill()
         }
         await fulfillment(of: [finished], timeout: 10)

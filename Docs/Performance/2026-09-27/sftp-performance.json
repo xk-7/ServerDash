@@ -1,0 +1,22 @@
+{
+  "after" : {
+    "medianMilliseconds" : 0.00079199999999999995,
+    "p95Milliseconds" : 0.0010839999999999999
+  },
+  "before" : {
+    "medianMilliseconds" : 140.459125,
+    "p95Milliseconds" : 144.993583
+  },
+  "files" : 10000,
+  "iterations" : 30,
+  "notes" : "Exact prior map\/filter path versus retained indexes; excludes SwiftUI layout, AppKit drawing and UI automation.",
+  "scenario" : "100 repeated SFTP body projections",
+  "testHostResourceUsage" : {
+    "peakResidentMemoryBytes" : 659537920,
+    "processIdentifier" : 36519,
+    "scope" : "Cumulative process-lifetime peak resident memory of the XCTest host, including earlier tests and fixtures in this process. Not a per-operation increment, not the QA app, and not the xcodebuild driver.",
+    "source" : "Darwin.getrusage(RUSAGE_SELF).ru_maxrss",
+    "unit" : "bytes"
+  },
+  "warmups" : 3
+}

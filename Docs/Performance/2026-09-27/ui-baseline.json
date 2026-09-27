@@ -1,0 +1,289 @@
+{
+  "commit": "e4d6b84",
+  "configuration": "Release",
+  "warmups": 3,
+  "iterations": 30,
+  "window": "1440x900",
+  "theme": "light",
+  "items": 10000,
+  "samples": [
+    {
+      "searchMS": 1044,
+      "clearMS": 1953
+    },
+    {
+      "searchMS": 1067,
+      "clearMS": 1966
+    },
+    {
+      "searchMS": 1066,
+      "clearMS": 2001
+    },
+    {
+      "searchMS": 970,
+      "clearMS": 1984
+    },
+    {
+      "searchMS": 951,
+      "clearMS": 1963
+    },
+    {
+      "searchMS": 914,
+      "clearMS": 1969
+    },
+    {
+      "searchMS": 944,
+      "clearMS": 1969
+    },
+    {
+      "searchMS": 952,
+      "clearMS": 1996
+    },
+    {
+      "searchMS": 1067,
+      "clearMS": 2003
+    },
+    {
+      "searchMS": 1082,
+      "clearMS": 1984
+    },
+    {
+      "searchMS": 982,
+      "clearMS": 1969
+    },
+    {
+      "searchMS": 964,
+      "clearMS": 1998
+    },
+    {
+      "searchMS": 1068,
+      "clearMS": 1932
+    },
+    {
+      "searchMS": 885,
+      "clearMS": 1466
+    },
+    {
+      "searchMS": 681,
+      "clearMS": 1435
+    },
+    {
+      "searchMS": 668,
+      "clearMS": 1398
+    },
+    {
+      "searchMS": 712,
+      "clearMS": 1423
+    },
+    {
+      "searchMS": 682,
+      "clearMS": 1426
+    },
+    {
+      "searchMS": 706,
+      "clearMS": 5284
+    },
+    {
+      "searchMS": 1400,
+      "clearMS": 5950
+    },
+    {
+      "searchMS": 1514,
+      "clearMS": 6642
+    },
+    {
+      "searchMS": 1398,
+      "clearMS": 5945
+    },
+    {
+      "searchMS": 1382,
+      "clearMS": 5920
+    },
+    {
+      "searchMS": 1434,
+      "clearMS": 5908
+    },
+    {
+      "searchMS": 1347,
+      "clearMS": 5816
+    },
+    {
+      "searchMS": 1400,
+      "clearMS": 5890
+    },
+    {
+      "searchMS": 1341,
+      "clearMS": 5898
+    },
+    {
+      "searchMS": 1479,
+      "clearMS": 6034
+    },
+    {
+      "searchMS": 1368,
+      "clearMS": 6034
+    },
+    {
+      "searchMS": 1460,
+      "clearMS": 6027
+    }
+  ],
+  "notes": "CUA setValue + full accessibility read; NOT application-only latency. No concurrent build during samples. RSS after baseline224176 KiB; idleCPU0.0 percent.",
+  "summary": {
+    "search": {
+      "medianMS": 1066.5,
+      "p95MS": 1479
+    },
+    "clear": {
+      "medianMS": 1997.0,
+      "p95MS": 6034
+    }
+  },
+  "rawSamples": [
+    {
+      "searchMS": 1494,
+      "clearMS": 1982
+    },
+    {
+      "searchMS": 963,
+      "clearMS": 2036
+    },
+    {
+      "searchMS": 1069,
+      "clearMS": 2049
+    },
+    {
+      "searchMS": 1044,
+      "clearMS": 1953
+    },
+    {
+      "searchMS": 1067,
+      "clearMS": 1966
+    },
+    {
+      "searchMS": 1066,
+      "clearMS": 2001
+    },
+    {
+      "searchMS": 970,
+      "clearMS": 1984
+    },
+    {
+      "searchMS": 951,
+      "clearMS": 1963
+    },
+    {
+      "searchMS": 914,
+      "clearMS": 1969
+    },
+    {
+      "searchMS": 944,
+      "clearMS": 1969
+    },
+    {
+      "searchMS": 952,
+      "clearMS": 1996
+    },
+    {
+      "searchMS": 1067,
+      "clearMS": 2003
+    },
+    {
+      "searchMS": 1082,
+      "clearMS": 1984
+    },
+    {
+      "searchMS": 982,
+      "clearMS": 1969
+    },
+    {
+      "searchMS": 964,
+      "clearMS": 1998
+    },
+    {
+      "searchMS": 1068,
+      "clearMS": 1932
+    },
+    {
+      "searchMS": 885,
+      "clearMS": 1466
+    },
+    {
+      "searchMS": 681,
+      "clearMS": 1435
+    },
+    {
+      "searchMS": 668,
+      "clearMS": 1398
+    },
+    {
+      "searchMS": 712,
+      "clearMS": 1423
+    },
+    {
+      "searchMS": 682,
+      "clearMS": 1426
+    },
+    {
+      "searchMS": 706,
+      "clearMS": 5284
+    },
+    {
+      "searchMS": 1400,
+      "clearMS": 5950
+    },
+    {
+      "searchMS": 1514,
+      "clearMS": 6642
+    },
+    {
+      "searchMS": 1398,
+      "clearMS": 5945
+    },
+    {
+      "searchMS": 1382,
+      "clearMS": 5920
+    },
+    {
+      "searchMS": 1434,
+      "clearMS": 5908
+    },
+    {
+      "searchMS": 1347,
+      "clearMS": 5816
+    },
+    {
+      "searchMS": 1400,
+      "clearMS": 5890
+    },
+    {
+      "searchMS": 1341,
+      "clearMS": 5898
+    },
+    {
+      "searchMS": 1479,
+      "clearMS": 6034
+    },
+    {
+      "searchMS": 1368,
+      "clearMS": 6034
+    },
+    {
+      "searchMS": 1460,
+      "clearMS": 6027
+    }
+  ],
+  "scope": "CUA setValue plus complete accessibility snapshot; includes automation pacing and AX traversal, not event-to-frame or application main-thread time. Separate profiler runs are excluded from timed samples.",
+  "sampleAccounting": {
+    "sourcePath": "/tmp/serverdash-performance-ui-baseline.json",
+    "sourceSHA256": "86d3408804cca573bea8ec51d192fe037f573d12cdcbcc6bfd2955c30b14c01c",
+    "sourceSampleCount": 33,
+    "sourceIncludesWarmups": true,
+    "warmupsBeforeMeasurement": 3,
+    "discardedSourcePrefixSamples": 3,
+    "measuredSampleCount": 30,
+    "rawSamplesScope": "Exact source samples in original order. Baseline includes its first three warmups; optimized source already excludes warmups and those warmup values were not supplied.",
+    "samplesScope": "Thirty measured samples only; warmups excluded. Summary is recomputed from this array.",
+    "p95Method": "Nearest rank: sortedSamples[ceil(0.95 * count) - 1]."
+  }
+}

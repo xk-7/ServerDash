@@ -5,12 +5,110 @@ struct MachineBrowserItem: Equatable {
     let id: String
     let name: String
     let address: String
+    let username: String
     let group: String
     let tags: [String]
+    let tagSearchText: String
     let notes: String
     let kind: String
     let createdAt: Date
     let monitoringEnabled: Bool?
+
+    init(
+        id: String,
+        name: String,
+        address: String,
+        username: String = "",
+        group: String,
+        tags: [String],
+        tagSearchText: String? = nil,
+        notes: String,
+        kind: String,
+        createdAt: Date,
+        monitoringEnabled: Bool?
+    ) {
+        self.id = id
+        self.name = name
+        self.address = address
+        self.username = username
+        self.group = group
+        self.tags = tags
+        self.tagSearchText = tagSearchText ?? tags.joined(separator: " ")
+        self.notes = notes
+        self.kind = kind
+        self.createdAt = createdAt
+        self.monitoringEnabled = monitoringEnabled
+    }
+}
+
+/// Cheap, exact dashboard invalidation input. SwiftData-backed values are read
+/// on every body evaluation, while trimming, UUID formatting, and tag parsing
+/// happen only when one of these query-relevant values (or its order) changes.
+struct DashboardServerMetadataInput: Equatable {
+    let id: UUID
+    let name: String
+    let address: String
+    let username: String
+    let group: String
+    let tagsText: String
+    let notes: String
+    let createdAt: Date
+    let monitoringEnabled: Bool
+
+    init(server: ServerRecord) {
+        id = server.id
+        name = server.name
+        address = server.host
+        username = server.username
+        group = server.groupName
+        tagsText = server.tagsText
+        notes = server.notes
+        createdAt = server.createdAt
+        monitoringEnabled = server.enableDashboardMonitor
+    }
+
+    init(
+        id: UUID,
+        name: String,
+        address: String,
+        username: String,
+        group: String,
+        tagsText: String,
+        notes: String,
+        createdAt: Date,
+        monitoringEnabled: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.address = address
+        self.username = username
+        self.group = group
+        self.tagsText = tagsText
+        self.notes = notes
+        self.createdAt = createdAt
+        self.monitoringEnabled = monitoringEnabled
+    }
+
+    fileprivate var browserItem: MachineBrowserItem {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tags = tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return MachineBrowserItem(
+            id: id.uuidString,
+            name: trimmedName.isEmpty ? address : trimmedName,
+            address: address,
+            username: username,
+            group: ServerBrowserQuery.effectiveGroupName(group),
+            tags: tags,
+            tagSearchText: tagsText,
+            notes: notes,
+            kind: "SSH",
+            createdAt: createdAt,
+            monitoringEnabled: monitoringEnabled
+        )
+    }
 }
 
 struct MachineBrowserGroup: Equatable, Identifiable {
@@ -26,6 +124,11 @@ struct MachineBrowserQuery: Equatable {
     var kind = "all"
     var monitoring = "all"
     var sort = "name"
+
+    var hasFilters: Bool {
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !group.isEmpty || !tag.isEmpty || kind != "all" || monitoring != "all"
+    }
 }
 
 struct MachineBrowserGroupRow: Identifiable {
@@ -43,6 +146,7 @@ struct MachineBrowserProjection {
     let groupNames: Set<String>
     private let descendantNames: [String: Set<String>]
     private let groupNameByID: [UUID: String]
+    private let indexByID: [String: Int]
     private let searchableText: [String: String]
     private let sortedItems: [String: [MachineBrowserItem]]
 
@@ -51,11 +155,21 @@ struct MachineBrowserProjection {
         groupNames = Set(groups.map(\.name))
         var text: [String: String] = [:]
         var directCounts: [String: Int] = [:]
-        for item in items {
-            text[item.id] = ([item.name, item.address, item.group, item.notes] + item.tags).joined(separator: "\n")
+        var indices: [String: Int] = [:]
+        for (index, item) in items.enumerated() {
+            text[item.id] = ([
+                item.name,
+                item.address,
+                item.username,
+                item.group,
+                item.tagSearchText,
+                item.notes
+            ] + item.tags).joined(separator: "\n")
+            indices[item.id] = index
             directCounts[item.group, default: 0] += 1
         }
         searchableText = text
+        indexByID = indices
 
         let byID = Dictionary(groups.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         groupNameByID = byID.mapValues(\.name)
@@ -117,11 +231,19 @@ struct MachineBrowserProjection {
         }
     }
 
+    func itemIndex(id: String) -> Int? { indexByID[id] }
+
     /// The dashboard uses the same catalog hierarchy as the machine browser.
     func groupNamesIncludingDescendants(of id: UUID) -> Set<String>? {
         guard let name = groupNameByID[id] else { return nil }
         return descendantNames[name] ?? [name]
     }
+}
+
+struct DashboardProjectionResult {
+    let catalog: DashboardFilterCatalog
+    let query: MachineBrowserQuery
+    let indices: [Int]
 }
 
 struct DashboardFilterOption: Identifiable, Equatable {
@@ -253,17 +375,34 @@ struct MachineBrowserFilterState: Equatable {
 final class MachineBrowserProjectionCache {
     private var sourceItems: [MachineBrowserItem] = []
     private var sourceGroups: [MachineBrowserGroup] = []
+    private var dashboardMetadataInputs: [DashboardServerMetadataInput]?
     private var projection: MachineBrowserProjection?
     private var lastQuery: MachineBrowserQuery?
     private var lastIDs: [String] = []
+    private var lastIndices: [Int] = []
+    private var cachedDashboardCatalog: DashboardFilterCatalog?
+    private var dashboardCatalogTags: [DashboardCatalogTag] = []
+    private var dashboardCatalogProjectionBuild = -1
     private(set) var buildCount = 0
     private(set) var filterCount = 0
+    private(set) var catalogBuildCount = 0
 
     func resolve(items: [MachineBrowserItem], groups: [MachineBrowserGroup]) -> MachineBrowserProjection {
+        dashboardMetadataInputs = nil
+        return resolveProjection(items: items, groups: groups)
+    }
+
+    private func resolveProjection(
+        items: [MachineBrowserItem],
+        groups: [MachineBrowserGroup]
+    ) -> MachineBrowserProjection {
         if projection == nil || sourceItems != items || sourceGroups != groups {
             sourceItems = items; sourceGroups = groups
             projection = MachineBrowserProjection(items: items, groups: groups)
             lastQuery = nil
+            lastIDs = []
+            lastIndices = []
+            cachedDashboardCatalog = nil
             buildCount += 1
         }
         return projection!
@@ -272,10 +411,104 @@ final class MachineBrowserProjectionCache {
     func filteredIDs(_ query: MachineBrowserQuery) -> [String] {
         if lastQuery != query {
             lastIDs = projection?.filteredIDs(query) ?? []
+            lastIndices = lastIDs.compactMap { projection?.itemIndex(id: $0) }
             lastQuery = query
             filterCount += 1
         }
         return lastIDs
+    }
+
+    func filteredIndices(_ query: MachineBrowserQuery) -> [Int] {
+        _ = filteredIDs(query)
+        return lastIndices
+    }
+
+    func dashboardCatalog(
+        items: [MachineBrowserItem],
+        groups: [MachineBrowserGroup],
+        tags: [DashboardCatalogTag]
+    ) -> DashboardFilterCatalog {
+        dashboardMetadataInputs = nil
+        let resolved = resolveProjection(items: items, groups: groups)
+        return dashboardCatalog(
+            projection: resolved,
+            items: items,
+            tags: tags
+        )
+    }
+
+    private func dashboardCatalog(
+        projection resolved: MachineBrowserProjection,
+        items: [MachineBrowserItem],
+        tags: [DashboardCatalogTag]
+    ) -> DashboardFilterCatalog {
+        if cachedDashboardCatalog == nil ||
+            dashboardCatalogProjectionBuild != buildCount ||
+            dashboardCatalogTags != tags {
+            cachedDashboardCatalog = DashboardFilterCatalog(
+                projection: resolved,
+                items: items,
+                tags: tags
+            )
+            dashboardCatalogProjectionBuild = buildCount
+            dashboardCatalogTags = tags
+            catalogBuildCount += 1
+        }
+        return cachedDashboardCatalog!
+    }
+
+    func resolveDashboard(
+        items: [MachineBrowserItem],
+        groups: [MachineBrowserGroup],
+        tags: [DashboardCatalogTag],
+        query: (DashboardFilterCatalog) -> MachineBrowserQuery
+    ) -> DashboardProjectionResult {
+        let interval = PerformanceTrace.begin(.dashboardFilter)
+        defer { PerformanceTrace.end(interval) }
+        let catalog = dashboardCatalog(items: items, groups: groups, tags: tags)
+        return dashboardResult(catalog: catalog, query: query)
+    }
+
+    func resolveDashboard(
+        inputs: [DashboardServerMetadataInput],
+        groups: [MachineBrowserGroup],
+        tags: [DashboardCatalogTag],
+        query: (DashboardFilterCatalog) -> MachineBrowserQuery
+    ) -> DashboardProjectionResult {
+        let interval = PerformanceTrace.begin(.dashboardFilter)
+        defer { PerformanceTrace.end(interval) }
+        let items: [MachineBrowserItem]
+        let inputsChanged = dashboardMetadataInputs != inputs
+        if inputsChanged {
+            dashboardMetadataInputs = inputs
+            items = inputs.map(\.browserItem)
+        } else {
+            items = sourceItems
+        }
+        let resolved: MachineBrowserProjection
+        if inputsChanged || projection == nil || sourceGroups != groups {
+            resolved = resolveProjection(items: items, groups: groups)
+        } else {
+            resolved = projection!
+        }
+        let catalog = dashboardCatalog(
+            projection: resolved,
+            items: items,
+            tags: tags
+        )
+        return dashboardResult(catalog: catalog, query: query)
+    }
+
+    private func dashboardResult(
+        catalog: DashboardFilterCatalog,
+        query: (DashboardFilterCatalog) -> MachineBrowserQuery
+    ) -> DashboardProjectionResult {
+        let resolvedQuery = query(catalog)
+        return DashboardProjectionResult(
+            catalog: catalog,
+            query: resolvedQuery,
+            indices: filteredIndices(resolvedQuery)
+        )
     }
 }
 

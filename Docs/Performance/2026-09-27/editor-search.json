@@ -1,0 +1,52 @@
+{
+  "fixtures" : [
+    {
+      "baseline" : {
+        "maxMS" : 63.768959000000002,
+        "medianMS" : 61.785125000000001,
+        "p95MS" : 63.507582999999997
+      },
+      "cached" : {
+        "maxMS" : 0.00033399999999999999,
+        "medianMS" : 0.000292,
+        "p95MS" : 0.00033399999999999999
+      },
+      "cursorMovesPerSample" : 12,
+      "indexBuild" : {
+        "maxMS" : 5.2556659999999997,
+        "medianMS" : 5.1401044999999996,
+        "p95MS" : 5.251125
+      },
+      "utf16Units" : 1300000
+    },
+    {
+      "baseline" : {
+        "maxMS" : 395.30541599999998,
+        "medianMS" : 390.52356299999997,
+        "p95MS" : 395.223792
+      },
+      "cached" : {
+        "maxMS" : 0.00033399999999999999,
+        "medianMS" : 0.000292,
+        "p95MS" : 0.00033399999999999999
+      },
+      "cursorMovesPerSample" : 12,
+      "indexBuild" : {
+        "maxMS" : 33.448166000000001,
+        "medianMS" : 32.574187500000001,
+        "p95MS" : 33.419375000000002
+      },
+      "utf16Units" : 8388000
+    }
+  ],
+  "iterations" : 30,
+  "note" : "Exact prior capped case-insensitive counting versus cached binary search, excluding UI\/AX and debounce. Index construction reported separately.",
+  "testHostResourceUsage" : {
+    "peakResidentMemoryBytes" : 659537920,
+    "processIdentifier" : 36519,
+    "scope" : "Cumulative process-lifetime peak resident memory of the XCTest host, including earlier tests and fixtures in this process. Not a per-operation increment, not the QA app, and not the xcodebuild driver.",
+    "source" : "Darwin.getrusage(RUSAGE_SELF).ru_maxrss",
+    "unit" : "bytes"
+  },
+  "warmups" : 3
+}
