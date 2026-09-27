@@ -2,7 +2,7 @@
   "use strict";
 
   const RELEASE_API = "https://api.github.com/repos/xk-7/ServerDash/releases/latest";
-  const FALLBACK_VERSION = "v1.0.4";
+  const FALLBACK_VERSION = "v1.0.5";
   const THEME_KEY = "serverdash-theme";
   const languageButtons = [...document.querySelectorAll("[data-set-lang]")];
   const status = document.querySelector("#release-status");
