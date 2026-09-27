@@ -1959,8 +1959,14 @@ final class ConnectionProcessControllerTests: XCTestCase {
         )
         let pidURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ServerDash-child-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: pidURL) }
-        let script = "trap '' TERM; sleep 30 & child=$!; printf '%s' \"$child\" > \"$1\"; wait"
+        let temporaryPIDURL = pidURL.appendingPathExtension("tmp")
+        defer {
+            try? FileManager.default.removeItem(at: pidURL)
+            try? FileManager.default.removeItem(at: temporaryPIDURL)
+        }
+        // Publish readiness only after the complete PID is written. Shell redirection
+        // creates an empty file before printf runs, so file existence alone races.
+        let script = "trap '' TERM; sleep 30 & child=$!; printf '%s' \"$child\" > \"$1.tmp\"; /bin/mv \"$1.tmp\" \"$1\"; wait"
         let task = Task {
             try await controller.run(
                 ProcessRunRequest(
@@ -1974,12 +1980,15 @@ final class ConnectionProcessControllerTests: XCTestCase {
             )
         }
 
+        defer { task.cancel() }
+
         let childPIDWasWritten = await waitUntil {
             FileManager.default.fileExists(atPath: pidURL.path)
         }
         XCTAssertTrue(childPIDWasWritten)
         let childPIDText = try String(contentsOf: pidURL, encoding: .utf8)
         let childPID = try XCTUnwrap(Int32(childPIDText))
+        XCTAssertGreaterThan(childPID, 1)
         let cancelledAt = Date()
         task.cancel()
         await assertCancelled(task)
