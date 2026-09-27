@@ -191,7 +191,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 
 ## 开发与验证状态
 
-1.0.4 继续使用 Swift 5.9 与完整严格并发检查，并纳入按需 RDP 依赖自举、SSH 审查后续的 fail-closed 收口，以及 Windows RDP 证书/NLA 修复；RDP 仍标记为开发中。详见 [1.0.4 发布通知](Docs/RELEASE_NOTES_1.0.4.md)和[macOS 工作台验收记录](Docs/WORKBENCH_UI_QA.md)。
+1.0.5（Build 10）完善 macOS 原生紧凑布局、稳定分组／标签筛选、SFTP 选择与滚动保留、编辑器搜索／撤销和本地 Shell 校验。批量启动查询、分批历史维护及浏览／搜索／高亮缓存减少重复计算，保留监控频率与连接生命周期。Swift 5.9、完整严格并发检查、SwiftData V5 和移动端功能保持不变；RDP 仍为开发中。详见 [1.0.5 发布通知](Docs/RELEASE_NOTES_1.0.5.md)、[分项性能结果](Docs/MAC_PERFORMANCE_QA.md)和[macOS 工作台验收记录](Docs/WORKBENCH_UI_QA.md)。
 
 通用 `ServerDashMobile` Target 已通过 iPhone 与 iPad Simulator 构建。移动端专项套件现有 65 项测试，其中 41 项为三端共用的会话迁移测试，覆盖格式映射、畸形输入处理、重复识别、跳过原因、ZIP 路径穿越与符号链接防护、敏感信息排除、Keychain 授权、取消与事务回滚；其余用例覆盖连接协议、本地 Citadel 密码/密钥/PTY 集成、可操作的认证错误映射、主机信任及取消、监控并发与退避、后台恢复和删除清理、跨字段筛选、状态汇总、卡片截图、平台能力门控和凭据脱敏。Vendored NIOSSH 另有两项畸形 ECDSA 签名安全回归测试。实体设备 SSH/SFTP 与辅助功能检查尚未执行，详见[移动端实机检查清单](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md)。
 
@@ -205,7 +205,7 @@ ServerDash 是一款面向 Linux VPS 的原生 macOS、iPhone 与 iPad 监控、
 不会反向合入 `main`；macOS 连接远端 Windows 主机的 RDP 能力仍属于 Apple
 应用。详见[分支政策](Docs/BRANCH_POLICY.md)。
 
-最新正式版本为 [ServerDash 1.0.4](https://github.com/xk-7/ServerDash/releases/tag/v1.0.4)（Build 9）。macOS 附件继续使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
+最新正式版本为 [ServerDash 1.0.5](https://github.com/xk-7/ServerDash/releases/tag/v1.0.5)（Build 10）。macOS 附件继续使用 ad-hoc 签名且未经公证；iPhone 与 iPad 附件是 Xcode Simulator 构建，实体设备分发仍需 Apple 签名与 TestFlight / App Store 流程。
 
 ## 运行
 
@@ -282,10 +282,10 @@ DMG 脚本默认要求工作区干净、用于 Apple 构建且包含本地已知
 构建正式 GitHub Release 的 macOS、iPhone Simulator、iPad Simulator 产物，并验证无签名 iOS Device Release 编译：
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.4
+./Scripts/build-release-artifacts.sh 1.0.5
 ```
 
-产物和 SHA-256 校验文件输出到 `dist/v1.0.4/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)，已完成的验收结果见[1.0.4 发布通知](Docs/RELEASE_NOTES_1.0.4.md)。
+产物和 SHA-256 校验文件输出到 `dist/v1.0.5/`；移动端 ZIP 的安装方式见[模拟器安装说明](Docs/SIMULATOR_INSTALL.md)，版本变化与验收范围见[1.0.5 发布通知](Docs/RELEASE_NOTES_1.0.5.md)。
 
 ## 项目结构
 

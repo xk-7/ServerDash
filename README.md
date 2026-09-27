@@ -206,7 +206,7 @@ The project uses local `Vendor/SwiftTerm`, `Vendor/Citadel`, `Vendor/swift-nio-s
 
 ## Development Status
 
-Version 1.0.4 keeps Swift 5.9 and complete strict-concurrency checking for the macOS app and tests. It ships the on-demand RDP bootstrap, fail-closed SSH review follow-ups, and Windows RDP certificate/NLA fixes while leaving RDP marked as in development. See the [1.0.4 release notes](Docs/RELEASE_NOTES_1.0.4.md) and [macOS workbench acceptance record](Docs/WORKBENCH_UI_QA.md).
+Version 1.0.5 (build 10) refines native macOS layout, stable group/tag filters, SFTP selection and scroll retention, editor search/undo, and local Shell validation. Batched startup queries, incremental history maintenance and cached browser/search/highlight work reduce repeated computation while preserving monitoring cadence and connection lifecycles. Swift 5.9, complete strict-concurrency checking, SwiftData V5 and mobile features are unchanged; RDP remains in development. See the [1.0.5 release notes](Docs/RELEASE_NOTES_1.0.5.md), [scoped performance results](Docs/MAC_PERFORMANCE_QA.md), and [macOS workbench acceptance record](Docs/WORKBENCH_UI_QA.md).
 
 The universal `ServerDashMobile` target builds for iPhone and iPad Simulator. Its focused suite currently contains 65 tests, including 41 shared session-migration cases for format mapping, malformed-input handling, duplicate detection, skipped-session reporting, ZIP traversal/symlink hardening, secret omission, Keychain authorization, cancellation, and rollback; the remaining tests cover connection contracts, local Citadel password/key/PTY integration, actionable authentication-error mapping, host trust and cancellation, monitoring concurrency/backoff, background recovery/deletion cleanup, metadata search, fleet summaries, card rendering, platform capability gating, and secret redaction. The vendored NIOSSH suite adds two malformed-ECDSA-signature regression tests. Physical-device SSH/SFTP and accessibility checks remain explicitly unexecuted; see the [mobile device checklist](Docs/MOBILE_DEVICE_TEST_CHECKLIST.md).
 
@@ -221,7 +221,7 @@ on long-lived Windows branches and is never merged back into `main`; macOS RDP
 support for remote Windows hosts remains part of the Apple app. See the
 [branch policy](Docs/BRANCH_POLICY.md).
 
-Latest stable release: [ServerDash 1.0.4](https://github.com/xk-7/ServerDash/releases/tag/v1.0.4) (build 9). The macOS artifact remains ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
+Latest stable release: [ServerDash 1.0.5](https://github.com/xk-7/ServerDash/releases/tag/v1.0.5) (build 10). The macOS artifact remains ad-hoc signed and not notarized; iPhone and iPad artifacts are Xcode Simulator builds, while physical-device distribution still requires Apple signing and TestFlight/App Store delivery.
 
 ## Build and Run
 
@@ -303,10 +303,10 @@ branch, and legacy-worktree overrides are listed by the
 Build the macOS, iPhone Simulator, and iPad Simulator GitHub Release artifacts, plus an unsigned iOS Device Release compile check:
 
 ```bash
-./Scripts/build-release-artifacts.sh 1.0.4
+./Scripts/build-release-artifacts.sh 1.0.5
 ```
 
-Artifacts and SHA-256 checksums are written to `dist/v1.0.4/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files and the [1.0.4 release notes](Docs/RELEASE_NOTES_1.0.4.md) for the completed verification record.
+Artifacts and SHA-256 checksums are written to `dist/v1.0.5/`. See the [Simulator installation guide](Docs/SIMULATOR_INSTALL.md) for the mobile ZIP files and the [1.0.5 release notes](Docs/RELEASE_NOTES_1.0.5.md) for the changes and verification scope.
 
 ## Project Layout
 

@@ -28,7 +28,7 @@ python3 -m http.server 4173
 
 ## 文档信息架构
 
-文档以 ServerDash 1.0.4（Build 9）为稳定基线，分为：
+文档以 ServerDash 1.0.5（Build 10）为稳定基线，分为：
 
 1. 安装与快速开始
 2. 机器与连接
@@ -69,7 +69,7 @@ Release API 只在包含 `#release-status` 的首页执行；文档页只复用�
 https://api.github.com/repos/xk-7/ServerDash/releases?per_page=100
 ```
 
-页面只显示 `draft === false` 且 `prerelease === false` 的正式版本，并按 `published_at` 倒序排列。最近一次成功结果在浏览器本地缓存一小时，用于减少匿名 API 限流；请求失败或返回空列表时保留 `releases.html` 内置的 1.0.0–1.0.4 双语摘要。Release 正文使用 DOM 文本节点安全渲染，不直接写入 `innerHTML`。
+页面只显示 `draft === false` 且 `prerelease === false` 的正式版本，并按 `published_at` 倒序排列。最近一次成功结果在浏览器本地缓存一小时，用于减少匿名 API 限流；请求失败或返回空列表时保留 `releases.html` 内置的 1.0.0–1.0.5 双语摘要。Release 正文使用 DOM 文本节点安全渲染，不直接写入 `innerHTML`。
 
 正常发布新的正式 GitHub Release 后无需修改更新日志页。只有回退基线、分发限制或数据结构变化时，才需要同步更新内置摘要和脚本。
 
